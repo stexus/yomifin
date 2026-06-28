@@ -224,3 +224,25 @@ Target dir: `utils/yomifin/yomitan/` (vendored, lightly modified) + `utils/yomif
 ### Exit criteria (restated from the plan)
 Tapping a **conjugated Japanese word** in a real subtitle resolves to its **dictionary
 entry** and shows a **correctly rendered definition popup** on the physical iPad.
+
+---
+
+## Regression guards (run after any change to the language layer / re-vendor)
+
+Fast JS-side guards, no device needed. **One command:** `./scripts/yomifin-test.sh`
+(runs both of the below; also re-run after bumping the Yomitan pin in
+`utils/yomifin/yomitan/VENDOR.md`).
+
+| Guard | Runner | What it locks down |
+|---|---|---|
+| **Deinflector smoke** | `scripts/yomifin-deinflect-smoke.sh` (node) | engine + JA rules reduce 12 conjugated single words to lemmas (好きでした→好き, 食べさせられた→食べる, 来られる→来る, …) |
+| **Lookup integration** | `bun utils/yomifin/lookup.test.ts` | full pipeline: synthetic Yomitan **zip → termBankLoader → InMemoryDictionaryDatabase → Translator → lookup()**, on **complex sentences with trailing context** — verifies (a) multi-step deinflection chains and (b) forward-greedy boundaries stop in the right place (飲ませてくれなかった→飲ませて/飲む; 読んでいた本を借りて→読んでいた/読む) |
+
+Things these guards deliberately do NOT cover (validated elsewhere / later):
+- **Hermes-only behavior** (`Intl.Collator`, unicode regex) — only provable on device.
+- **Real dictionary data** (JMdict/Jitendex), incl. the noun/na-adjective copula path
+  (好き) that needs real entry tags — needs a user-provided dictionary zip.
+- **The RN structured-content popup** — needs the renderer port + device.
+
+When adding lookup features, **add a case to `lookup.test.ts`** (keep sentences
+complex and realistic, not toy single words) so the guard grows with the engine.

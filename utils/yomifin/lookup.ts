@@ -1,0 +1,142 @@
+/*
+ * Clean lookup API over the vendored Yomitan Translator + InMemoryDictionaryDatabase.
+ *
+ * Hides the verbose FindTermsOptions and the raw TermDictionaryEntry shape behind a
+ * small surface tailored to yomifin's needs: feed "text from the tapped token to the
+ * end of the line", get back the forward-greedy matched length + the resolved
+ * dictionary entries (term, reading, how it deinflected, and the glossary to render).
+ *
+ * See PHASE2_YOMITAN.md. The glossary entries are returned untouched (plain strings or
+ * Yomitan structured-content objects) for the structured-content renderer to handle.
+ */
+// @ts-expect-error — vendored JS (no .d.ts); typed loosely on purpose.
+
+import type { InMemoryDictionaryDatabase } from "./InMemoryDictionaryDatabase";
+import { Translator } from "./yomitan/translator.js";
+
+/** A glossary block from one dictionary for one resolved headword. */
+export interface DefinitionGroup {
+  dictionary: string;
+  tags: string[];
+  /** glossary items: plain strings and/or Yomitan structured-content objects */
+  glossary: unknown[];
+}
+
+/** One resolved dictionary entry (lemma) for the tapped text. */
+export interface LookupEntry {
+  term: string;
+  reading: string;
+  /** part-of-speech classes, e.g. ["v1"], ["adj-i"] */
+  wordClasses: string[];
+  /** human-readable deinflection chain, e.g. ["causative", "potential or passive", "-た"] */
+  inflectionChain: string[];
+  definitions: DefinitionGroup[];
+}
+
+export interface LookupResult {
+  /** number of characters from the start of `text` that formed the match (forward-greedy) */
+  matchedLength: number;
+  /** the matched surface substring (text.slice(0, matchedLength)) */
+  matchedText: string;
+  entries: LookupEntry[];
+}
+
+export interface YomifinDictionaryOptions {
+  /** ISO language for the Translator pipeline; 'ja' for now, 'zh' later. */
+  language?: string;
+  /** Names of the dictionaries to search, in priority order. */
+  dictionaryNames: string[];
+}
+
+/** Builds the enabledDictionaryMap the Translator expects from a list of names. */
+function buildEnabledDictionaryMap(
+  dictionaryNames: string[],
+): Map<string, unknown> {
+  const map = new Map<string, unknown>();
+  dictionaryNames.forEach((name, index) => {
+    map.set(name, {
+      index,
+      priority: 0,
+      allowSecondarySearches: false,
+      partsOfSpeechFilter: true,
+      useDeinflections: true,
+    });
+  });
+  return map;
+}
+
+export class YomifinDictionary {
+  // biome-ignore lint/suspicious/noExplicitAny: vendored Translator is untyped JS
+  private _translator: any;
+  private _language: string;
+  private _enabledDictionaryMap: Map<string, unknown>;
+  private _mainDictionary: string;
+
+  constructor(
+    db: InMemoryDictionaryDatabase,
+    options: YomifinDictionaryOptions,
+  ) {
+    this._translator = new Translator(db);
+    this._translator.prepare();
+    this._language = options.language ?? "ja";
+    this._enabledDictionaryMap = buildEnabledDictionaryMap(
+      options.dictionaryNames,
+    );
+    this._mainDictionary = options.dictionaryNames[0] ?? "";
+  }
+
+  /**
+   * Forward-greedy lookup. Pass text from the tapped position to the end of the line;
+   * the dictionary + deinflector decide the real word boundary.
+   */
+  async lookup(text: string): Promise<LookupResult> {
+    const { dictionaryEntries, originalTextLength } =
+      await this._translator.findTerms("simple", text, {
+        matchType: "exact",
+        deinflect: true,
+        language: this._language,
+        mainDictionary: this._mainDictionary,
+        sortFrequencyDictionary: null,
+        sortFrequencyDictionaryOrder: "descending",
+        removeNonJapaneseCharacters: false,
+        textReplacements: [null],
+        enabledDictionaryMap: this._enabledDictionaryMap,
+        excludeDictionaryDefinitions: null,
+        searchResolution: "letter",
+        primaryReading: "",
+        useAllFrequencyDictionaries: false,
+      });
+
+    return {
+      matchedLength: originalTextLength,
+      matchedText: text.slice(0, originalTextLength),
+      // biome-ignore lint/suspicious/noExplicitAny: mapping the vendored result shape
+      entries: (dictionaryEntries as any[]).map(mapEntry),
+    };
+  }
+}
+
+// biome-ignore lint/suspicious/noExplicitAny: vendored TermDictionaryEntry shape
+function mapEntry(entry: any): LookupEntry {
+  const headword = entry.headwords?.[0] ?? {};
+  // Each inflectionRuleChainCandidate is a chain of {name}; take the first candidate.
+  const chain: string[] =
+    entry.inflectionRuleChainCandidates?.[0]?.inflectionRules?.map(
+      (r: { name: string }) => r.name,
+    ) ?? [];
+  // biome-ignore lint/suspicious/noExplicitAny: vendored definition shape
+  const definitions: DefinitionGroup[] = (entry.definitions ?? []).map(
+    (d: any) => ({
+      dictionary: d.dictionary,
+      tags: (d.tags ?? []).map((t: { name: string }) => t.name ?? t),
+      glossary: d.entries ?? [],
+    }),
+  );
+  return {
+    term: headword.term ?? "",
+    reading: headword.reading ?? "",
+    wordClasses: headword.wordClasses ?? [],
+    inflectionChain: chain,
+    definitions,
+  };
+}

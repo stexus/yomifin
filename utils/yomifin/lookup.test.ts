@@ -1,147 +1,137 @@
 /*
- * Phase 2 integration smoke: vendored Yomitan Translator + InMemoryDictionaryDatabase.
- * Proves a conjugated JA word resolves to its dictionary entry through deinflection.
+ * Phase 2 integration smoke (REGRESSION GUARD).
+ * Exercises the whole harvested stack together:
+ *   synthetic Yomitan .zip  →  termBankLoader  →  InMemoryDictionaryDatabase
+ *                           →  vendored Translator (deinflection + forward-greedy)
+ *                           →  clean lookup() API.
+ *
+ * Test inputs are "from the tapped token to the END of the line" (exactly what the
+ * tap handler will pass), with realistic TRAILING CONTEXT after the target word and
+ * multi-step deinflection — so we prove both (a) deinflection chains and (b) that the
+ * forward-greedy boundary stops at the right place instead of eating the rest of the line.
  *
  * Run: bun utils/yomifin/lookup.test.ts
  */
-// @ts-expect-error — vendored JS (no .d.ts); typed loosely on purpose.
+import { strToU8, zipSync } from "fflate";
+import { InMemoryDictionaryDatabase } from "./InMemoryDictionaryDatabase";
+import { YomifinDictionary } from "./lookup";
+import { loadDictionaryFromZip } from "./termBankLoader";
 
-import {
-  InMemoryDictionaryDatabase,
-  type TermRow,
-} from "./InMemoryDictionaryDatabase";
-import { Translator } from "./yomitan/translator.js";
+const DICT = "SynthJA";
 
-const DICT = "TestDict";
-
-const db = new InMemoryDictionaryDatabase();
-const rows: Omit<TermRow, "id">[] = [
-  {
-    expression: "食べる",
-    reading: "たべる",
-    definitionTags: "v1 vt",
-    rules: "v1",
-    score: 0,
-    glossary: ["to eat"],
-    sequence: 1,
-    dictionary: DICT,
-  },
-  {
-    expression: "行く",
-    reading: "いく",
-    definitionTags: "v5 vi",
-    rules: "v5",
-    score: 0,
-    glossary: ["to go"],
-    sequence: 2,
-    dictionary: DICT,
-  },
-  {
-    expression: "高い",
-    reading: "たかい",
-    definitionTags: "adj-i",
-    rules: "adj-i",
-    score: 0,
-    glossary: ["high; tall; expensive"],
-    sequence: 3,
-    dictionary: DICT,
-  },
-  {
-    expression: "読む",
-    reading: "よむ",
-    definitionTags: "v5 vt",
-    rules: "v5",
-    score: 0,
-    glossary: ["to read"],
-    sequence: 4,
-    dictionary: DICT,
-  },
-  {
-    expression: "猫",
-    reading: "ねこ",
-    definitionTags: "n",
-    rules: "",
-    score: 0,
-    glossary: ["cat"],
-    sequence: 5,
-    dictionary: DICT,
-  },
+// --- Build a synthetic Yomitan dictionary zip (v3 term banks). ---------------
+// tuple: [expression, reading, definitionTags, rules, score, glossary[], sequence, termTags]
+type V3 = [
+  string,
+  string,
+  string | null,
+  string,
+  number,
+  unknown[],
+  number,
+  string,
 ];
-db.addTerms(rows);
+const termBank: V3[] = [
+  ["食べる", "たべる", "v1 vt", "v1", 0, ["to eat", "to consume"], 1, ""],
+  ["行く", "いく", "v5 vi", "v5", 0, ["to go"], 2, ""],
+  ["読む", "よむ", "v5 vt", "v5", 0, ["to read"], 3, ""],
+  ["話す", "はなす", "v5 vt", "v5", 0, ["to speak; to talk"], 4, ""],
+  ["待つ", "まつ", "v5 vt", "v5", 0, ["to wait"], 5, ""],
+  ["来る", "くる", "vk vi", "vk", 0, ["to come"], 6, ""],
+  ["泳ぐ", "およぐ", "v5 vi", "v5", 0, ["to swim"], 7, ""],
+  ["飲む", "のむ", "v5 vt", "v5", 0, ["to drink"], 8, ""],
+  // a reading-only match target + a decoy noun the boundary test must NOT swallow:
+  ["本", "ほん", "n", "", 0, ["book"], 9, ""],
+];
+const zip = zipSync({
+  "index.json": strToU8(
+    JSON.stringify({
+      title: DICT,
+      format: 3,
+      revision: "synth-1",
+      sequenced: true,
+    }),
+  ),
+  "term_bank_1.json": strToU8(JSON.stringify(termBank)),
+});
 
-const translator = new Translator(db as never);
-translator.prepare();
+// --- Load it the real way (unzip → parse → index). ---------------------------
+const db = new InMemoryDictionaryDatabase();
+const loaded = loadDictionaryFromZip(zip, db);
 
-const enabledDictionaryMap = new Map([
-  [
-    DICT,
-    {
-      index: 0,
-      priority: 0,
-      allowSecondarySearches: false,
-      partsOfSpeechFilter: true,
-      useDeinflections: true,
-    },
-  ],
-]);
+const dict = new YomifinDictionary(db, { dictionaryNames: [DICT] });
 
-async function lookup(text: string) {
-  const { dictionaryEntries, originalTextLength } = await translator.findTerms(
-    "simple",
-    text,
-    {
-      matchType: "exact",
-      deinflect: true,
-      language: "ja",
-      mainDictionary: DICT,
-      sortFrequencyDictionary: null,
-      sortFrequencyDictionaryOrder: "descending",
-      removeNonJapaneseCharacters: false,
-      textReplacements: [null],
-      enabledDictionaryMap,
-      excludeDictionaryDefinitions: null,
-      searchResolution: "letter",
-      primaryReading: "",
-      useAllFrequencyDictionaries: false,
-    } as never,
-  );
-  return { dictionaryEntries, originalTextLength };
-}
-
-// [input (from tap to end of line), expected lemma, expected matched length]
-const cases: [string, string, number][] = [
-  ["猫が", "猫", 1],
-  ["食べた", "食べる", 3],
-  ["食べさせられた", "食べる", 7],
-  ["行きました", "行く", 5],
-  ["高かったです", "高い", 4],
-  ["読まなかった本", "読む", 6],
+// [input from tap to end of line, expected lemma, expected matched surface, expect deinflected?]
+const cases: [string, string, string, boolean][] = [
+  // brutal chain: causative + passive + tai(want) + negative + past, then trailing から
+  ["食べさせられたくなかったから", "食べる", "食べさせられたくなかった", true],
+  // must-go (negative-conditional + ならない) resolved by forward-greedy shortening, + trailing んだ
+  ["行かなければならないんだ", "行く", "行かなければ", true],
+  // te-iru past, boundary must stop BEFORE 本を借りて
+  ["読んでいた本を借りて", "読む", "読んでいた", true],
+  // tai + negative-conditional, trailing 言って
+  ["話したくなければ言って", "話す", "話したくなければ", true],
+  // contracted て-iru imperative 待ってて, trailing くださいね
+  ["待っててくださいね", "待つ", "待ってて", true],
+  // potential/passive negative past, trailing ので
+  ["来られなかったので", "来る", "来られなかった", true],
+  // 3rd-person desire progressive past (たがる + ている past), trailing のに
+  ["泳ぎたがっていたのに", "泳ぐ", "泳ぎたがっていた", true],
+  // causative + くれる auxiliary: forward-greedy must stop at 飲ませて (NOT eat くれなかった)
+  ["飲ませてくれなかった", "飲む", "飲ませて", true],
+  // plain exact word, boundary stops before continuation particle を
+  ["本を読んだ", "本", "本", false],
 ];
 
 let pass = 0;
 let fail = 0;
-for (const [input, expectedLemma, expectedLen] of cases) {
-  const { dictionaryEntries, originalTextLength } = await lookup(input);
-  const headword =
-    dictionaryEntries[0]?.headwords?.[0]?.term ?? dictionaryEntries[0]?.term;
-  const gloss = JSON.stringify(
-    dictionaryEntries[0]?.definitions?.[0]?.entries ??
-      dictionaryEntries[0]?.definitions?.[0]?.glossary ??
-      "",
+
+// loader sanity
+if (
+  loaded.termCount !== termBank.length ||
+  loaded.title !== DICT ||
+  db.termCount !== termBank.length
+) {
+  fail++;
+  console.log(
+    `  FAIL  loader: termCount=${loaded.termCount} title=${loaded.title} dbCount=${db.termCount}`,
   );
-  const ok = headword === expectedLemma && originalTextLength === expectedLen;
+} else {
+  pass++;
+  console.log(
+    `  PASS  loader loaded ${loaded.termCount} terms from ${loaded.termBankFiles} bank(s) as "${loaded.title}"`,
+  );
+}
+
+for (const [
+  input,
+  expectedLemma,
+  expectedSurface,
+  expectDeinflected,
+] of cases) {
+  const res = await dict.lookup(input);
+  const top = res.entries[0];
+  const term = top?.term;
+  const surfaceOk = res.matchedText === expectedSurface;
+  const lemmaOk = term === expectedLemma;
+  const glossOk = (top?.definitions?.[0]?.glossary?.length ?? 0) > 0;
+  const chainOk = expectDeinflected ? top?.inflectionChain.length > 0 : true;
+  const ok = surfaceOk && lemmaOk && glossOk && chainOk;
   if (ok) {
     pass++;
+    const chain = top.inflectionChain.length
+      ? ` [${top.inflectionChain.join(" ← ")}]`
+      : "";
     console.log(
-      `  PASS  ${input}  ->  ${headword}  (matched ${originalTextLength}) ${gloss}`,
+      `  PASS  ${input}  →  ${term} (${top.reading}) "${top.definitions[0].glossary[0]}" matched「${res.matchedText}」${chain}`,
     );
   } else {
     fail++;
     console.log(
-      `  FAIL  ${input}  ->  got headword=${headword} len=${originalTextLength} (expected ${expectedLemma}/${expectedLen}); entries=${dictionaryEntries.length}`,
+      `  FAIL  ${input}  →  term=${term} matched「${res.matchedText}」 (expected ${expectedLemma}/「${expectedSurface}」) surfaceOk=${surfaceOk} lemmaOk=${lemmaOk} glossOk=${glossOk} chainOk=${chainOk}`,
     );
   }
 }
 
-console.log(`\n${pass}/${cases.length} passed, ${fail} failed`);
+console.log(`\n${pass}/${cases.length + 1} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
