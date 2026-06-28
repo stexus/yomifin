@@ -28,9 +28,6 @@
         "usesNonExemptEncryption": false
       },
       "supportsTablet": true,
-      "entitlements": {
-        "com.apple.developer.networking.wifi-info": true
-      },
       "bundleIdentifier": "com.massimotseng.yomifin",
       "icon": "./assets/images/icon-ios-liquid-glass.icon",
       "appleTeamId": "27326V9T54"
@@ -52,6 +49,7 @@
       "googleServicesFile": "./google-services.json"
     },
     "plugins": [
+      "./plugins/withFreeAccountEntitlements.js",
       [
         "@react-native-tvos/config-tv",
         {
