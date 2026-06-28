@@ -281,18 +281,45 @@ Everything else is well-scoped grunt work.
 
 ---
 
-## 8. Dev environment & build setup (Phase −1 — DONE)
+## 8. Dev environment & build setup (Phase −1 — DONE ✅)
 
-The environment from `IMPLEMENTATION_PLAN.md` Phase −1 is established and working:
-unmodified Streamyfin builds via a reproducible Nix toolchain and runs on the
-physical iPad. These are the concrete learnings (moved here so upstream
-`CLAUDE.md` stays clean of fork-specific setup).
+Phase −1 from `IMPLEMENTATION_PLAN.md` is **complete and verified end-to-end**:
+unmodified Streamyfin builds via a reproducible Nix toolchain, deploys over the
+full remote loop, and **plays a Jellyfin video via libmpv on the physical iPad**
+(confirmed: live device logs while navigating, video playback works). The
+remaining unknowns are now downstream (Phase 0 overlay spike, Phase 2 Yomitan).
+These are the concrete learnings (kept here so upstream `CLAUDE.md` stays clean).
 
-> NOTE: the current working setup builds **locally on the Mac**, not yet the
-> provisional Linux → SSH → headless Mac Mini loop from CONTEXT §1a. The Nix
-> shell + CLI build flow below transfers directly to that remote loop when set up
-> (it's all `nix develop --command bash -c '…'` over SSH); the SSH keychain trap
-> in §1a still applies there.
+> REMOTE FLOW VERIFIED: the CONTEXT §1a loop works — Linux desktop → SSH →
+> headless Mac (`massimo@10.0.0.99`, `Louiss-Mac-mini.local`) → WiFi → iPad.
+> Build + deploy via `./scripts/remote-build.sh` (unlocks keychain, then builds
+> in the Nix shell). The SSH keychain trap from §1a is real and handled by that
+> script; Nix is found over SSH because Determinate Nix writes PATH setup to
+> `/etc/zshenv` (sourced by non-interactive SSH).
+
+### Signing facts (free Apple account) — all reproducible via app.json/plugins
+
+- **Bundle ID:** `com.massimotseng.yomifin` (in `app.json` `ios.bundleIdentifier`).
+- **Apple team:** `27326V9T54` (`app.json` `ios.appleTeamId` → `DEVELOPMENT_TEAM`).
+  The Apple ID `massimotseng@gmail.com` belongs to TWO teams — `27326V9T54`
+  (owns this App ID; this is the right one) and `ZUGK5GXTT7` (where the Apple
+  Development cert lives). The cert works across both. A provisioning profile's
+  `application-identifier` prefix tells you which team owns a bundle ID.
+- **iPad device UDID (for `expo run:ios --device`):** `00008027-000641082130402E`
+  (CoreDevice/devicectl id is different: `9932CE8C-3F5F-52C5-8A27-DDFFC93FD0D1`).
+- **Free-account entitlement stripping:** free profiles can't grant paid
+  capabilities, so `plugins/withFreeAccountEntitlements.js` removes
+  `aps-environment` (push, added by expo-notifications) and
+  `com.apple.developer.networking.wifi-info`. It is placed **first** in
+  `app.json` `plugins` so its entitlements mod runs **last** (Expo runs
+  later-registered entitlement mods first). If a new "profile does not support
+  the X capability" error appears, add that entitlement key to that plugin.
+- **Sandbox:** `plugins/withDisableScriptSandboxing.js` keeps
+  `ENABLE_USER_SCRIPT_SANDBOXING=NO` (Xcode 26 defaults it YES → breaks the RN
+  packager-IP build phase).
+- All of the above survive `expo prebuild`; **never hand-edit `ios/`** for them.
+- Free certs/profiles expire after **7 days** — rebuild + re-trust on device
+  (Settings > General > VPN & Device Management).
 
 ### Reproducible toolchain (Nix)
 

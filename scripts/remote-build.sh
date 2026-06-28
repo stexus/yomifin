@@ -45,5 +45,12 @@ echo "› Building + deploying to device $DEVICE_UDID via Nix shell…"
 # Metro runs here on the Mac; the iPad connects to it over WiFi. Keep this
 # session open while developing, or Ctrl-C after install if you only wanted the
 # build on-device.
-exec nix develop --command bash -c \
-  "EXPO_TV=0 bunx expo run:ios --device $DEVICE_UDID"
+#
+# Run directly if already inside the Nix dev shell (IN_NIX_SHELL is set by
+# `nix develop`), otherwise enter it first.
+if [ -n "${IN_NIX_SHELL:-}" ]; then
+  exec env EXPO_TV=0 bunx expo run:ios --device "$DEVICE_UDID"
+else
+  exec nix develop --command bash -c \
+    "EXPO_TV=0 bunx expo run:ios --device $DEVICE_UDID"
+fi
