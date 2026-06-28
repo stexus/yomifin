@@ -73,6 +73,7 @@
       "expo-font",
       "./plugins/withExcludeMedia3Dash.js",
       "./plugins/withTVUserManagement.js",
+      "./plugins/withDisableScriptSandboxing.js",
       [
         "expo-build-properties",
         {
