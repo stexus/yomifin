@@ -81,3 +81,6 @@ google-service-account.json
 
 # Nix / direnv
 .direnv/
+
+# Upstream Yomitan clone (reference for Phase 2 harvest; not part of app)
+/yomitan/

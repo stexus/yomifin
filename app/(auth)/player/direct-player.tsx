@@ -29,6 +29,7 @@ import {
   PlaybackSpeedScope,
   updatePlaybackSpeedSettings,
 } from "@/components/video-player/controls/utils/playback-speed-settings";
+import TappableSubtitleOverlay from "@/components/yomifin/TappableSubtitleOverlay";
 import useRouter from "@/hooks/useAppRouter";
 import { useHaptic } from "@/hooks/useHaptic";
 import { useOrientation } from "@/hooks/useOrientation";
@@ -49,7 +50,6 @@ import { DownloadedItem } from "@/providers/Downloads/types";
 import { useInactivity } from "@/providers/InactivityProvider";
 import { apiAtom, userAtom } from "@/providers/JellyfinProvider";
 import { OfflineModeProvider } from "@/providers/OfflineModeProvider";
-
 import { getSubtitlesForItem } from "@/utils/atoms/downloadedSubtitles";
 import { useSettings } from "@/utils/atoms/settings";
 import { getDefaultPlaySettings } from "@/utils/jellyfin/getDefaultPlaySettings";
@@ -61,6 +61,12 @@ import {
 } from "@/utils/jellyfin/subtitleUtils";
 import { writeToLog } from "@/utils/log";
 import { msToTicks, ticksToSeconds } from "@/utils/time";
+import {
+  buildSrtUrl,
+  fetchSubtitleSrt,
+  pickTextSubtitleStream,
+} from "@/utils/yomifin/fetchSubtitleSrt";
+import { parseSrt, type SubtitleCue } from "@/utils/yomifin/srt";
 import { generateDeviceProfile } from "../../../utils/profiles/native";
 
 export default function DirectPlayerPage() {
@@ -157,6 +163,9 @@ export default function DirectPlayerPage() {
   const [item, setItem] = useState<BaseItemDto | null>(null);
   const initialSeekDoneRef = useRef(false);
 
+  // ===== YOMIFIN Phase 1: tappable subtitle overlay =====
+  const [yomifinCues, setYomifinCues] = useState<SubtitleCue[]>([]);
+
   const initialPlaybackTicksRef = useRef<number>(
     playbackPositionFromUrl
       ? Number.parseInt(playbackPositionFromUrl, 10)
@@ -228,6 +237,13 @@ export default function DirectPlayerPage() {
   //   }
   //   return item?.UserData?.PlaybackPositionTicks ?? 0;
   // }, [playbackPositionFromUrl, item?.UserData?.PlaybackPositionTicks]);
+
+  // YOMIFIN Phase 1: turn mpv's own subtitle rendering OFF so our tappable
+  // overlay is the only subtitle layer (CONTEXT §7).
+  useEffect(() => {
+    if (!tracksReady || !videoRef.current) return;
+    videoRef.current.disableSubtitles?.();
+  }, [tracksReady]);
 
   useEffect(() => {
     if (!tracksReady || !videoRef.current) return;
@@ -414,6 +430,45 @@ export default function DirectPlayerPage() {
     };
     reportPlaybackStart();
   }, [stream, api, offline]);
+
+  // YOMIFIN Phase 1: fetch ONE subtitle stream from Jellyfin as SRT data and parse.
+  useEffect(() => {
+    if (offline) return; // online path first
+    if (!api?.basePath || !api.accessToken) return;
+    if (!item?.Id || !stream?.mediaSource?.Id) return;
+
+    const chosen = pickTextSubtitleStream(stream.mediaSource, subtitleIndex);
+    if (!chosen || chosen.Index == null) {
+      setYomifinCues([]);
+      console.log("[YOMIFIN SUB] no text subtitle stream available");
+      return;
+    }
+
+    const url = buildSrtUrl(
+      api.basePath,
+      item.Id,
+      stream.mediaSource.Id,
+      chosen.Index,
+      api.accessToken,
+    );
+
+    let cancelled = false;
+    fetchSubtitleSrt(url)
+      .then(parseSrt)
+      .then((cues) => {
+        if (cancelled) return;
+        setYomifinCues(cues);
+        console.log(
+          `[YOMIFIN SUB] loaded ${cues.length} cues from stream #${chosen.Index}`,
+        );
+      })
+      .catch((e) => {
+        if (!cancelled) console.warn("[YOMIFIN SUB] fetch/parse failed:", e);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, item?.Id, stream?.mediaSource, subtitleIndex, offline]);
 
   const togglePlay = async () => {
     lightHapticFeedback();
@@ -1358,6 +1413,15 @@ export default function DirectPlayerPage() {
                   transcodeReasons={transcodeReasons}
                 />
               ))}
+            {/* YOMIFIN Phase 1: tappable subtitle overlay (mounted last = on top) */}
+            {yomifinCues.length > 0 && (
+              <TappableSubtitleOverlay
+                cues={yomifinCues}
+                progressMs={progress}
+                isPlaying={isPlaying}
+                speed={currentPlaybackSpeed}
+              />
+            )}
           </View>
         </VideoProvider>
       </PlayerProvider>

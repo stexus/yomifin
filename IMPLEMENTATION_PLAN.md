@@ -41,7 +41,16 @@ everything downstream depends on it. Do not modify anything yet.
 
 ---
 
-## Phase 0 — THE OVERLAY SPIKE (the hinge — do this before any real work)
+## Phase 0 — THE OVERLAY SPIKE (the hinge) — DONE ✅ PASS
+
+**Result:** overlay-on-mpv PASSED on the physical iPad. libmpv renders into an
+`AVSampleBufferDisplayLayer` (a normal CALayer in a plain UIView/ExpoView), not a
+raw Metal/GL surface; `MpvPlayerView` doesn't swallow touches; and Streamyfin
+already overlays interactive RN `<Controls>` as siblings of the player. A hardcoded
+tappable 猫 label mounted over playing video received taps and logged. **Overlay is
+the adopted container; sidebar is a trivial future fallback.** Seam map written to
+`PHASE0_SEAMS.md`. Throwaway spike code removed.
+
 
 **Goal:** prove (or kill) overlay-on-mpv with the smallest possible change.
 
@@ -70,9 +79,18 @@ differs; the engine, parsing, and card logic are identical.
 
 ---
 
-## Phase 1 — Tappable subtitles synced to playback
+## Phase 1 — Tappable subtitles synced to playback — DONE ✅ PASS
 
-**Goal:** real subtitle text, tappable, synced to the video, in the chosen container.
+**Result:** PASS on the physical iPad. Fetched one Jellyfin SRT (287 cues parsed),
+mpv's own subs disabled, the active line renders bottom-center over the video and
+updates with playback, and tapping a word logs the correct from-token-to-end-of-line
+text. Tap anchors are per-grapheme (Intl.Segmenter word granularity is not present
+in this Hermes build → per-grapheme fallback) — acceptable, since Phase 2 owns real
+boundaries. Code (isolated language layer): `utils/yomifin/{srt,segment,fetchSubtitleSrt}.ts`,
+`components/yomifin/TappableSubtitleOverlay.tsx`, wired in
+`app/(auth)/player/direct-player.tsx`.
+
+**Original goal:** real subtitle text, tappable, synced to the video, in the chosen container.
 
 1. Fetch ONE SRT file for the playing item from Jellyfin as data. Parse it
    (lines + start/end timings). SRT only for now.

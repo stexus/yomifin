@@ -290,6 +290,21 @@ full remote loop, and **plays a Jellyfin video via libmpv on the physical iPad**
 remaining unknowns are now downstream (Phase 0 overlay spike, Phase 2 Yomitan).
 These are the concrete learnings (kept here so upstream `CLAUDE.md` stays clean).
 
+> **Phase 0 (overlay spike) = PASS ✅.** Overlay-on-mpv works on the physical iPad.
+> libmpv renders into an `AVSampleBufferDisplayLayer` (normal CALayer in a plain
+> UIView/ExpoView), not a raw Metal/GL surface; the player view doesn't swallow
+> touches; Streamyfin already overlays interactive RN `<Controls>` as siblings of
+> `<MpvPlayerView>`. Overlay is the adopted container. Full seam map (a)–(d) is in
+> `PHASE0_SEAMS.md`.
+>
+> **Phase 1 (tappable subtitles synced to playback) = PASS ✅.** Fetch one Jellyfin
+> SRT as data → parse → render the active line as tappable spans over the video,
+> synced via the player's `progress` shared value; mpv's own subs disabled. Tap
+> logs from-token-to-end-of-line. Isolated language layer in `utils/yomifin/` +
+> `components/yomifin/TappableSubtitleOverlay.tsx`, wired in the direct player.
+> Tap anchors are per-grapheme (no Intl.Segmenter in this Hermes). Next: Phase 2
+> (harvest Yomitan core for real lookup) — starts with an investigation task.
+
 > REMOTE FLOW VERIFIED: the CONTEXT §1a loop works — Linux desktop → SSH →
 > headless Mac (`massimo@10.0.0.99`, `Louiss-Mac-mini.local`) → WiFi → iPad.
 > Build + deploy via `./scripts/remote-build.sh` (unlocks keychain, then builds
