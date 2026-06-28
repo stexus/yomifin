@@ -31,7 +31,7 @@
       "entitlements": {
         "com.apple.developer.networking.wifi-info": true
       },
-      "bundleIdentifier": "com.massimoqtseng.streamyfin",
+      "bundleIdentifier": "com.massimotseng.yomifin",
       "icon": "./assets/images/icon-ios-liquid-glass.icon",
       "appleTeamId": "ZUGK5GXTT7"
     },
