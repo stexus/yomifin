@@ -84,6 +84,10 @@ db.run(
 
 // Indices are in TERMS_SCHEMA; ANALYZE helps the planner.
 db.exec("ANALYZE;");
+// Finalize as a SINGLE self-contained file: checkpoint the WAL and switch back to the
+// rollback journal so the .db can be copied/shipped/opened read-only without sidecars.
+db.exec("PRAGMA wal_checkpoint(TRUNCATE);");
+db.exec("PRAGMA journal_mode = DELETE;");
 db.close();
 
 const sizeMb = (Bun.file(outPath).size / 1e6).toFixed(1);
