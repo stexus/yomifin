@@ -10,7 +10,10 @@
  *   bun scripts/build-dictionary-db.ts --zip JMdict.zip --out assets/dictionaries/dictionaries.db [--title "Name"]
  */
 import { Database } from "bun:sqlite";
-import { strFromU8, unzipSync } from "fflate";
+import {
+  importDictionaryFromZip,
+  type TermInsertRow,
+} from "../utils/yomifin/importDictionary";
 import { TERMS_SCHEMA } from "../utils/yomifin/SqliteDictionaryDatabase";
 
 function arg(name: string, fallback?: string): string | undefined {
@@ -28,23 +31,7 @@ if (!zipPath || !outPath) {
   process.exit(2);
 }
 
-type V3 = [
-  string,
-  string,
-  string | null,
-  string,
-  number,
-  unknown[],
-  number,
-  string,
-];
-
 const t0 = Date.now();
-const zip = unzipSync(new Uint8Array(await Bun.file(zipPath).arrayBuffer()));
-
-const index = JSON.parse(strFromU8(zip["index.json"])) as { title: string };
-const title = overrideTitle ?? index.title;
-if (!title) throw new Error("dictionary index.json has no title");
 
 const db = new Database(outPath, { create: true });
 db.exec("PRAGMA journal_mode = WAL;");
@@ -57,48 +44,42 @@ db.run(
 const insert = db.prepare(
   "INSERT INTO terms (expression, reading, definitionTags, rules, score, glossary, sequence, termTags, dictionary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
 );
-
-const bankNames = Object.keys(zip)
-  .filter((n) => /^term_bank_\d+\.json$/.test(n))
-  .sort();
-
-let count = 0;
-const insertMany = db.transaction((rows: V3[]) => {
-  for (const [
-    expression,
-    reading,
-    definitionTags,
-    rules,
-    score,
-    glossary,
-    sequence,
-    termTags,
-  ] of rows) {
+const insertMany = db.transaction((rows: TermInsertRow[]) => {
+  for (const r of rows) {
     insert.run(
-      expression,
-      reading.length > 0 ? reading : expression,
-      definitionTags,
-      rules,
-      score,
-      JSON.stringify(glossary),
-      sequence,
-      termTags,
-      title,
+      r.expression,
+      r.reading,
+      r.definitionTags,
+      r.rules,
+      r.score,
+      r.glossary,
+      r.sequence,
+      r.termTags,
+      r.dictionary,
     );
-    count++;
   }
 });
 
-for (const name of bankNames) {
-  const entries = JSON.parse(strFromU8(zip[name])) as V3[];
-  insertMany(entries);
-  process.stdout.write(`\r  ${name} → ${count} terms`);
-}
+const zipBytes = new Uint8Array(await Bun.file(zipPath).arrayBuffer());
+const result = await importDictionaryFromZip(
+  zipBytes,
+  { insertBatch: (rows) => insertMany(rows) },
+  {
+    title: overrideTitle,
+    // Idempotent: replace this dictionary's rows if it was imported before.
+    onTitleResolved: (title) =>
+      db.run("DELETE FROM terms WHERE dictionary = ?", [title]),
+    onProgress: (p) =>
+      process.stdout.write(
+        `\r  bank ${p.bank}/${p.totalBanks} → ${p.terms} terms`,
+      ),
+  },
+);
 process.stdout.write("\n");
 
 db.run(
   "INSERT OR REPLACE INTO dictionaries (title, revision, termCount) VALUES (?, ?, ?)",
-  [title, (index as { revision?: string }).revision ?? "", count],
+  [result.title, result.revision, result.termCount],
 );
 
 // Indices are in TERMS_SCHEMA; ANALYZE helps the planner.
@@ -107,5 +88,5 @@ db.close();
 
 const sizeMb = (Bun.file(outPath).size / 1e6).toFixed(1);
 console.log(
-  `built "${title}": ${count} terms from ${bankNames.length} banks → ${outPath} (${sizeMb}MB) in ${((Date.now() - t0) / 1000).toFixed(1)}s`,
+  `built "${result.title}": ${result.termCount} terms from ${result.bankCount} banks → ${outPath} (${sizeMb}MB) in ${((Date.now() - t0) / 1000).toFixed(1)}s`,
 );
