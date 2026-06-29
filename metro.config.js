@@ -7,6 +7,13 @@ const config = getDefaultConfig(__dirname);
 // Add Hermes parser
 config.transformer.hermesParser = true;
 
+// YOMIFIN: allow require()-ing bundled dictionary .zip files as binary assets
+// (the term-bank loader unzips them at runtime). Without this Metro treats .zip as
+// source and fails to bundle it.
+if (!config.resolver.assetExts.includes("zip")) {
+  config.resolver.assetExts.push("zip");
+}
+
 // When enabled, the optional code below will allow Metro to resolve
 // and bundle source files with TV-specific extensions
 // (e.g., *.ios.tv.tsx, *.android.tv.tsx, *.tv.tsx)

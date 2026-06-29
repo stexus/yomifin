@@ -29,7 +29,7 @@ import {
   PlaybackSpeedScope,
   updatePlaybackSpeedSettings,
 } from "@/components/video-player/controls/utils/playback-speed-settings";
-import TappableSubtitleOverlay from "@/components/yomifin/TappableSubtitleOverlay";
+import YomifinLookupLayer from "@/components/yomifin/YomifinLookupLayer";
 import useRouter from "@/hooks/useAppRouter";
 import { useHaptic } from "@/hooks/useHaptic";
 import { useOrientation } from "@/hooks/useOrientation";
@@ -1413,9 +1413,9 @@ export default function DirectPlayerPage() {
                   transcodeReasons={transcodeReasons}
                 />
               ))}
-            {/* YOMIFIN Phase 1: tappable subtitle overlay (mounted last = on top) */}
+            {/* YOMIFIN Phase 2: tappable subtitles + Yomitan lookup + popup (top) */}
             {yomifinCues.length > 0 && (
-              <TappableSubtitleOverlay
+              <YomifinLookupLayer
                 cues={yomifinCues}
                 progressMs={progress}
                 isPlaying={isPlaying}

@@ -237,6 +237,7 @@ Fast JS-side guards, no device needed. **One command:** `./scripts/yomifin-test.
 |---|---|---|
 | **Deinflector smoke** | `scripts/yomifin-deinflect-smoke.sh` (node) | engine + JA rules reduce 12 conjugated single words to lemmas (好きでした→好き, 食べさせられた→食べる, 来られる→来る, …) |
 | **Lookup integration** | `bun utils/yomifin/lookup.test.ts` | full pipeline: synthetic Yomitan **zip → termBankLoader → InMemoryDictionaryDatabase → Translator → lookup()**, on **complex sentences with trailing context** — verifies (a) multi-step deinflection chains and (b) forward-greedy boundaries stop in the right place (飲ませてくれなかった→飲ませて/飲む; 読んでいた本を借りて→読んでいた/読む) |
+| **Structured content** | `bun utils/yomifin/structuredContent.test.ts` | pure renderer helpers (classify / group inline+block / list bullets / style→RN mapping) + walks **34k+ real JMdict structured-content nodes** without throwing |
 
 Things these guards deliberately do NOT cover (validated elsewhere / later):
 - **Hermes-only behavior** (`Intl.Collator`, unicode regex) — only provable on device.

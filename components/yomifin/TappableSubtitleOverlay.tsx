@@ -32,14 +32,12 @@ interface Props {
   isPlaying: boolean;
   /** Playback speed multiplier (1.0 = normal). */
   speed: number;
-}
-
-function onTokenPress(token: Token, line: string) {
-  const fromHere = line.slice(token.start);
-  // Phase 1 exit criterion: log tapped token + from-token-to-end-of-line.
-  console.log(
-    `[YOMIFIN SUB] tapped "${token.text}" → lookup input: "${fromHere}"`,
-  );
+  /**
+   * Called on word tap with the text from the tapped token to the end of the line
+   * (Phase 2's forward-greedy lookup input) and the tapped token. If omitted, the
+   * tap is just logged (Phase 1 behavior).
+   */
+  onWordTap?: (input: string, token: Token) => void;
 }
 
 export default function TappableSubtitleOverlay({
@@ -47,7 +45,18 @@ export default function TappableSubtitleOverlay({
   progressMs,
   isPlaying,
   speed,
+  onWordTap,
 }: Props) {
+  const handleTokenPress = (token: Token, line: string) => {
+    const fromHere = line.slice(token.start);
+    if (onWordTap) {
+      onWordTap(fromHere, token);
+    } else {
+      console.log(
+        `[YOMIFIN SUB] tapped "${token.text}" → lookup input: "${fromHere}"`,
+      );
+    }
+  };
   const [activeIndex, setActiveIndex] = useState(-1);
 
   // Mirror playing/speed into shared values for the worklet.
@@ -125,7 +134,7 @@ export default function TappableSubtitleOverlay({
                   <Pressable
                     // biome-ignore lint/suspicious/noArrayIndexKey: positional token
                     key={ti}
-                    onPress={() => onTokenPress(tok, line)}
+                    onPress={() => handleTokenPress(tok, line)}
                     hitSlop={4}
                   >
                     <Text style={styles.text}>{tok.text}</Text>

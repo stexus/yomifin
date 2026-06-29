@@ -10,17 +10,22 @@
 #   1. deinflector smoke  — engine + JA rules reduce conjugations to lemmas (node)
 #   2. lookup integration — zip loader → in-memory DB → Translator → lookup() with
 #                           complex sentences + forward-greedy boundaries (bun)
+#   3. structured content — pure renderer helpers + real-JMdict tree walk (bun)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-echo "── [1/2] deinflector smoke ─────────────────────────────────────────"
+echo "── [1/3] deinflector smoke ─────────────────────────────────────────"
 ./scripts/yomifin-deinflect-smoke.sh
 
 echo
-echo "── [2/2] lookup integration (loader + DB + Translator + API) ───────"
+echo "── [2/3] lookup integration (loader + DB + Translator + API) ───────"
 bun utils/yomifin/lookup.test.ts
+
+echo
+echo "── [3/3] structured-content renderer helpers ───────────────────"
+bun utils/yomifin/structuredContent.test.ts
 
 echo
 echo "✅ all yomifin regression guards passed"

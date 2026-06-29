@@ -9,9 +9,8 @@
  * See PHASE2_YOMITAN.md. The glossary entries are returned untouched (plain strings or
  * Yomitan structured-content objects) for the structured-content renderer to handle.
  */
-// @ts-expect-error — vendored JS (no .d.ts); typed loosely on purpose.
-
 import type { InMemoryDictionaryDatabase } from "./InMemoryDictionaryDatabase";
+// vendored JS (no .d.ts) — typed loosely via the `any` field below.
 import { Translator } from "./yomitan/translator.js";
 
 /** A glossary block from one dictionary for one resolved headword. */

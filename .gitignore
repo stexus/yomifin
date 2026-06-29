@@ -84,3 +84,8 @@ google-service-account.json
 
 # Upstream Yomitan clone (reference for Phase 2 harvest; not part of app)
 /yomitan/
+
+# Yomitan dictionary data (user-provided; licensing + size)
+/JMdict.zip
+*.dic.zip
+assets/dictionaries/
