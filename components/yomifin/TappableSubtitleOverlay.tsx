@@ -1,52 +1,32 @@
 /**
- * Phase 1 — tappable subtitle overlay.
+ * Tappable subtitle overlay (mpv-driven).
  *
- * Renders the currently-active subtitle line over the libmpv surface as tappable
- * word-spans. On tap it logs the tapped token and the text from that token to the
- * end of the line (the input Phase 2's forward-greedy lookup will consume).
+ * Renders the CURRENT subtitle line — as decoded by mpv and pushed via its `sub-text`
+ * property (see modules/mpv-player onSubtitleText) — over the libmpv surface as
+ * tappable word-spans. On tap it hands Phase 2's forward-greedy lookup the text from
+ * the tapped token to the end of the line.
  *
- * SYNC: mpv pushes its position only ~1x/sec (a deliberate native battery
- * throttle). To avoid up-to-1s subtitle lag we INTERPOLATE the clock on the UI
- * thread with a 60fps frame callback: anchor to each native position update, then
- * advance by elapsed wall-time * speed — but only while playing (so pausing to do
- * a lookup freezes the line correctly). The active-cue index is computed inside the
- * worklet; we only cross to JS when the visible line actually changes.
+ * No clock interpolation: mpv owns subtitle timing/visibility, so the line appears and
+ * clears exactly in sync with playback (and bitmap/PGS subs simply send empty text and
+ * render natively). This replaces the old SRT-fetch + 60fps reanimated interpolation,
+ * which caused flicker and couldn't handle PGS.
  */
 
-import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import {
-  runOnJS,
-  type SharedValue,
-  useFrameCallback,
-  useSharedValue,
-} from "react-native-reanimated";
 import { segmentLine, type Token } from "@/utils/yomifin/segment";
-import type { SubtitleCue } from "@/utils/yomifin/srt";
 
 interface Props {
-  cues: SubtitleCue[];
-  /** Latest known playback position in milliseconds (updated ~1x/sec). */
-  progressMs: SharedValue<number>;
-  /** Whether playback is currently running (freezes interpolation when false). */
-  isPlaying: boolean;
-  /** Playback speed multiplier (1.0 = normal). */
-  speed: number;
+  /** Current subtitle text from mpv (empty string = nothing showing). */
+  text: string;
   /**
    * Called on word tap with the text from the tapped token to the end of the line
    * (Phase 2's forward-greedy lookup input) and the tapped token. If omitted, the
-   * tap is just logged (Phase 1 behavior).
+   * tap is just logged.
    */
   onWordTap?: (input: string, token: Token) => void;
 }
 
-export default function TappableSubtitleOverlay({
-  cues,
-  progressMs,
-  isPlaying,
-  speed,
-  onWordTap,
-}: Props) {
+export default function TappableSubtitleOverlay({ text, onWordTap }: Props) {
   const handleTokenPress = (token: Token, line: string) => {
     const fromHere = line.slice(token.start);
     if (onWordTap) {
@@ -57,71 +37,11 @@ export default function TappableSubtitleOverlay({
       );
     }
   };
-  const [activeIndex, setActiveIndex] = useState(-1);
 
-  // Mirror playing/speed into shared values for the worklet.
-  const playingSV = useSharedValue(isPlaying ? 1 : 0);
-  const speedSV = useSharedValue(speed || 1);
-  useEffect(() => {
-    playingSV.value = isPlaying ? 1 : 0;
-  }, [isPlaying, playingSV]);
-  useEffect(() => {
-    speedSV.value = speed || 1;
-  }, [speed, speedSV]);
+  const trimmed = text?.trim();
+  if (!trimmed) return null;
 
-  // Worklet-readable cue bounds (ascending by start). Stable for the item.
-  const bounds = useMemo(
-    () => cues.map((c) => [c.startMs, c.endMs] as [number, number]),
-    [cues],
-  );
-
-  // Interpolation anchors.
-  const lastSeen = useSharedValue(-1);
-  const anchorPos = useSharedValue(0);
-  const anchorT = useSharedValue(0);
-  const activeIdxSV = useSharedValue(-1);
-
-  useFrameCallback((frame) => {
-    "worklet";
-    const t = frame.timeSinceFirstFrame;
-
-    // Re-anchor whenever a fresh native position arrives (also covers seeks).
-    if (progressMs.value !== lastSeen.value) {
-      lastSeen.value = progressMs.value;
-      anchorPos.value = progressMs.value;
-      anchorT.value = t;
-    }
-
-    const est =
-      playingSV.value === 1
-        ? anchorPos.value + (t - anchorT.value) * speedSV.value
-        : anchorPos.value;
-
-    // Sticky selection: if the currently-shown cue still contains the estimated
-    // time, keep it. Only search for a new cue when we've actually left it. This
-    // prevents flip-flop flicker when cues overlap in time (common in SRT) and
-    // avoids re-renders from boundary jitter.
-    let idx = activeIdxSV.value;
-    if (idx < 0 || est < bounds[idx][0] || est > bounds[idx][1]) {
-      idx = -1;
-      for (let i = 0; i < bounds.length; i++) {
-        if (est >= bounds[i][0] && est <= bounds[i][1]) {
-          idx = i;
-          break;
-        }
-      }
-    }
-
-    if (idx !== activeIdxSV.value) {
-      activeIdxSV.value = idx;
-      runOnJS(setActiveIndex)(idx);
-    }
-  });
-
-  const active = activeIndex >= 0 ? cues[activeIndex] : null;
-  if (!active) return null;
-
-  const lines = active.text.split("\n");
+  const lines = trimmed.split("\n");
 
   return (
     <View pointerEvents='box-none' style={styles.container}>

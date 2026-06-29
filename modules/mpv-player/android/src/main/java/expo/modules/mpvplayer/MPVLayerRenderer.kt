@@ -68,6 +68,8 @@ class MPVLayerRenderer(private val context: Context) : MPVLib.EventObserver {
         fun onTracksReady()
         fun onError(message: String)
         fun onVideoDimensionsChanged(width: Int, height: Int)
+        // YOMIFIN: current decoded subtitle text (drives the tappable overlay).
+        fun onSubtitleText(text: String, start: Double, end: Double)
     }
     
     var delegate: Delegate? = null
@@ -409,6 +411,8 @@ class MPVLayerRenderer(private val context: Context) : MPVLib.EventObserver {
         MPVLib.observeProperty("track-list/count", MPV_FORMAT_INT64)
         MPVLib.observeProperty("paused-for-cache", MPV_FORMAT_FLAG)
         MPVLib.observeProperty("demuxer-cache-duration", MPV_FORMAT_DOUBLE)
+        // YOMIFIN: drive the tappable-subtitle overlay from mpv's decoded subtitle text.
+        MPVLib.observeProperty("sub-text", MPV_FORMAT_STRING)
         // Video dimensions for PiP aspect ratio
         MPVLib.observeProperty("video-params/w", MPV_FORMAT_INT64)
         MPVLib.observeProperty("video-params/h", MPV_FORMAT_INT64)
@@ -468,7 +472,10 @@ class MPVLayerRenderer(private val context: Context) : MPVLib.EventObserver {
             
             val selected = MPVLib.getPropertyBoolean("track-list/$i/selected") ?: false
             track["selected"] = selected
-            
+
+            // YOMIFIN: codec lets JS tell text subs (tappable overlay) from bitmap subs.
+            MPVLib.getPropertyString("track-list/$i/codec")?.let { track["codec"] = it }
+
             tracks.add(track)
         }
         
@@ -486,6 +493,12 @@ class MPVLayerRenderer(private val context: Context) : MPVLib.EventObserver {
     
     fun disableSubtitles() {
         MPVLib.setPropertyString("sid", "no")
+    }
+
+    // YOMIFIN: hide native subtitle rendering without deselecting the track, so sub-text
+    // keeps flowing for the tappable overlay (text subs only).
+    fun setSubtitleVisibility(visible: Boolean) {
+        MPVLib.setPropertyString("sub-visibility", if (visible) "yes" else "no")
     }
     
     fun getCurrentSubtitleTrack(): Int {
@@ -702,7 +715,13 @@ class MPVLayerRenderer(private val context: Context) : MPVLib.EventObserver {
     }
     
     override fun eventProperty(property: String, value: String) {
-        // Handle string properties if needed
+        when (property) {
+            "sub-text" -> {
+                val start = MPVLib.getPropertyDouble("sub-start") ?: 0.0
+                val end = MPVLib.getPropertyDouble("sub-end") ?: 0.0
+                mainHandler.post { delegate?.onSubtitleText(value, start, end) }
+            }
+        }
     }
     
     override fun eventProperty(property: String, value: Double) {

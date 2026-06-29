@@ -139,6 +139,12 @@ public class MpvPlayerModule: Module {
       AsyncFunction("disableSubtitles") { (view: MpvPlayerView) in
         view.disableSubtitles()
       }
+
+      // YOMIFIN: hide native subtitle rendering without deselecting the track, so
+      // sub-text keeps flowing for the tappable overlay (text subs only).
+      AsyncFunction("setSubtitleVisibility") { (view: MpvPlayerView, visible: Bool) in
+        view.setSubtitleVisibility(visible)
+      }
       
       AsyncFunction("getCurrentSubtitleTrack") { (view: MpvPlayerView) -> Int in
         return view.getCurrentSubtitleTrack()
@@ -213,7 +219,7 @@ public class MpvPlayerModule: Module {
       }
 
       // Defines events that the view can send to JavaScript
-      Events("onLoad", "onPlaybackStateChange", "onProgress", "onError", "onTracksReady", "onPictureInPictureChange")
+      Events("onLoad", "onPlaybackStateChange", "onProgress", "onError", "onTracksReady", "onPictureInPictureChange", "onSubtitleText")
     }
   }
 }

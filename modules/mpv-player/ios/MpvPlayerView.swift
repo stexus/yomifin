@@ -62,6 +62,7 @@ class MpvPlayerView: ExpoView {
 	let onError = EventDispatcher()
 	let onTracksReady = EventDispatcher()
 	let onPictureInPictureChange = EventDispatcher()
+	let onSubtitleText = EventDispatcher()
 
 	private var currentURL: URL?
 	private var cachedPosition: Double = 0
@@ -357,6 +358,10 @@ class MpvPlayerView: ExpoView {
 	func disableSubtitles() {
 		renderer?.disableSubtitles()
 	}
+
+	func setSubtitleVisibility(_ visible: Bool) {
+		renderer?.setSubtitleVisibility(visible)
+	}
 	
 	func getCurrentSubtitleTrack() -> Int {
 		return renderer?.getCurrentSubtitleTrack() ?? 0
@@ -517,6 +522,12 @@ extension MpvPlayerView: MPVLayerRendererDelegate {
 		DispatchQueue.main.async { [weak self] in
 			guard let self else { return }
 			self.onTracksReady([:])
+		}
+	}
+	func renderer(_: MPVLayerRenderer, didUpdateSubtitleText text: String, start: Double, end: Double) {
+		DispatchQueue.main.async { [weak self] in
+			guard let self else { return }
+			self.onSubtitleText(["text": text, "start": start, "end": end])
 		}
 	}
 	func renderer(_: MPVLayerRenderer, didDetectHDRMode mode: HDRMode, fps: Double) {

@@ -18,6 +18,7 @@ protocol MPVLayerRendererDelegate: AnyObject {
     func renderer(_ renderer: MPVLayerRenderer, didChangeLoading isLoading: Bool)
     func renderer(_ renderer: MPVLayerRenderer, didBecomeReadyToSeek: Bool)
     func renderer(_ renderer: MPVLayerRenderer, didBecomeTracksReady: Bool)
+    func renderer(_ renderer: MPVLayerRenderer, didUpdateSubtitleText text: String, start: Double, end: Double)
     func renderer(_ renderer: MPVLayerRenderer, didDetectHDRMode mode: HDRMode, fps: Double)
     func renderer(_ renderer: MPVLayerRenderer, didSelectAudioOutput audioOutput: String)
 }
@@ -429,7 +430,11 @@ final class MPVLayerRenderer {
             ("track-list/count", MPV_FORMAT_INT64),
             ("paused-for-cache", MPV_FORMAT_FLAG),
             ("demuxer-cache-duration", MPV_FORMAT_DOUBLE),
-            ("current-ao", MPV_FORMAT_STRING)
+            ("current-ao", MPV_FORMAT_STRING),
+            // YOMIFIN: drive the tappable-subtitle overlay from mpv's own decoded
+            // subtitle text. Fires only when the current cue changes (text subs only;
+            // bitmap/PGS subs report empty text and keep rendering natively).
+            ("sub-text", MPV_FORMAT_STRING)
         ]
         for (name, format) in properties {
             mpv_observe_property(handle, 0, name, format)
@@ -653,6 +658,17 @@ final class MPVLayerRenderer {
                     self.delegate?.renderer(self, didSelectAudioOutput: aoName)
                 }
             }
+        case "sub-text":
+            // Empty string when no current subtitle (clears the overlay).
+            let text = getStringProperty(handle: handle, name: name) ?? ""
+            var start = Double(0)
+            var end = Double(0)
+            getProperty(handle: handle, name: "sub-start", format: MPV_FORMAT_DOUBLE, value: &start)
+            getProperty(handle: handle, name: "sub-end", format: MPV_FORMAT_DOUBLE, value: &end)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.delegate?.renderer(self, didUpdateSubtitleText: text, start: start, end: end)
+            }
         default:
             break
         }
@@ -774,7 +790,13 @@ final class MPVLayerRenderer {
             var selected: Int32 = 0
             getProperty(handle: handle, name: "track-list/\(i)/selected", format: MPV_FORMAT_FLAG, value: &selected)
             track["selected"] = selected != 0
-            
+
+            // YOMIFIN: codec lets JS distinguish text subs (we render a tappable
+            // overlay) from bitmap subs like PGS/VobSub (mpv renders natively).
+            if let codec = getStringProperty(handle: handle, name: "track-list/\(i)/codec") {
+                track["codec"] = codec
+            }
+
             Logger.shared.log("getSubtitleTracks: found sub track id=\(trackId), title=\(track["title"] ?? "none"), lang=\(track["lang"] ?? "none")", type: "Info")
             tracks.append(track)
         }
@@ -799,6 +821,13 @@ final class MPVLayerRenderer {
     
     func disableSubtitles() {
         setProperty(name: "sid", value: "no")
+    }
+
+    // YOMIFIN: hide mpv's native subtitle rendering WITHOUT deselecting the track, so
+    // `sub-text` keeps flowing for our tappable overlay. Used for text subs; bitmap
+    // subs keep visibility = yes so PGS/VobSub render natively.
+    func setSubtitleVisibility(_ visible: Bool) {
+        setProperty(name: "sub-visibility", value: visible ? "yes" : "no")
     }
     
     func getCurrentSubtitleTrack() -> Int {

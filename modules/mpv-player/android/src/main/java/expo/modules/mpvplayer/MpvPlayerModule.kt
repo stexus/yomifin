@@ -121,6 +121,9 @@ class MpvPlayerModule : Module() {
                 view.setSubtitleTrack(trackId)
             }
 
+            AsyncFunction("setSubtitleVisibility") { view: MpvPlayerView, visible: Boolean ->
+                view.setSubtitleVisibility(visible)
+            }
             AsyncFunction("disableSubtitles") { view: MpvPlayerView ->
                 view.disableSubtitles()
             }
@@ -198,7 +201,7 @@ class MpvPlayerModule : Module() {
             }
 
             // Defines events that the view can send to JavaScript
-            Events("onLoad", "onPlaybackStateChange", "onProgress", "onError", "onTracksReady", "onPictureInPictureChange")
+            Events("onLoad", "onPlaybackStateChange", "onProgress", "onError", "onTracksReady", "onPictureInPictureChange", "onSubtitleText")
         }
     }
 }

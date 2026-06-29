@@ -29,6 +29,17 @@ export type OnPictureInPictureChangePayload = {
   isActive: boolean;
 };
 
+/**
+ * Current decoded subtitle text from mpv (text-based subs only; empty when no cue is
+ * showing or for bitmap/PGS subs). Drives the tappable-subtitle overlay. `start`/`end`
+ * are the cue's time range in seconds.
+ */
+export type OnSubtitleTextEventPayload = {
+  text: string;
+  start: number;
+  end: number;
+};
+
 export type NowPlayingMetadata = {
   title?: string;
   artist?: string;
@@ -84,6 +95,7 @@ export type MpvPlayerViewProps = {
   onPictureInPictureChange?: (event: {
     nativeEvent: OnPictureInPictureChangePayload;
   }) => void;
+  onSubtitleText?: (event: { nativeEvent: OnSubtitleTextEventPayload }) => void;
 };
 
 export interface MpvPlayerViewRef {
@@ -104,6 +116,8 @@ export interface MpvPlayerViewRef {
   getSubtitleTracks: () => Promise<SubtitleTrack[]>;
   setSubtitleTrack: (trackId: number) => Promise<void>;
   disableSubtitles: () => Promise<void>;
+  /** Hide/show mpv's native subtitle rendering without deselecting the track. */
+  setSubtitleVisibility: (visible: boolean) => Promise<void>;
   getCurrentSubtitleTrack: () => Promise<number>;
   addSubtitleFile: (url: string, select?: boolean) => Promise<void>;
   // Subtitle positioning
@@ -134,6 +148,8 @@ export type SubtitleTrack = {
   title?: string;
   lang?: string;
   selected?: boolean;
+  /** mpv codec name, e.g. "subrip", "ass", "hdmv_pgs_subtitle" (bitmap). */
+  codec?: string;
 };
 
 export type AudioTrack = {

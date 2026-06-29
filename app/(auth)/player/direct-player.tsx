@@ -56,15 +56,13 @@ import { useSettings } from "@/utils/atoms/settings";
 import { getDefaultPlaySettings } from "@/utils/jellyfin/getDefaultPlaySettings";
 import { getPrimaryImageUrl } from "@/utils/jellyfin/image/getPrimaryImageUrl";
 import { getStreamUrl } from "@/utils/jellyfin/media/getStreamUrl";
-import { getMpvAudioId } from "@/utils/jellyfin/subtitleUtils";
+import {
+  getMpvAudioId,
+  getMpvSubtitleId,
+} from "@/utils/jellyfin/subtitleUtils";
 import { writeToLog } from "@/utils/log";
 import { msToTicks, ticksToSeconds } from "@/utils/time";
-import {
-  buildSrtUrl,
-  fetchSubtitleSrt,
-  pickTextSubtitleStream,
-} from "@/utils/yomifin/fetchSubtitleSrt";
-import { parseSrt, type SubtitleCue } from "@/utils/yomifin/srt";
+
 import { generateDeviceProfile } from "../../../utils/profiles/native";
 
 export default function DirectPlayerPage() {
@@ -162,7 +160,8 @@ export default function DirectPlayerPage() {
   const initialSeekDoneRef = useRef(false);
 
   // ===== YOMIFIN Phase 1: tappable subtitle overlay =====
-  const [yomifinCues, setYomifinCues] = useState<SubtitleCue[]>([]);
+  // YOMIFIN: current subtitle text as decoded by mpv (drives the tappable overlay).
+  const [yomifinSubtitleText, setYomifinSubtitleText] = useState<string>("");
 
   const initialPlaybackTicksRef = useRef<number>(
     playbackPositionFromUrl
@@ -235,14 +234,6 @@ export default function DirectPlayerPage() {
   //   }
   //   return item?.UserData?.PlaybackPositionTicks ?? 0;
   // }, [playbackPositionFromUrl, item?.UserData?.PlaybackPositionTicks]);
-
-  // YOMIFIN: keep mpv's own subtitle rendering OFF so our tappable overlay is the
-  // only subtitle layer (CONTEXT §7). Re-assert on every track-selection change,
-  // because selecting a track would otherwise re-enable mpv's sid.
-  useEffect(() => {
-    if (!tracksReady || !videoRef.current) return;
-    videoRef.current.disableSubtitles?.();
-  }, [tracksReady, currentSubtitleIndex]);
 
   useEffect(() => {
     if (!tracksReady || !videoRef.current) return;
@@ -430,49 +421,27 @@ export default function DirectPlayerPage() {
     reportPlaybackStart();
   }, [stream, api, offline]);
 
-  // YOMIFIN Phase 1: fetch ONE subtitle stream from Jellyfin as SRT data and parse.
+  // YOMIFIN: mpv OWNS subtitle decoding/selection (so PGS and embedded subs work and
+  // switching is instant). For TEXT subs we hide mpv's NATIVE rendering and draw our
+  // tappable overlay from the live `sub-text` event instead; for BITMAP subs (PGS,
+  // VobSub) we keep native rendering on and our overlay stays empty (sub-text is empty).
   useEffect(() => {
-    if (offline) return; // online path first
-    if (!api?.basePath || !api.accessToken) return;
-    if (!item?.Id || !stream?.mediaSource?.Id) return;
-
-    // Drive the overlay off the LIVE selection (currentSubtitleIndex), so changing
-    // the subtitle in the player menu re-fetches and swaps our overlay track.
-    const chosen = pickTextSubtitleStream(
-      stream.mediaSource,
-      currentSubtitleIndex,
+    if (!tracksReady || !videoRef.current) return;
+    const sub = stream?.mediaSource?.MediaStreams?.find(
+      (s) => s.Type === "Subtitle" && s.Index === currentSubtitleIndex,
     );
-    if (!chosen || chosen.Index == null) {
-      setYomifinCues([]);
-      console.log("[YOMIFIN SUB] no text subtitle stream available");
-      return;
-    }
+    const isTextSub =
+      currentSubtitleIndex !== -1 && sub?.IsTextSubtitleStream === true;
+    // Hide native rendering only for the text subs we overlay ourselves.
+    videoRef.current.setSubtitleVisibility?.(!isTextSub);
+  }, [tracksReady, currentSubtitleIndex, stream?.mediaSource]);
 
-    const url = buildSrtUrl(
-      api.basePath,
-      item.Id,
-      stream.mediaSource.Id,
-      chosen.Index,
-      api.accessToken,
-    );
-
-    let cancelled = false;
-    fetchSubtitleSrt(url)
-      .then(parseSrt)
-      .then((cues) => {
-        if (cancelled) return;
-        setYomifinCues(cues);
-        console.log(
-          `[YOMIFIN SUB] loaded ${cues.length} cues from stream #${chosen.Index}`,
-        );
-      })
-      .catch((e) => {
-        if (!cancelled) console.warn("[YOMIFIN SUB] fetch/parse failed:", e);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [api, item?.Id, stream?.mediaSource, currentSubtitleIndex, offline]);
+  // YOMIFIN: receive mpv's live decoded subtitle text (text subs only; empty for
+  // bitmap/PGS or when no cue is showing). This drives the tappable overlay in perfect
+  // sync with playback — no SRT re-fetch, no clock interpolation, no flicker.
+  const onSubtitleText = useCallback((e: { nativeEvent: { text: string } }) => {
+    setYomifinSubtitleText(e.nativeEvent?.text ?? "");
+  }, []);
 
   const togglePlay = async () => {
     lightHapticFeedback();
@@ -685,10 +654,11 @@ export default function DirectPlayerPage() {
       ).map((s) => s.DeliveryUrl!);
     }
 
-    // YOMIFIN: never let mpv render subtitles itself — our tappable overlay is the
-    // only subtitle layer. Switching tracks updates the overlay (currentSubtitleIndex),
-    // not mpv's sid. Force the initial mpv subtitle track to "none".
-    const initialSubtitleId = -1;
+    // YOMIFIN: let mpv decode the selected subtitle so its `sub-text` flows to our
+    // overlay (text subs) and bitmap subs render natively. The visibility effect hides
+    // native rendering for text subs. (undefined → mpv default; -1 → none.)
+    const initialSubtitleId =
+      getMpvSubtitleId(mediaSource, subtitleIndex, isTranscoding) ?? -1;
     const initialAudioId = getMpvAudioId(
       mediaSource,
       audioIndex,
@@ -952,13 +922,23 @@ export default function DirectPlayerPage() {
   );
 
   // TV subtitle track change handler
-  const handleSubtitleIndexChange = useCallback(async (index: number) => {
-    // YOMIFIN: selecting a subtitle drives our tappable overlay (via the
-    // currentSubtitleIndex effect that re-fetches the SRT), NOT mpv. Keep mpv's
-    // own rendering off in all cases so only our overlay shows.
-    setCurrentSubtitleIndex(index);
-    await videoRef.current?.disableSubtitles?.();
-  }, []);
+  const handleSubtitleIndexChange = useCallback(
+    async (index: number) => {
+      // YOMIFIN: mpv owns selection; map Jellyfin index → mpv sid and select it. The
+      // visibility effect (keyed on currentSubtitleIndex) then hides native rendering
+      // for text subs so only our tappable overlay shows.
+      setCurrentSubtitleIndex(index);
+      const mediaSource = stream?.mediaSource;
+      const isTranscoding = Boolean(mediaSource?.TranscodingUrl);
+      const mpvId = getMpvSubtitleId(mediaSource, index, isTranscoding);
+      if (index === -1) {
+        await videoRef.current?.disableSubtitles?.();
+      } else if (mpvId !== undefined && mpvId >= 0) {
+        await videoRef.current?.setSubtitleTrack?.(mpvId);
+      }
+    },
+    [stream?.mediaSource],
+  );
 
   // Technical info toggle handler
   const handleToggleTechnicalInfo = useCallback(() => {
@@ -1299,6 +1279,7 @@ export default function DirectPlayerPage() {
                 style={{ width: "100%", height: "100%" }}
                 nowPlayingMetadata={nowPlayingMetadata}
                 onProgress={onProgress}
+                onSubtitleText={onSubtitleText}
                 onPlaybackStateChange={onPlaybackStateChanged}
                 onPictureInPictureChange={_onPictureInPictureChange}
                 onLoad={() => setIsVideoLoaded(true)}
@@ -1397,19 +1378,12 @@ export default function DirectPlayerPage() {
                   transcodeReasons={transcodeReasons}
                 />
               ))}
-            {/* YOMIFIN Phase 2: tappable subtitles + Yomitan lookup + popup (top).
-                Wrapped in an error boundary so a crash in the experimental layer can
-                never take down the player / app root. */}
-            {yomifinCues.length > 0 && (
-              <YomifinErrorBoundary label='lookup-layer'>
-                <YomifinLookupLayer
-                  cues={yomifinCues}
-                  progressMs={progress}
-                  isPlaying={isPlaying}
-                  speed={currentPlaybackSpeed}
-                />
-              </YomifinErrorBoundary>
-            )}
+            {/* YOMIFIN Phase 2: tappable subtitles + Yomitan lookup + popup (top),
+                driven by mpv's live subtitle text. Wrapped in an error boundary so a
+                crash in the experimental layer can never take down the player / app. */}
+            <YomifinErrorBoundary label='lookup-layer'>
+              <YomifinLookupLayer text={yomifinSubtitleText} />
+            </YomifinErrorBoundary>
           </View>
         </VideoProvider>
       </PlayerProvider>

@@ -47,6 +47,7 @@ class MpvPlayerView(context: Context, appContext: AppContext) : ExpoView(context
     val onError by EventDispatcher()
     val onTracksReady by EventDispatcher()
     val onPictureInPictureChange by EventDispatcher()
+    val onSubtitleText by EventDispatcher()
 
     private var textureView: TextureView
     private var renderer: MPVLayerRenderer? = null
@@ -346,6 +347,10 @@ class MpvPlayerView(context: Context, appContext: AppContext) : ExpoView(context
         renderer?.disableSubtitles()
     }
 
+    fun setSubtitleVisibility(visible: Boolean) {
+        renderer?.setSubtitleVisibility(visible)
+    }
+
     fun getCurrentSubtitleTrack(): Int {
         return renderer?.getCurrentSubtitleTrack() ?: 0
     }
@@ -467,6 +472,10 @@ class MpvPlayerView(context: Context, appContext: AppContext) : ExpoView(context
 
     override fun onTracksReady() {
         onTracksReady(emptyMap<String, Any>())
+    }
+
+    override fun onSubtitleText(text: String, start: Double, end: Double) {
+        onSubtitleText(mapOf("text" to text, "start" to start, "end" to end))
     }
 
     override fun onVideoDimensionsChanged(width: Int, height: Int) {

@@ -1,41 +1,31 @@
 /*
  * Phase 2 layer: tappable subtitles + real Yomitan lookup + definition popup.
  *
- * Loads the bundled dictionary once (in-memory), renders Phase 1's
- * TappableSubtitleOverlay, and on word tap runs the forward-greedy lookup and shows
- * DefinitionPopup. Container-agnostic: this is the overlay container adopted in Phase 0.
+ * Loads the bundled dictionary once, renders the tappable overlay from mpv's live
+ * subtitle text, and on word tap runs the forward-greedy lookup and shows
+ * DefinitionPopup.
  *
- * Drop-in replacement for TappableSubtitleOverlay in the player; it forwards the same
- * subtitle/sync props through.
+ * mpv-driven: the overlay text comes from mpv's `sub-text` (perfect sync, PGS-safe),
+ * not from a re-fetched SRT + interpolation.
  */
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
-import type { SharedValue } from "react-native-reanimated";
 import { loadBundledDictionary } from "@/utils/yomifin/loadBundledDictionary";
 import type { LookupResult, YomifinDictionary } from "@/utils/yomifin/lookup";
-import type { SubtitleCue } from "@/utils/yomifin/srt";
 import DefinitionPopup from "./DefinitionPopup";
 import TappableSubtitleOverlay from "./TappableSubtitleOverlay";
 import YomifinErrorBoundary from "./YomifinErrorBoundary";
 
 interface Props {
-  cues: SubtitleCue[];
-  progressMs: SharedValue<number>;
-  isPlaying: boolean;
-  speed: number;
+  /** Current subtitle text from mpv (empty string = nothing showing). */
+  text: string;
   /** Optional: pause playback while a definition is open (nice-to-have). */
   onLookupOpen?: () => void;
 }
 
 type DictStatus = "loading" | "ready" | "error";
 
-export default function YomifinLookupLayer({
-  cues,
-  progressMs,
-  isPlaying,
-  speed,
-  onLookupOpen,
-}: Props) {
+export default function YomifinLookupLayer({ text, onLookupOpen }: Props) {
   const dictRef = useRef<YomifinDictionary | null>(null);
   const [status, setStatus] = useState<DictStatus>("loading");
   const [result, setResult] = useState<LookupResult | null>(null);
@@ -81,10 +71,7 @@ export default function YomifinLookupLayer({
   return (
     <>
       <TappableSubtitleOverlay
-        cues={cues}
-        progressMs={progressMs}
-        isPlaying={isPlaying}
-        speed={speed}
+        text={text}
         onWordTap={status === "ready" ? handleWordTap : undefined}
       />
       {status === "loading" ? (

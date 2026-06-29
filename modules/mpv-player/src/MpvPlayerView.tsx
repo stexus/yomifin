@@ -70,6 +70,9 @@ export default React.forwardRef<MpvPlayerViewRef, MpvPlayerViewProps>(
       disableSubtitles: async () => {
         await nativeRef.current?.disableSubtitles();
       },
+      setSubtitleVisibility: async (visible: boolean) => {
+        await nativeRef.current?.setSubtitleVisibility(visible);
+      },
       getCurrentSubtitleTrack: async () => {
         return await nativeRef.current?.getCurrentSubtitleTrack();
       },
