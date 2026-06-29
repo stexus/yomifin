@@ -29,6 +29,7 @@ import {
   PlaybackSpeedScope,
   updatePlaybackSpeedSettings,
 } from "@/components/video-player/controls/utils/playback-speed-settings";
+import YomifinErrorBoundary from "@/components/yomifin/YomifinErrorBoundary";
 import YomifinLookupLayer from "@/components/yomifin/YomifinLookupLayer";
 import useRouter from "@/hooks/useAppRouter";
 import { useHaptic } from "@/hooks/useHaptic";
@@ -1396,14 +1397,18 @@ export default function DirectPlayerPage() {
                   transcodeReasons={transcodeReasons}
                 />
               ))}
-            {/* YOMIFIN Phase 2: tappable subtitles + Yomitan lookup + popup (top) */}
+            {/* YOMIFIN Phase 2: tappable subtitles + Yomitan lookup + popup (top).
+                Wrapped in an error boundary so a crash in the experimental layer can
+                never take down the player / app root. */}
             {yomifinCues.length > 0 && (
-              <YomifinLookupLayer
-                cues={yomifinCues}
-                progressMs={progress}
-                isPlaying={isPlaying}
-                speed={currentPlaybackSpeed}
-              />
+              <YomifinErrorBoundary label='lookup-layer'>
+                <YomifinLookupLayer
+                  cues={yomifinCues}
+                  progressMs={progress}
+                  isPlaying={isPlaying}
+                  speed={currentPlaybackSpeed}
+                />
+              </YomifinErrorBoundary>
             )}
           </View>
         </VideoProvider>

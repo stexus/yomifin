@@ -11,6 +11,7 @@ import {
   getListBullet,
   groupChildren,
   mapStyleToRN,
+  normalizeGlossary,
   type SCContent,
   toChildArray,
 } from "./structuredContent";
@@ -89,6 +90,34 @@ check(
 );
 check("style empty → {}", Object.keys(mapStyleToRN(undefined)).length === 0);
 
+// normalizeGlossary (glossary wrapper shapes)
+check("normalize string passthrough", normalizeGlossary("hi") === "hi");
+check(
+  "normalize {type:text}",
+  normalizeGlossary({ type: "text", text: "a def" }) === "a def",
+);
+check(
+  "normalize {type:image} → null",
+  normalizeGlossary({ type: "image", path: "x" }) === null,
+);
+check(
+  "normalize {type:structured-content} → inner tree",
+  (() => {
+    const inner = { tag: "ul", content: [] };
+    return (
+      normalizeGlossary({ type: "structured-content", content: inner }) ===
+      inner
+    );
+  })(),
+);
+check(
+  "normalize real SC node passthrough (has tag)",
+  (() => {
+    const n = { tag: "span", content: "x" };
+    return normalizeGlossary(n) === n;
+  })(),
+);
+
 // Real-data walk (optional)
 if (existsSync("./JMdict.zip")) {
   // lazy import to avoid requiring fflate when zip absent
@@ -108,20 +137,26 @@ if (existsSync("./JMdict.zip")) {
     }
   };
   try {
+    let scItems = 0;
+    let nonNullNormalized = 0;
     for (const e of bank.slice(0, 5000)) {
-      for (const item of e[5] as SCContent[]) {
+      for (const item of e[5] as unknown[]) {
+        // exercise the real glossary-item normalize path (wrappers included)
+        const tree = normalizeGlossary(item);
+        if (tree !== null && tree !== undefined) nonNullNormalized++;
         if (
           typeof item === "object" &&
           item !== null &&
           (item as { type?: string }).type === "structured-content"
         ) {
-          walk((item as { content: SCContent }).content);
+          scItems++;
         }
+        walk(tree);
       }
     }
     check(
-      `real JMdict walk (no throw over ${nodes} nodes from 5000 entries)`,
-      true,
+      `real JMdict normalize+walk (${nodes} nodes; ${scItems} SC items, ${nonNullNormalized} non-null)`,
+      scItems > 0 && nonNullNormalized > 0,
     );
   } catch (err) {
     check("real JMdict walk", false, String(err));

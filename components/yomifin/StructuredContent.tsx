@@ -2,11 +2,15 @@
  * React Native renderer for Yomitan structured content (the mini-HTML JSON tree used
  * by JMdict and many other dictionaries for glossary entries).
  *
- * This is the RN port of Yomitan's display/structured-content-generator.js (which
- * emits DOM). The classification / grouping / style mapping logic lives in the
- * RN-free, unit-tested utils/yomifin/structuredContent.ts; this file only turns that
- * into <View>/<Text>. Definitions-only scope: images are skipped, links render as
- * styled (optionally tappable) text, tables degrade to simple rows. See PHASE2_YOMITAN.md.
+ * RN port of Yomitan's display/structured-content-generator.js (which emits DOM). The
+ * classification / grouping / style mapping logic lives in the RN-free, unit-tested
+ * utils/yomifin/structuredContent.ts; this file turns that into <View>/<Text>.
+ * Definitions-only scope: images are skipped, links render as styled (tappable) text,
+ * tables degrade to simple rows. See PHASE2_YOMITAN.md.
+ *
+ * Robustness: a glossary item may be a plain string, a structured-content tree, OR a
+ * Yomitan WRAPPER object ({type:'structured-content'|'text'|'image', ...}); we normalize
+ * those here so the renderer always gets a valid tree, and never throws on odd input.
  */
 import type React from "react";
 import { StyleSheet, Text, View } from "react-native";
@@ -16,6 +20,7 @@ import {
   groupChildren,
   LIST_TAGS,
   mapStyleToRN,
+  normalizeGlossary,
   type SCContent,
   type SCNode,
   toChildArray,
@@ -40,31 +45,34 @@ interface RenderCtx {
   color: string;
 }
 
-let keySeq = 0;
-const nextKey = () => `sc${keySeq++}`;
-
-/** Render content that is valid INSIDE a <Text> (strings + inline nodes). */
-function renderInline(node: SCContent, ctx: RenderCtx): React.ReactNode {
+/** Render content valid INSIDE a <Text> (strings + inline nodes). */
+function renderInline(
+  node: SCContent,
+  ctx: RenderCtx,
+  key: string,
+): React.ReactNode {
   if (node === null || node === undefined) return null;
   if (typeof node === "string") return node;
-  if (Array.isArray(node))
-    return node.map((n) => <Text key={nextKey()}>{renderInline(n, ctx)}</Text>);
+  if (Array.isArray(node)) {
+    return node.map((n, i) => (
+      <Text key={`${key}.${i}`}>{renderInline(n, ctx, `${key}.${i}`)}</Text>
+    ));
+  }
 
   const el = node as SCNode;
   if (el.tag === "br") return "\n";
-  // rt/rp are furigana ruby annotations; show base text only for MVP → skip annotations
-  if (el.tag === "rt" || el.tag === "rp") return null;
+  if (el.tag === "rt" || el.tag === "rp") return null; // furigana annotations: base only
 
   const style = mapStyleToRN(el.style);
-  const children = toChildArray(el.content).map((c) => (
-    <Text key={nextKey()}>{renderInline(c, ctx)}</Text>
+  const children = toChildArray(el.content).map((c, i) => (
+    <Text key={`${key}.${i}`}>{renderInline(c, ctx, `${key}.${i}`)}</Text>
   ));
 
   if (el.tag === "a" && typeof el.href === "string") {
     const href = el.href;
     return (
       <Text
-        key={nextKey()}
+        key={key}
         style={[styles.link, style]}
         onPress={ctx.onLinkPress ? () => ctx.onLinkPress?.(href) : undefined}
       >
@@ -73,12 +81,11 @@ function renderInline(node: SCContent, ctx: RenderCtx): React.ReactNode {
     );
   }
 
-  // span / em / strong / b / i / ruby / unknown-inline → styled text
   const extra: Record<string, unknown> = {};
   if (el.tag === "strong" || el.tag === "b") extra.fontWeight = "bold";
   if (el.tag === "em" || el.tag === "i") extra.fontStyle = "italic";
   return (
-    <Text key={nextKey()} style={[extra, style]}>
+    <Text key={key} style={[extra, style]}>
       {children}
     </Text>
   );
@@ -88,35 +95,44 @@ function renderInline(node: SCContent, ctx: RenderCtx): React.ReactNode {
 function renderGroups(
   children: SCContent[],
   ctx: RenderCtx,
+  key: string,
 ): React.ReactNode[] {
-  return groupChildren(children).map((group) => {
+  return groupChildren(children).map((group, gi) => {
     if (group.kind === "inline") {
       return (
-        <Text key={nextKey()} style={{ color: ctx.color }}>
-          {group.nodes.map((n) => (
-            <Text key={nextKey()}>{renderInline(n, ctx)}</Text>
+        <Text key={`${key}.g${gi}`} style={{ color: ctx.color }}>
+          {group.nodes.map((n, i) => (
+            <Text key={`${key}.g${gi}.${i}`}>
+              {renderInline(n, ctx, `${key}.g${gi}.${i}`)}
+            </Text>
           ))}
         </Text>
       );
     }
     return (
-      <View key={nextKey()}>{group.nodes.map((n) => renderBlock(n, ctx))}</View>
+      <View key={`${key}.g${gi}`}>
+        {group.nodes.map((n, i) => renderBlock(n, ctx, `${key}.g${gi}.${i}`))}
+      </View>
     );
   });
 }
 
 /** Render a block-level node (or anything not known to be inline) as views. */
-function renderBlock(node: SCContent, ctx: RenderCtx): React.ReactNode {
+function renderBlock(
+  node: SCContent,
+  ctx: RenderCtx,
+  key: string,
+): React.ReactNode {
   if (node === null || node === undefined) return null;
   if (typeof node === "string") {
     return (
-      <Text key={nextKey()} style={{ color: ctx.color }}>
+      <Text key={key} style={{ color: ctx.color }}>
         {node}
       </Text>
     );
   }
   if (Array.isArray(node)) {
-    return <View key={nextKey()}>{renderGroups(node, ctx)}</View>;
+    return <View key={key}>{renderGroups(node, ctx, key)}</View>;
   }
 
   const el = node as SCNode;
@@ -124,8 +140,8 @@ function renderBlock(node: SCContent, ctx: RenderCtx): React.ReactNode {
 
   if (INLINE_TAGS_AS_TEXT.has(el.tag)) {
     return (
-      <Text key={nextKey()} style={{ color: ctx.color }}>
-        {renderInline(el, ctx)}
+      <Text key={key} style={{ color: ctx.color }}>
+        {renderInline(el, ctx, key)}
       </Text>
     );
   }
@@ -134,7 +150,7 @@ function renderBlock(node: SCContent, ctx: RenderCtx): React.ReactNode {
     const ordered = el.tag === "ol";
     const items = toChildArray(el.content);
     return (
-      <View key={nextKey()} style={[styles.list, style]}>
+      <View key={key} style={[styles.list, style]}>
         {items.map((item, index) => {
           const itemNode = item as SCNode;
           const bullet = getListBullet(
@@ -151,17 +167,21 @@ function renderBlock(node: SCContent, ctx: RenderCtx): React.ReactNode {
               ? toChildArray(itemNode.content)
               : [item];
           return (
-            <View key={nextKey()} style={styles.listItem}>
+            <View key={`${key}.li${index}`} style={styles.listItem}>
               {bullet ? (
                 <Text style={[styles.bullet, { color: ctx.color }]}>
                   {bullet}{" "}
                 </Text>
               ) : null}
               <View style={styles.listItemBody}>
-                {renderGroups(itemChildren, {
-                  ...ctx,
-                  color: (itemStyle.color as string) ?? ctx.color,
-                })}
+                {renderGroups(
+                  itemChildren,
+                  {
+                    ...ctx,
+                    color: (itemStyle.color as string) ?? ctx.color,
+                  },
+                  `${key}.li${index}`,
+                )}
               </View>
             </View>
           );
@@ -177,17 +197,21 @@ function renderBlock(node: SCContent, ctx: RenderCtx): React.ReactNode {
     el.tag === "tfoot"
   ) {
     return (
-      <View key={nextKey()} style={[styles.table, style]}>
-        {renderGroups(toChildArray(el.content), ctx)}
+      <View key={key} style={[styles.table, style]}>
+        {renderGroups(toChildArray(el.content), ctx, key)}
       </View>
     );
   }
   if (el.tag === "tr") {
     return (
-      <View key={nextKey()} style={styles.tableRow}>
-        {toChildArray(el.content).map((cell) => (
-          <View key={nextKey()} style={styles.tableCell}>
-            {renderGroups(toChildArray((cell as SCNode)?.content ?? cell), ctx)}
+      <View key={key} style={styles.tableRow}>
+        {toChildArray(el.content).map((cell, ci) => (
+          <View key={`${key}.c${ci}`} style={styles.tableCell}>
+            {renderGroups(
+              toChildArray((cell as SCNode)?.content ?? cell),
+              ctx,
+              `${key}.c${ci}`,
+            )}
           </View>
         ))}
       </View>
@@ -196,35 +220,35 @@ function renderBlock(node: SCContent, ctx: RenderCtx): React.ReactNode {
 
   // div / details / summary / unknown block → container
   return (
-    <View key={nextKey()} style={style}>
-      {renderGroups(toChildArray(el.content), ctx)}
+    <View key={key} style={style}>
+      {renderGroups(toChildArray(el.content), ctx, key)}
     </View>
   );
 }
 
 export interface StructuredContentProps {
-  /** A Yomitan structured-content tree, OR a plain string glossary item. */
-  content: SCContent;
+  /** A glossary item: string, structured-content tree, or Yomitan wrapper object. */
+  content: unknown;
   color?: string;
   onLinkPress?: (href: string) => void;
 }
 
-/** Render one glossary item (string or structured-content tree). */
+/** Render one glossary item (normalized to a structured-content tree). */
 export function StructuredContent({
   content,
   color = "#e5e5e5",
   onLinkPress,
 }: StructuredContentProps) {
   const ctx: RenderCtx = { onLinkPress, color };
-  if (typeof content === "string") {
-    return <Text style={{ color }}>{content}</Text>;
-  }
+  const tree = normalizeGlossary(content);
+  if (tree === null || tree === undefined) return null;
+  if (typeof tree === "string") return <Text style={{ color }}>{tree}</Text>;
   return (
     <View>
-      {classify(content) === "inline" ? (
-        <Text style={{ color }}>{renderInline(content, ctx)}</Text>
+      {classify(tree) === "inline" ? (
+        <Text style={{ color }}>{renderInline(tree, ctx, "r")}</Text>
       ) : (
-        renderBlock(content, ctx)
+        renderBlock(tree, ctx, "r")
       )}
     </View>
   );

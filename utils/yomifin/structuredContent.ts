@@ -26,6 +26,29 @@ export interface SCNode {
 
 export type SCContent = string | SCContent[] | SCNode | undefined | null;
 
+/**
+ * Normalize a glossary item into a renderable structured-content tree. A Yomitan
+ * glossary item may be a plain string, a structured-content tree, or a WRAPPER object
+ * ({type:'structured-content'|'text'|'image', ...}). Unwrapping here means the renderer
+ * always receives valid SCContent and can't choke on the wrapper shapes.
+ */
+export function normalizeGlossary(content: unknown): SCContent {
+  if (content && typeof content === "object" && !Array.isArray(content)) {
+    const obj = content as Record<string, unknown>;
+    if (typeof obj.type === "string" && obj.tag === undefined) {
+      switch (obj.type) {
+        case "structured-content":
+          return obj.content as SCContent;
+        case "text":
+          return typeof obj.text === "string" ? obj.text : "";
+        default:
+          return null; // 'image' and anything else: out of scope (definitions-only)
+      }
+    }
+  }
+  return content as SCContent;
+}
+
 /** Block-level tags get their own container (View); everything else is inline (Text). */
 export const BLOCK_TAGS = new Set([
   "div",

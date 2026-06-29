@@ -7,7 +7,6 @@
  */
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { LookupResult } from "@/utils/yomifin/lookup";
-import type { SCContent } from "@/utils/yomifin/structuredContent";
 import { StructuredContent } from "./StructuredContent";
 
 interface Props {
@@ -70,7 +69,7 @@ export default function DefinitionPopup({
                           style={styles.gloss}
                         >
                           <StructuredContent
-                            content={gloss as SCContent}
+                            content={gloss}
                             onLinkPress={onLinkPress}
                           />
                         </View>

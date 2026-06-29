@@ -16,6 +16,7 @@ import type { LookupResult, YomifinDictionary } from "@/utils/yomifin/lookup";
 import type { SubtitleCue } from "@/utils/yomifin/srt";
 import DefinitionPopup from "./DefinitionPopup";
 import TappableSubtitleOverlay from "./TappableSubtitleOverlay";
+import YomifinErrorBoundary from "./YomifinErrorBoundary";
 
 interface Props {
   cues: SubtitleCue[];
@@ -98,7 +99,9 @@ export default function YomifinLookupLayer({
         </View>
       ) : null}
       {result ? (
-        <DefinitionPopup result={result} onClose={() => setResult(null)} />
+        <YomifinErrorBoundary label='popup'>
+          <DefinitionPopup result={result} onClose={() => setResult(null)} />
+        </YomifinErrorBoundary>
       ) : null}
     </>
   );
