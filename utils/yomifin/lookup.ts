@@ -10,8 +10,14 @@
  * Yomitan structured-content objects) for the structured-content renderer to handle.
  */
 import type { InMemoryDictionaryDatabase } from "./InMemoryDictionaryDatabase";
+import type { SqliteDictionaryDatabase } from "./SqliteDictionaryDatabase";
 // vendored JS (no .d.ts) — typed loosely via the `any` field below.
 import { Translator } from "./yomitan/translator.js";
+
+/** Either dictionary backend satisfies the Translator's DB interface. */
+export type YomifinDatabase =
+  | InMemoryDictionaryDatabase
+  | SqliteDictionaryDatabase;
 
 /** A glossary block from one dictionary for one resolved headword. */
 export interface DefinitionGroup {
@@ -80,10 +86,7 @@ export class YomifinDictionary {
   private _mainDictionary: string;
   private _maxScanLength: number;
 
-  constructor(
-    db: InMemoryDictionaryDatabase,
-    options: YomifinDictionaryOptions,
-  ) {
+  constructor(db: YomifinDatabase, options: YomifinDictionaryOptions) {
     this._translator = new Translator(db);
     this._translator.prepare();
     this._language = options.language ?? "ja";

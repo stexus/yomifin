@@ -41,6 +41,7 @@
     "node_modules",
     "babel.config.js",
     "metro.config.js",
-    "utils/jellyseerr/**/*"
+    "utils/jellyseerr/**/*",
+    "scripts/build-dictionary-db.ts"
   ]
 }

@@ -89,3 +89,8 @@ google-service-account.json
 /JMdict.zip
 *.dic.zip
 assets/dictionaries/
+
+# Built SQLite dictionary databases (large; built offline / on device)
+*.db
+*.db-wal
+*.db-shm
