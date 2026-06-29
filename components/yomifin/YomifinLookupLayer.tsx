@@ -62,8 +62,12 @@ export default function YomifinLookupLayer({
     const dict = dictRef.current;
     if (!dict || busy) return;
     setBusy(true);
+    const t0 = Date.now();
     try {
       const r = await dict.lookup(input);
+      console.log(
+        `[YOMIFIN LOOKUP] "${r.matchedText}" (${r.entries.length} entries) in ${Date.now() - t0}ms`,
+      );
       setResult(r);
       onLookupOpen?.();
     } catch (err) {

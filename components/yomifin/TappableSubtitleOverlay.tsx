@@ -97,11 +97,18 @@ export default function TappableSubtitleOverlay({
         ? anchorPos.value + (t - anchorT.value) * speedSV.value
         : anchorPos.value;
 
-    let idx = -1;
-    for (let i = 0; i < bounds.length; i++) {
-      if (est >= bounds[i][0] && est <= bounds[i][1]) {
-        idx = i;
-        break;
+    // Sticky selection: if the currently-shown cue still contains the estimated
+    // time, keep it. Only search for a new cue when we've actually left it. This
+    // prevents flip-flop flicker when cues overlap in time (common in SRT) and
+    // avoids re-renders from boundary jitter.
+    let idx = activeIdxSV.value;
+    if (idx < 0 || est < bounds[idx][0] || est > bounds[idx][1]) {
+      idx = -1;
+      for (let i = 0; i < bounds.length; i++) {
+        if (est >= bounds[i][0] && est <= bounds[i][1]) {
+          idx = i;
+          break;
+        }
       }
     }
 

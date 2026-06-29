@@ -45,6 +45,14 @@ export interface YomifinDictionaryOptions {
   language?: string;
   /** Names of the dictionaries to search, in priority order. */
   dictionaryNames: string[];
+  /**
+   * Max characters of the input the forward-greedy scan considers. The scan tries
+   * every substring length from the tapped position, so an unbounded line makes a
+   * tap on a particle / mid-word explore a huge space and block the JS thread. A
+   * single word is rarely longer than this, so capping it bounds the work with no
+   * practical loss of matches. Default 16.
+   */
+  maxScanLength?: number;
 }
 
 /** Builds the enabledDictionaryMap the Translator expects from a list of names. */
@@ -70,6 +78,7 @@ export class YomifinDictionary {
   private _language: string;
   private _enabledDictionaryMap: Map<string, unknown>;
   private _mainDictionary: string;
+  private _maxScanLength: number;
 
   constructor(
     db: InMemoryDictionaryDatabase,
@@ -82,6 +91,7 @@ export class YomifinDictionary {
       options.dictionaryNames,
     );
     this._mainDictionary = options.dictionaryNames[0] ?? "";
+    this._maxScanLength = options.maxScanLength ?? 16;
   }
 
   /**
@@ -89,8 +99,13 @@ export class YomifinDictionary {
    * the dictionary + deinflector decide the real word boundary.
    */
   async lookup(text: string): Promise<LookupResult> {
+    // Bound the forward-greedy scan space (see maxScanLength).
+    const scanText =
+      text.length > this._maxScanLength
+        ? text.slice(0, this._maxScanLength)
+        : text;
     const { dictionaryEntries, originalTextLength } =
-      await this._translator.findTerms("simple", text, {
+      await this._translator.findTerms("simple", scanText, {
         matchType: "exact",
         deinflect: true,
         language: this._language,
@@ -108,7 +123,7 @@ export class YomifinDictionary {
 
     return {
       matchedLength: originalTextLength,
-      matchedText: text.slice(0, originalTextLength),
+      matchedText: scanText.slice(0, originalTextLength),
       // biome-ignore lint/suspicious/noExplicitAny: mapping the vendored result shape
       entries: (dictionaryEntries as any[]).map(mapEntry),
     };

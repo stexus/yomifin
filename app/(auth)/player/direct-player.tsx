@@ -55,10 +55,7 @@ import { useSettings } from "@/utils/atoms/settings";
 import { getDefaultPlaySettings } from "@/utils/jellyfin/getDefaultPlaySettings";
 import { getPrimaryImageUrl } from "@/utils/jellyfin/image/getPrimaryImageUrl";
 import { getStreamUrl } from "@/utils/jellyfin/media/getStreamUrl";
-import {
-  getMpvAudioId,
-  getMpvSubtitleId,
-} from "@/utils/jellyfin/subtitleUtils";
+import { getMpvAudioId } from "@/utils/jellyfin/subtitleUtils";
 import { writeToLog } from "@/utils/log";
 import { msToTicks, ticksToSeconds } from "@/utils/time";
 import {
@@ -238,12 +235,13 @@ export default function DirectPlayerPage() {
   //   return item?.UserData?.PlaybackPositionTicks ?? 0;
   // }, [playbackPositionFromUrl, item?.UserData?.PlaybackPositionTicks]);
 
-  // YOMIFIN Phase 1: turn mpv's own subtitle rendering OFF so our tappable
-  // overlay is the only subtitle layer (CONTEXT §7).
+  // YOMIFIN: keep mpv's own subtitle rendering OFF so our tappable overlay is the
+  // only subtitle layer (CONTEXT §7). Re-assert on every track-selection change,
+  // because selecting a track would otherwise re-enable mpv's sid.
   useEffect(() => {
     if (!tracksReady || !videoRef.current) return;
     videoRef.current.disableSubtitles?.();
-  }, [tracksReady]);
+  }, [tracksReady, currentSubtitleIndex]);
 
   useEffect(() => {
     if (!tracksReady || !videoRef.current) return;
@@ -437,7 +435,12 @@ export default function DirectPlayerPage() {
     if (!api?.basePath || !api.accessToken) return;
     if (!item?.Id || !stream?.mediaSource?.Id) return;
 
-    const chosen = pickTextSubtitleStream(stream.mediaSource, subtitleIndex);
+    // Drive the overlay off the LIVE selection (currentSubtitleIndex), so changing
+    // the subtitle in the player menu re-fetches and swaps our overlay track.
+    const chosen = pickTextSubtitleStream(
+      stream.mediaSource,
+      currentSubtitleIndex,
+    );
     if (!chosen || chosen.Index == null) {
       setYomifinCues([]);
       console.log("[YOMIFIN SUB] no text subtitle stream available");
@@ -468,7 +471,7 @@ export default function DirectPlayerPage() {
     return () => {
       cancelled = true;
     };
-  }, [api, item?.Id, stream?.mediaSource, subtitleIndex, offline]);
+  }, [api, item?.Id, stream?.mediaSource, currentSubtitleIndex, offline]);
 
   const togglePlay = async () => {
     lightHapticFeedback();
@@ -681,12 +684,10 @@ export default function DirectPlayerPage() {
       ).map((s) => s.DeliveryUrl!);
     }
 
-    // Calculate track IDs for initial selection
-    const initialSubtitleId = getMpvSubtitleId(
-      mediaSource,
-      subtitleIndex,
-      isTranscoding,
-    );
+    // YOMIFIN: never let mpv render subtitles itself — our tappable overlay is the
+    // only subtitle layer. Switching tracks updates the overlay (currentSubtitleIndex),
+    // not mpv's sid. Force the initial mpv subtitle track to "none".
+    const initialSubtitleId = -1;
     const initialAudioId = getMpvAudioId(
       mediaSource,
       audioIndex,
@@ -950,31 +951,13 @@ export default function DirectPlayerPage() {
   );
 
   // TV subtitle track change handler
-  const handleSubtitleIndexChange = useCallback(
-    async (index: number) => {
-      setCurrentSubtitleIndex(index);
-
-      // Check if we're transcoding
-      const isTranscoding = Boolean(stream?.mediaSource?.TranscodingUrl);
-
-      if (index === -1) {
-        // Disable subtitles
-        await videoRef.current?.disableSubtitles?.();
-      } else {
-        // Convert Jellyfin index to MPV track ID
-        const mpvTrackId = getMpvSubtitleId(
-          stream?.mediaSource,
-          index,
-          isTranscoding,
-        );
-
-        if (mpvTrackId !== undefined && mpvTrackId !== -1) {
-          await videoRef.current?.setSubtitleTrack?.(mpvTrackId);
-        }
-      }
-    },
-    [stream?.mediaSource],
-  );
+  const handleSubtitleIndexChange = useCallback(async (index: number) => {
+    // YOMIFIN: selecting a subtitle drives our tappable overlay (via the
+    // currentSubtitleIndex effect that re-fetches the SRT), NOT mpv. Keep mpv's
+    // own rendering off in all cases so only our overlay shows.
+    setCurrentSubtitleIndex(index);
+    await videoRef.current?.disableSubtitles?.();
+  }, []);
 
   // Technical info toggle handler
   const handleToggleTechnicalInfo = useCallback(() => {

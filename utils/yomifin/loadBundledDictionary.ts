@@ -21,8 +21,30 @@ export interface BundledDictionary {
   loadMs: number;
 }
 
-export async function loadBundledDictionary(
+/**
+ * Process-lifetime cache: the dictionary is huge (~300MB heap, multi-second parse),
+ * so we load + index it ONCE per app session and reuse it across every video open.
+ * Re-parsing per player mount was the "import took a long time, every time" symptom
+ * and a likely source of memory-pressure freezes. Keyed by language.
+ */
+const _cache = new Map<string, Promise<BundledDictionary>>();
+
+export function loadBundledDictionary(
   language = "ja",
+): Promise<BundledDictionary> {
+  let cached = _cache.get(language);
+  if (!cached) {
+    cached = _loadBundledDictionary(language).catch((err) => {
+      _cache.delete(language); // don't cache a failed load — allow retry
+      throw err;
+    });
+    _cache.set(language, cached);
+  }
+  return cached;
+}
+
+async function _loadBundledDictionary(
+  language: string,
 ): Promise<BundledDictionary> {
   const t0 = Date.now();
 
