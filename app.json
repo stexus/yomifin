@@ -49,6 +49,7 @@
       "googleServicesFile": "./google-services.json"
     },
     "plugins": [
+      "expo-sqlite",
       "./plugins/withFreeAccountEntitlements.js",
       [
         "@react-native-tvos/config-tv",

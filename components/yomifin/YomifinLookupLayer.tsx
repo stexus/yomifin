@@ -10,7 +10,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
-import { loadBundledDictionary } from "@/utils/yomifin/loadBundledDictionary";
+import { loadInstalledDictionary } from "@/utils/yomifin/loadInstalledDictionary";
 import type { LookupResult, YomifinDictionary } from "@/utils/yomifin/lookup";
 import DefinitionPopup from "./DefinitionPopup";
 import TappableSubtitleOverlay from "./TappableSubtitleOverlay";
@@ -23,7 +23,7 @@ interface Props {
   onLookupOpen?: () => void;
 }
 
-type DictStatus = "loading" | "ready" | "error";
+type DictStatus = "loading" | "ready" | "none" | "error";
 
 export default function YomifinLookupLayer({ text, onLookupOpen }: Props) {
   const dictRef = useRef<YomifinDictionary | null>(null);
@@ -31,22 +31,22 @@ export default function YomifinLookupLayer({ text, onLookupOpen }: Props) {
   const [result, setResult] = useState<LookupResult | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // Load the dictionary once for the lifetime of the player screen.
+  // Open the installed dictionary db once for the player screen's lifetime. Opening is
+  // instant (no parse); if none is installed yet, the overlay still shows text but taps
+  // do nothing (status "none").
   useEffect(() => {
-    let cancelled = false;
-    loadBundledDictionary("ja")
-      .then(({ dict }) => {
-        if (cancelled) return;
-        dictRef.current = dict;
+    try {
+      const loaded = loadInstalledDictionary();
+      if (loaded) {
+        dictRef.current = loaded.dict;
         setStatus("ready");
-      })
-      .catch((err) => {
-        console.error("[YOMIFIN DICT] load failed:", err);
-        if (!cancelled) setStatus("error");
-      });
-    return () => {
-      cancelled = true;
-    };
+      } else {
+        setStatus("none");
+      }
+    } catch (err) {
+      console.error("[YOMIFIN DICT] open failed:", err);
+      setStatus("error");
+    }
   }, []);
 
   const handleWordTap = async (input: string) => {
@@ -78,6 +78,13 @@ export default function YomifinLookupLayer({ text, onLookupOpen }: Props) {
         <View style={styles.badge} pointerEvents='none'>
           <ActivityIndicator size='small' color='#fff' />
           <Text style={styles.badgeText}>Loading dictionary…</Text>
+        </View>
+      ) : null}
+      {status === "none" ? (
+        <View style={styles.badge} pointerEvents='none'>
+          <Text style={styles.badgeText}>
+            No dictionary installed — add one in Settings
+          </Text>
         </View>
       ) : null}
       {status === "error" ? (
