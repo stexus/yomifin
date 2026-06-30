@@ -62,6 +62,10 @@ import {
 } from "@/utils/jellyfin/subtitleUtils";
 import { writeToLog } from "@/utils/log";
 import { msToTicks, ticksToSeconds } from "@/utils/time";
+import {
+  type CaptureContext,
+  captureCardMedia,
+} from "@/utils/yomifin/ankiMedia";
 
 import { generateDeviceProfile } from "../../../utils/profiles/native";
 
@@ -162,6 +166,12 @@ export default function DirectPlayerPage() {
   // ===== YOMIFIN Phase 1: tappable subtitle overlay =====
   // YOMIFIN: current subtitle text as decoded by mpv (drives the tappable overlay).
   const [yomifinSubtitleText, setYomifinSubtitleText] = useState<string>("");
+  // YOMIFIN Phase 4: live cue time range (for the Anki audio clip). A ref, not state,
+  // so updating it every cue doesn't re-render the player.
+  const yomifinCueRef = useRef<{ start: number; end: number }>({
+    start: 0,
+    end: 0,
+  });
 
   const initialPlaybackTicksRef = useRef<number>(
     playbackPositionFromUrl
@@ -471,9 +481,50 @@ export default function DirectPlayerPage() {
   // YOMIFIN: receive mpv's live decoded subtitle text (text subs only; empty for
   // bitmap/PGS or when no cue is showing). This drives the tappable overlay in perfect
   // sync with playback — no SRT re-fetch, no clock interpolation, no flicker.
-  const onSubtitleText = useCallback((e: { nativeEvent: { text: string } }) => {
-    setYomifinSubtitleText(e.nativeEvent?.text ?? "");
-  }, []);
+  const onSubtitleText = useCallback(
+    (e: { nativeEvent: { text: string; start?: number; end?: number } }) => {
+      setYomifinSubtitleText(e.nativeEvent?.text ?? "");
+      yomifinCueRef.current = {
+        start: e.nativeEvent?.start ?? 0,
+        end: e.nativeEvent?.end ?? 0,
+      };
+    },
+    [],
+  );
+
+  // YOMIFIN Phase 4: the STATIC/original stream URL for capture — a throwaway handle
+  // seeking on this is a plain HTTP range request (never a transcode), regardless of
+  // whether playback itself is direct/transcoded. Empty => native uses the playing URL
+  // (e.g. the local file when offline).
+  const yomifinCaptureSourceUrl = useMemo(() => {
+    if (offline || !api?.basePath || !api.accessToken || !item?.Id) return "";
+    const p = new URLSearchParams({
+      static: "true",
+      mediaSourceId,
+      api_key: api.accessToken,
+    });
+    return `${api.basePath}/Videos/${item.Id}/stream?${p.toString()}`;
+  }, [offline, api?.basePath, api?.accessToken, item?.Id, mediaSourceId]);
+
+  // Cheap: snapshot the cue range + frame position at TAP time (no decode/seek).
+  const yomifinSnapshotCard = useCallback(
+    (): CaptureContext => ({
+      cueStart: yomifinCueRef.current.start,
+      cueEnd: yomifinCueRef.current.end,
+      framePos: progress.get() / 1000,
+    }),
+    [progress],
+  );
+
+  // Expensive: runs ONLY on "+ Anki card" press. Best-effort (partial/empty on failure).
+  const yomifinCaptureMedia = useCallback(
+    async (ctx: CaptureContext, baseName: string) => {
+      const v = videoRef.current;
+      if (!v) return {};
+      return captureCardMedia(v, ctx, baseName, yomifinCaptureSourceUrl);
+    },
+    [yomifinCaptureSourceUrl],
+  );
 
   const togglePlay = async () => {
     lightHapticFeedback();
@@ -1414,7 +1465,11 @@ export default function DirectPlayerPage() {
                 driven by mpv's live subtitle text. Wrapped in an error boundary so a
                 crash in the experimental layer can never take down the player / app. */}
             <YomifinErrorBoundary label='lookup-layer'>
-              <YomifinLookupLayer text={yomifinSubtitleText} />
+              <YomifinLookupLayer
+                text={yomifinSubtitleText}
+                onSnapshotCard={yomifinSnapshotCard}
+                onCaptureMedia={yomifinCaptureMedia}
+              />
             </YomifinErrorBoundary>
           </View>
         </VideoProvider>

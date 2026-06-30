@@ -5,12 +5,27 @@
  *
  * Definitions-only scope (CONTEXT §3.10): no pitch/frequency display.
  */
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useState } from "react";
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { toast } from "sonner-native";
+import { addAnkiCard } from "@/utils/yomifin/anki";
+import type { CapturedMedia } from "@/utils/yomifin/ankiMedia";
 import type { LookupResult } from "@/utils/yomifin/lookup";
 import { StructuredContent } from "./StructuredContent";
 
 interface Props {
   result: LookupResult;
+  /** Subtitle cue frozen at tap time — the Anki card's sentence (Phase 3). */
+  sentence?: string;
+  /** Phase 4: resolves the in-flight media capture (frame + audio) for this card. */
+  getMedia?: () => Promise<CapturedMedia> | undefined;
   onClose: () => void;
   /** Optional: tapping an internal dictionary cross-reference link. */
   onLinkPress?: (href: string) => void;
@@ -18,10 +33,29 @@ interface Props {
 
 export default function DefinitionPopup({
   result,
+  sentence = "",
+  getMedia,
   onClose,
   onLinkPress,
 }: Props) {
   const hasEntries = result.entries.length > 0;
+  const [adding, setAdding] = useState(false);
+  const [added, setAdded] = useState(false);
+
+  const handleAddCard = async () => {
+    if (adding || added) return;
+    setAdding(true);
+    try {
+      const media = getMedia ? await getMedia() : undefined;
+      await addAnkiCard({ result, sentence, media });
+      setAdded(true);
+      toast.success("Card added to Anki");
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to add card");
+    } finally {
+      setAdding(false);
+    }
+  };
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents='box-none'>
       {/* backdrop */}
@@ -80,6 +114,22 @@ export default function DefinitionPopup({
               ))}
             </ScrollView>
           )}
+          {hasEntries ? (
+            <Pressable
+              style={[styles.addBtn, added && styles.addBtnDone]}
+              onPress={handleAddCard}
+              disabled={adding || added}
+              hitSlop={6}
+            >
+              {adding ? (
+                <ActivityIndicator size='small' color='#fff' />
+              ) : (
+                <Text style={styles.addBtnText}>
+                  {added ? "✓ Added" : "+ Anki card"}
+                </Text>
+              )}
+            </Pressable>
+          ) : null}
           <Pressable style={styles.closeBtn} onPress={onClose} hitSlop={8}>
             <Text style={styles.closeBtnText}>✕</Text>
           </Pressable>
@@ -147,4 +197,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   closeBtnText: { color: "#bbb", fontSize: 18, fontWeight: "600" },
+  addBtn: {
+    alignSelf: "flex-start",
+    marginTop: 4,
+    marginBottom: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: "#2d6cdf",
+    minWidth: 110,
+    alignItems: "center",
+  },
+  addBtnDone: { backgroundColor: "#3a7a3a" },
+  addBtnText: { color: "#fff", fontSize: 15, fontWeight: "600" },
 });

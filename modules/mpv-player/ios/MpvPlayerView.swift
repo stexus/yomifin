@@ -384,6 +384,17 @@ class MpvPlayerView: ExpoView {
 	func getCurrentAudioTrack() -> Int {
 		return renderer?.getCurrentAudioTrack() ?? 0
 	}
+
+	// MARK: - YOMIFIN Phase 4 (Anki media capture) — SPIKE
+
+	func captureScreenshot(to path: String, sourceUrl: String, pos: Double) throws -> Bool {
+		guard let renderer = renderer else { return false }
+		return try renderer.captureScreenshot(to: path, sourceUrl: sourceUrl, pos: pos)
+	}
+
+	func extractAudioClip(start: Double, end: Double, audioId: Int, sourceUrl: String, to outputPath: String) -> Bool {
+		return renderer?.extractAudioClip(start: start, end: end, audioId: audioId, sourceUrl: sourceUrl, to: outputPath) ?? false
+	}
 	
 	// MARK: - Subtitle Positioning
 	

@@ -204,6 +204,18 @@ public class MpvPlayerModule: Module {
         return view.getCurrentAudioTrack()
       }
 
+      // YOMIFIN Phase 4 (Anki media capture). On-device, MPVKit ffmpeg + SW render API.
+      // captureScreenshot(view, path, sourceUrl, pos) -> Bool : frame at `pos` (no subs/
+      // OSD) to a JPG path. sourceUrl="" => use the playing URL (local/offline).
+      AsyncFunction("captureScreenshot") { (view: MpvPlayerView, path: String, sourceUrl: String, pos: Double) throws -> Bool in
+        return try view.captureScreenshot(to: path, sourceUrl: sourceUrl, pos: pos)
+      }
+      // extractAudio(view, start, end, audioId, path, sourceUrl) -> Bool : AAC .m4a clip
+      // of [start,end]. audioId<=0 = current track; sourceUrl="" => playing URL.
+      AsyncFunction("extractAudio") { (view: MpvPlayerView, start: Double, end: Double, audioId: Int, path: String, sourceUrl: String) -> Bool in
+        return view.extractAudioClip(start: start, end: end, audioId: audioId, sourceUrl: sourceUrl, to: path)
+      }
+
       // Video scaling functions
       AsyncFunction("setZoomedToFill") { (view: MpvPlayerView, zoomed: Bool) in
         view.setZoomedToFill(zoomed)

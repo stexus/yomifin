@@ -118,6 +118,29 @@ export default React.forwardRef<MpvPlayerViewRef, MpvPlayerViewProps>(
       getCurrentAudioTrack: async () => {
         return await nativeRef.current?.getCurrentAudioTrack();
       },
+      // YOMIFIN Phase 4 (Anki media capture)
+      captureScreenshot: async (
+        path: string,
+        sourceUrl: string,
+        pos: number,
+      ) => {
+        return await nativeRef.current?.captureScreenshot(path, sourceUrl, pos);
+      },
+      extractAudio: async (
+        start: number,
+        end: number,
+        audioId: number,
+        path: string,
+        sourceUrl: string,
+      ) => {
+        return await nativeRef.current?.extractAudio(
+          start,
+          end,
+          audioId,
+          path,
+          sourceUrl,
+        );
+      },
       // Video scaling
       setZoomedToFill: async (zoomed: boolean) => {
         await nativeRef.current?.setZoomedToFill(zoomed);

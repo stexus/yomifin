@@ -951,6 +951,236 @@ final class MPVLayerRenderer {
         return Int(aid)
     }
 
+    // MARK: - YOMIFIN Phase 4 (Anki media capture) — SPIKE
+    //
+    // Two on-device capture seams, using ONLY the ffmpeg already bundled in MPVKit
+    // (no server). Validated capabilities from the MPVKit binary build flags:
+    //   - screenshot-to-file present
+    //   - encoders: aac (+ alac/flac/pcm); muxers: mp4/mov/matroska -> .m4a works
+    // These are the riskiest unknowns of Phase 4; prove them before wiring UI.
+
+    enum ScreenshotError: LocalizedError {
+        case noHandle
+        case createFailed
+        case renderCtxFailed(Int32)
+        case noFrame
+        case badSize(String)
+        case allocFailed
+        case renderFailed(Int32)
+        case cgImageFailed
+        case encodeFailed
+        case writeFailed(String)
+        var errorDescription: String? {
+            switch self {
+            case .noHandle: return "no current source"
+            case .createFailed: return "mpv_create failed"
+            case .renderCtxFailed(let s): return "render ctx create failed (\(s))"
+            case .noFrame: return "no frame became ready (timeout)"
+            case .badSize(let s): return "bad video size (\(s))"
+            case .allocFailed: return "buffer alloc failed"
+            case .renderFailed(let s): return "sw render failed (\(s))"
+            case .cgImageFailed: return "CGImage creation failed"
+            case .encodeFailed: return "JPEG encode failed"
+            case .writeFailed(let s): return "file write failed: \(s)"
+            }
+        }
+    }
+
+    /// Capture the current video frame to `path` (a `.jpg`) WITHOUT subs/OSD.
+    ///
+    /// Why not mpv's `screenshot` command: our custom `vo=avfoundation`
+    /// (AVSampleBufferDisplayLayer) implements no VO-side screenshot, and frames live on
+    /// the GPU — so `screenshot-raw` errors. And `screenshot-to-file` can't help because
+    /// MPVKit's ffmpeg ships no image encoders (png/mjpeg absent).
+    ///
+    /// Instead we spin a throwaway handle with `vo=libmpv` + the **software render API**
+    /// (`MPV_RENDER_API_TYPE_SW`), seek it to the current position, render one frame into
+    /// a CPU buffer (libplacebo/swscale, no GL/Metal), and encode the JPEG with
+    /// iOS-native UIKit. Fully on-device; works for streamed + local sources.
+    func captureScreenshot(to path: String, sourceUrl: String, pos: Double) throws -> Bool {
+        // Prefer the STATIC/original stream URL (range request, never a transcode);
+        // fall back to the currently-playing URL (e.g. local/offline file).
+        let url: URL
+        if !sourceUrl.isEmpty, let u = URL(string: sourceUrl) {
+            url = u
+        } else if let u = currentURL {
+            url = u
+        } else {
+            throw ScreenshotError.noHandle
+        }
+        let capturePos = pos >= 0 ? pos : cachedPosition
+
+        guard let cap = mpv_create() else { throw ScreenshotError.createFailed }
+        defer { mpv_terminate_destroy(cap) }
+
+        mpv_set_option_string(cap, "vo", "libmpv")   // required for the render API
+        mpv_set_option_string(cap, "hwdec", "auto")  // hw-decode the GOP (power), SW download one frame
+        mpv_set_option_string(cap, "audio", "no")
+        mpv_set_option_string(cap, "sid", "no")      // clean frame, no baked-in subs
+        mpv_set_option_string(cap, "osd-level", "0")
+        mpv_set_option_string(cap, "pause", "yes")
+        mpv_set_option_string(cap, "keep-open", "yes")
+        mpv_set_option_string(cap, "hr-seek", "yes")
+        mpv_set_option_string(cap, "start", String(format: "%.3f", max(0, capturePos)))
+        mpv_set_option_string(cap, "msg-level", "all=no")
+        if let headers = currentHeaders, !headers.isEmpty {
+            let headerString = headers.map { "\($0): \($1)" }.joined(separator: "\r\n")
+            mpv_set_option_string(cap, "http-header-fields", headerString)
+        }
+        if mpv_initialize(cap) < 0 { throw ScreenshotError.createFailed }
+
+        // Create the software render context.
+        var rctx: OpaquePointer?
+        let apiType = strdup("sw") // MPV_RENDER_API_TYPE_SW
+        defer { free(apiType) }
+        var createParams = [
+            mpv_render_param(type: MPV_RENDER_PARAM_API_TYPE, data: UnsafeMutableRawPointer(apiType)),
+            mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil),
+        ]
+        let ctxStatus = mpv_render_context_create(&rctx, cap, &createParams)
+        if ctxStatus < 0 || rctx == nil { throw ScreenshotError.renderCtxFailed(ctxStatus) }
+        defer { mpv_render_context_free(rctx) }
+
+        let target = url.isFileURL ? url.path : url.absoluteString
+        _ = commandSync(cap, ["loadfile", target])
+
+        // Pump the core until a frame is ready (or time out). MPV_RENDER_UPDATE_FRAME is
+        // (1 << 0) by fixed ABI; use the literal to avoid C-flag-enum import ambiguity.
+        let frameFlag: UInt64 = 1
+        let deadline = Date().addingTimeInterval(15)
+        var frameReady = false
+        while Date() < deadline {
+            if let evPtr = mpv_wait_event(cap, 0.05) {
+                if evPtr.pointee.event_id == MPV_EVENT_SHUTDOWN { break }
+            }
+            if (mpv_render_context_update(rctx) & frameFlag) != 0 {
+                frameReady = true
+                break
+            }
+        }
+        guard frameReady else { throw ScreenshotError.noFrame }
+
+        var dw: Int64 = 0, dh: Int64 = 0
+        mpv_get_property(cap, "dwidth", MPV_FORMAT_INT64, &dw)
+        mpv_get_property(cap, "dheight", MPV_FORMAT_INT64, &dh)
+        let w = Int(dw), h = Int(dh)
+        guard w > 0, h > 0, w <= 8192, h <= 8192 else {
+            throw ScreenshotError.badSize("\(w)x\(h)")
+        }
+
+        // rgb0 = bytes R,G,B,X. Stride aligned to 64 for the SW renderer.
+        let stride = ((w * 4) + 63) / 64 * 64
+        var bufRaw: UnsafeMutableRawPointer?
+        if posix_memalign(&bufRaw, 64, stride * h) != 0 { throw ScreenshotError.allocFailed }
+        guard let buf = bufRaw else { throw ScreenshotError.allocFailed }
+        defer { free(buf) }
+
+        // These must stay alive for the duration of the render call, so allocate them on
+        // the heap (passing `&local` into the struct init would dangle afterwards).
+        let sizePtr = UnsafeMutablePointer<Int32>.allocate(capacity: 2)
+        sizePtr[0] = Int32(w); sizePtr[1] = Int32(h)
+        defer { sizePtr.deallocate() }
+        let stridePtr = UnsafeMutablePointer<Int>.allocate(capacity: 1) // size_t
+        stridePtr.pointee = stride
+        defer { stridePtr.deallocate() }
+        let fmtC = strdup("rgb0")
+        defer { free(fmtC) }
+        var renderParams = [
+            mpv_render_param(type: MPV_RENDER_PARAM_SW_SIZE, data: UnsafeMutableRawPointer(sizePtr)),
+            mpv_render_param(type: MPV_RENDER_PARAM_SW_FORMAT, data: UnsafeMutableRawPointer(fmtC)),
+            mpv_render_param(type: MPV_RENDER_PARAM_SW_STRIDE, data: UnsafeMutableRawPointer(stridePtr)),
+            mpv_render_param(type: MPV_RENDER_PARAM_SW_POINTER, data: buf),
+            mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil),
+        ]
+        let rr = mpv_render_context_render(rctx, &renderParams)
+        if rr < 0 { throw ScreenshotError.renderFailed(rr) }
+
+        // rgb0 (R,G,B,X) -> CGImage; video is opaque so skip the trailing byte.
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue)
+        let cfData = Data(bytes: buf, count: stride * h) as CFData
+        guard let provider = CGDataProvider(data: cfData),
+              let cg = CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32,
+                               bytesPerRow: stride, space: CGColorSpaceCreateDeviceRGB(),
+                               bitmapInfo: bitmapInfo, provider: provider, decode: nil,
+                               shouldInterpolate: false, intent: .defaultIntent) else {
+            throw ScreenshotError.cgImageFailed
+        }
+        guard let jpeg = UIImage(cgImage: cg).jpegData(compressionQuality: 0.85) else {
+            throw ScreenshotError.encodeFailed
+        }
+        do {
+            try jpeg.write(to: URL(fileURLWithPath: path))
+        } catch {
+            throw ScreenshotError.writeFailed(error.localizedDescription)
+        }
+        Logger.shared.log("captureScreenshot: wrote \(jpeg.count)B (\(w)x\(h)) @\(String(format: "%.2f", capturePos))s", type: "Info")
+        return FileManager.default.fileExists(atPath: path)
+    }
+
+    /// Extract [start, end] of `sourceUrl`'s audio (track `audioId`) to an AAC `.m4a` at
+    /// `outputPath`, using a throwaway libmpv encode-mode handle. `sourceUrl` should be
+    /// the static/original stream (range request, no transcode); "" falls back to the
+    /// currently-playing URL (local/offline file). Blocks until encoding finishes.
+    func extractAudioClip(start: Double, end: Double, audioId: Int, sourceUrl: String, to outputPath: String) -> Bool {
+        let url: URL
+        if !sourceUrl.isEmpty, let u = URL(string: sourceUrl) {
+            url = u
+        } else if let u = currentURL {
+            url = u
+        } else {
+            Logger.shared.log("extractAudioClip: no source URL", type: "Error")
+            return false
+        }
+        guard let enc = mpv_create() else {
+            Logger.shared.log("extractAudioClip: mpv_create failed", type: "Error")
+            return false
+        }
+        defer { mpv_terminate_destroy(enc) }
+
+        // --- options BEFORE initialize ---
+        mpv_set_option_string(enc, "vid", "no")        // audio only (no video decode)
+        mpv_set_option_string(enc, "vo", "null")
+        mpv_set_option_string(enc, "ao", "null")
+        mpv_set_option_string(enc, "aid", audioId > 0 ? String(audioId) : "auto")
+        mpv_set_option_string(enc, "start", String(format: "%.3f", max(0, start)))
+        mpv_set_option_string(enc, "end", String(format: "%.3f", end))
+        // Encode mode: setting `o` switches mpv into headless encode; it quits at EOF.
+        mpv_set_option_string(enc, "o", outputPath)
+        mpv_set_option_string(enc, "of", "mp4")        // container for .m4a
+        mpv_set_option_string(enc, "oac", "aac")       // only AAC is built in MPVKit
+        mpv_set_option_string(enc, "oacopts", "b=128k")
+        mpv_set_option_string(enc, "msg-level", "all=warn")
+        // Carry the same HTTP headers (Jellyfin auth) for streamed sources.
+        if let headers = currentHeaders, !headers.isEmpty {
+            let headerString = headers.map { "\($0): \($1)" }.joined(separator: "\r\n")
+            mpv_set_option_string(enc, "http-header-fields", headerString)
+        }
+
+        if mpv_initialize(enc) < 0 {
+            Logger.shared.log("extractAudioClip: mpv_initialize failed", type: "Error")
+            return false
+        }
+
+        let target = url.isFileURL ? url.path : url.absoluteString
+        if commandSync(enc, ["loadfile", target]) < 0 {
+            Logger.shared.log("extractAudioClip: loadfile failed", type: "Error")
+            return false
+        }
+
+        // Pump the encode handle's event loop until it finishes (END_FILE) or shuts
+        // down. Cap with a wall-clock timeout so a stuck stream can't hang forever.
+        let deadline = Date().addingTimeInterval(30)
+        while Date() < deadline {
+            guard let evPtr = mpv_wait_event(enc, 0.5) else { break }
+            let ev = evPtr.pointee
+            if ev.event_id == MPV_EVENT_END_FILE || ev.event_id == MPV_EVENT_SHUTDOWN {
+                break
+            }
+        }
+
+        return FileManager.default.fileExists(atPath: outputPath)
+    }
+
     // MARK: - HDR Detection
 
     /// Detects the HDR mode of the currently playing video by reading mpv properties
