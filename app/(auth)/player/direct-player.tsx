@@ -427,11 +427,28 @@ export default function DirectPlayerPage() {
   // VobSub) we keep native rendering on and our overlay stays empty (sub-text is empty).
   useEffect(() => {
     if (!tracksReady || !videoRef.current) return;
-    const sub = stream?.mediaSource?.MediaStreams?.find(
+    const mediaSource = stream?.mediaSource;
+    const sub = mediaSource?.MediaStreams?.find(
       (s) => s.Type === "Subtitle" && s.Index === currentSubtitleIndex,
     );
     const isTextSub =
       currentSubtitleIndex !== -1 && sub?.IsTextSubtitleStream === true;
+
+    // Assert the selected track once tracks are ready. mpv's auto-selection at load can
+    // differ from the menu (it picks by default/language flags before our sid applies),
+    // so re-select explicitly here — this automates the manual "reselect" workaround.
+    const isTranscoding = Boolean(mediaSource?.TranscodingUrl);
+    const mpvId = getMpvSubtitleId(
+      mediaSource,
+      currentSubtitleIndex,
+      isTranscoding,
+    );
+    if (currentSubtitleIndex === -1) {
+      videoRef.current.disableSubtitles?.();
+    } else if (mpvId !== undefined && mpvId >= 0) {
+      videoRef.current.setSubtitleTrack?.(mpvId);
+    }
+
     // Hide native rendering only for the text subs we overlay ourselves.
     videoRef.current.setSubtitleVisibility?.(!isTextSub);
   }, [tracksReady, currentSubtitleIndex, stream?.mediaSource]);
