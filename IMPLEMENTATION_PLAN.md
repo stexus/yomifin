@@ -11,6 +11,63 @@ AnkiConnect. Audio/image, ASS, profiles, storage-at-scale are explicitly v2.
 
 ---
 
+## STATUS & HANDOFF (updated 2026-06-28) — READ THIS FIRST
+
+Where we actually are, and two **architecture pivots** that supersede parts of the
+phase text below. (The original phase descriptions are kept for history; where they
+conflict with this section, **this section wins**.)
+
+### Done & on-device validated
+- **Phase –1 / 0 / 1 / 2** complete. Real Yomitan lookup works on the iPad: tap a
+  conjugated word → deinflect → dictionary entry → structured-content popup.
+- **On-device dictionary import** (Settings → Dictionaries): import a Yomitan `.zip`
+  (chunked, progress bar, ~2 min once) or a prebuilt `.db` (seconds). Validated.
+
+### Done, pending ONE native rebuild to validate
+These are committed but only exercise after `expo run:ios` (they touch native /
+new deps). Rebuild cmd: `nix develop --command bash -c 'EXPO_TV=0 bunx expo run:ios
+--device 00008027-000641082130402E'`.
+- **Pivot B (mpv-driven subtitles)** — see below.
+- **expo-sqlite storage** + the **initial-subtitle-track fix**.
+- **Smoke test after rebuild:** (1) subtitle starts on the *correct* track, (2)
+  switching is instant, (3) PGS renders natively (overlay empty), (4) import a dict
+  and confirm it survives an incremental rebuild.
+
+### PIVOT A — dictionary storage: in-memory → SQLite (supersedes "in-memory MVP" + Phase 6 storage)
+In-memory load was dead on device (~5 min synchronous parse, ~300MB heap, froze the
+JS thread → UI/navigation crashes). Now: an **offline builder**
+(`scripts/build-dictionary-db.ts`) and an identical **on-device importer** turn a
+Yomitan `.zip` into a single indexed SQLite `.db`; lookups are one indexed query
+(sub-ms). Storage sits behind the `SqlRunner`/`SqliteDictionaryDatabase` interface;
+shared `importDictionary.ts` guarantees offline and device imports match. The combined
+`yomifin-dictionaries.db` lives in the app Documents container, so it **persists
+across normal rebuilds**; only a clean uninstall wipes it (re-add via prebuilt `.db`
+in seconds, or Finder file-sharing).
+
+### PIVOT B — subtitles: app-rendered SRT → mpv-driven (supersedes CONTEXT §7 and Phase 1/2 subtitle text)
+Fetching a separate Jellyfin SRT + interpolating a clock at 60fps caused flicker, slow
+switching, and couldn't show PGS. Now **mpv owns subtitle loading/selection/timing**.
+Native emits `onSubtitleText {text, start, end}` (mpv `sub-text`); for TEXT subs we
+`setSubtitleVisibility(false)` and render our tappable overlay from that text (perfect
+sync, no flicker); BITMAP subs (PGS/VobSub) render natively and the overlay stays
+empty. `getMpvSubtitleId` (Streamyfin's existing Jellyfin→mpv mapping) selects tracks.
+
+### Safety / infra added
+- **`YomifinErrorBoundary`** wraps the lookup layer + popup so a render crash in the
+  experimental layer can never take down the app root (was causing full-UI freezes).
+- **Regression guards:** `./scripts/yomifin-test.sh` (5 suites: deinflector, lookup
+  integration, structured-content, sqlite parity, importer idempotency+parity). Run
+  after any language-layer change. All green.
+
+### Commit trail (branch `yomifin`)
+`Phase 2 lookup` → `device fixes` → `error boundary` → `SQLite backend` → `Pivot B
+mpv subs` → `shared importer` → `single-file db` → `on-device import + Dictionaries
+UI` → `initial-track fix` (HEAD). `git log --oneline` for hashes.
+
+### Next: Phase 3 (Anki) — see augmented notes in that section below.
+
+---
+
 ## Phase –1 — Environment (prerequisite, do once)
 
 **Goal:** be able to build and run *unmodified* Streamyfin on the iPad.
@@ -133,9 +190,16 @@ repoint storage to **SQLite or in-memory**.
 its dictionary entry and shows a correctly rendered definition popup. (Chinese
 longest-match can be validated next, but JA-with-deinflection is the gate.)
 
+**DONE ✅** — plus two pivots that changed *how* this works vs the text above:
+storage is **SQLite** (not in-memory; see STATUS → Pivot A) and subtitle text is
+**mpv-driven** (not app-fetched SRT; see STATUS → Pivot B). Code lives in
+`utils/yomifin/` (deinflect, termMatching, Sqlite/InMemory DBs, importer, lookup,
+structuredContent) and `components/yomifin/` (overlay, popup, StructuredContent,
+error boundary, lookup layer).
+
 ---
 
-## Phase 3 — One Anki card (sentence only)
+## Phase 3 — One Anki card (sentence only)  ← NEXT
 
 **Goal:** close the loop end to end.
 
@@ -148,6 +212,40 @@ longest-match can be validated next, but JA-with-deinflection is the gate.)
 
 **Exit criteria:** tapping a word and pressing "make card" lands a sentence card in
 Anki on the server. **This completes the MVP.**
+
+### Implementation notes (current insight after Pivots A/B)
+
+- **Where the sentence comes from (changed by Pivot B):** the current sentence is the
+  live mpv subtitle text — already in `direct-player`'s `yomifinSubtitleText` state and
+  passed to `YomifinLookupLayer` as the `text` prop. **Capture it at tap time** (in
+  `handleWordTap`) so it's frozen even if playback continues, and thread it into
+  `DefinitionPopup` (which currently only gets the `LookupResult`). The tapped line is
+  also available in `TappableSubtitleOverlay.handleTokenPress` (`line`).
+- **Where the word/reading/definition come from:** the `LookupResult` already has
+  `entries[0].term` (lemma), `.reading`, `.definitions`, and `.matchedText` (surface).
+  Decide field mapping: e.g. Expression=lemma, Reading=reading, Sentence=captured
+  subtitle, optionally a plain-text gloss. (Glossary is structured content — for the
+  Anki field, flatten to text or send minimal HTML; don't ship the RN tree.)
+- **No CORS in React Native.** AnkiConnect's CORS allow-list is a *browser* concern;
+  native `fetch` from RN bypasses it. The user must still set AnkiConnect
+  `webBindAddress` to `0.0.0.0` (or LAN IP) so it's reachable off-localhost. POST:
+  `fetch('http://<server>:8765', {method:'POST', body: JSON.stringify({action:'addNote',
+  version:6, params:{note:{deckName, modelName, fields:{...}, tags:['yomifin'],
+  options:{allowDuplicate:false}}}})})`. Response is `{result, error}` — surface
+  `error` to the user (e.g. duplicate, missing deck/model).
+- **Config:** add a minimal **Anki settings screen** (mirror the Dictionaries screen
+  pattern: `settings/anki/page.tsx` + route + ListItem) holding server URL, deck,
+  model, and field names. Persist with the app's settings store. Runtime-configurable
+  field mapping is the Phase 5 goal but a basic version here avoids recompiles.
+- **Error isolation:** the "make card" action is async + network — wrap in try/catch,
+  show a success/failure toast; the popup is already inside `YomifinErrorBoundary`.
+- **Phase 4 readiness (don't build yet, but preserve the data):** the
+  `onSubtitleText` event already carries `{start, end}` (the cue's time range) — these
+  are exactly the clip boundaries the server-side ffmpeg step will need. `direct-player`
+  has the Jellyfin `item` + current `progress`. Consider capturing `{itemId, start,
+  end}` alongside the sentence at card time so Phase 4 (audio/image) is a drop-in.
+- **Duplicate handling:** `allowDuplicate:false` + show AnkiConnect's duplicate error
+  is the MVP; `canAddNotes` pre-check and dedupe UX are later polish.
 
 ---
 
@@ -171,10 +269,13 @@ Anki on the server. **This completes the MVP.**
 
 ## Phase 6 — Chinese parity + dictionary storage at scale
 
-- Validate Chinese longest-match lookup against the user's existing ZH Yomitan
-  dictionaries.
-- Move dictionary storage from in-memory to **SQLite** to handle multiple large
-  dictionaries without blowing memory.
+- **Storage → SQLite: DONE ✅ (brought forward; see STATUS → Pivot A).** Multiple
+  dictionaries already live in one indexed `.db`; the importer is idempotent per
+  dictionary, so adding the user's ~10 dicts is just repeated imports.
+- **Remaining:** validate **Chinese** longest-match lookup against the user's ZH
+  Yomitan dictionaries (the JA-with-deinflection path is proven; ZH needs a real
+  ZH dictionary imported + a tap test). The language layer already includes ZH in
+  `language-descriptors.js`; expect mostly verification, not new code.
 
 ## Phase 7 — ASS subtitles
 

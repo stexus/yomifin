@@ -305,6 +305,20 @@ These are the concrete learnings (kept here so upstream `CLAUDE.md` stays clean)
 > Tap anchors are per-grapheme (no Intl.Segmenter in this Hermes). Next: Phase 2
 > (harvest Yomitan core for real lookup) — starts with an investigation task.
 
+> **Phases 2 + storage + subtitles (2026-06-28).** Phase 2 (real Yomitan lookup) is
+> DONE on device. Since then, **two architecture pivots supersede parts of this
+> document** — the authoritative status is **`IMPLEMENTATION_PLAN.md` → STATUS &
+> HANDOFF**:
+>  - **Pivot A (storage):** dictionaries are now **SQLite** (`.db`), built offline or
+>    imported on-device via **Settings → Dictionaries** (`.zip` chunked import, or a
+>    prebuilt `.db` copy). Supersedes §2/§7's "in-memory MVP" and §7.5's "SQLite is v2".
+>  - **Pivot B (subtitles):** **mpv now owns subtitle loading/selection/timing**; the
+>    tappable overlay renders mpv's live `sub-text` (native `onSubtitleText` event), and
+>    bitmap/PGS subs render natively. **This reverses §7 / the "Overlay lookup" note**
+>    ("mpv subs OFF, app renders from data") — mpv subs are ON but native-rendering is
+>    hidden for text tracks.
+> Regression guards: `./scripts/yomifin-test.sh`. Next phase: **Phase 3 (Anki)**.
+
 > REMOTE FLOW VERIFIED: the CONTEXT §1a loop works — Linux desktop → SSH →
 > headless Mac (`massimo@10.0.0.99`, `Louiss-Mac-mini.local`) → WiFi → iPad.
 > Build + deploy via `./scripts/remote-build.sh` (unlocks keychain, then builds
