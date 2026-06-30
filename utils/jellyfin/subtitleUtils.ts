@@ -68,23 +68,35 @@ export const getMpvSubtitleId = (
 
   // Find the subtitle with the matching Jellyfin index
   const targetSub = allSubs.find((s) => s.Index === jellyfinSubtitleIndex);
+  if (!targetSub) return undefined;
 
-  // If the target subtitle isn't in MPV (e.g., image-based during transcode), return undefined
-  if (!targetSub || !isSubtitleInMpv(targetSub, isTranscoding)) {
-    return undefined;
+  // MPV enumerates tracks as [ALL embedded, THEN all external]. A naive single
+  // sequential count over Jellyfin's stream order is WRONG whenever embedded/external
+  // subs interleave in that order (it can resolve to the wrong track, e.g. English
+  // instead of the selected Japanese). Mirror VideoContext's proven mapping exactly:
+  // embedded position within embedded, external offset by the embedded-in-player count.
+  const embedded = allSubs.filter(
+    (s) => s.DeliveryMethod === SubtitleDeliveryMethod.Embed,
+  );
+  const external = allSubs.filter(
+    (s) => s.DeliveryMethod === SubtitleDeliveryMethod.External,
+  );
+  // During transcoding, image-based embedded subs are burned in (not in MPV).
+  const embeddedInPlayer = embedded.filter(
+    (s) => !isTranscoding || !isImageBasedSubtitle(s),
+  );
+
+  if (targetSub.DeliveryMethod === SubtitleDeliveryMethod.Embed) {
+    const pos = embeddedInPlayer.findIndex(
+      (s) => s.Index === jellyfinSubtitleIndex,
+    );
+    return pos >= 0 ? pos + 1 : undefined;
   }
-
-  // Count MPV track position (1-based)
-  let mpvIndex = 0;
-  for (const sub of allSubs) {
-    if (isSubtitleInMpv(sub, isTranscoding)) {
-      mpvIndex++;
-      if (sub.Index === jellyfinSubtitleIndex) {
-        return mpvIndex;
-      }
-    }
+  if (targetSub.DeliveryMethod === SubtitleDeliveryMethod.External) {
+    const pos = external.findIndex((s) => s.Index === jellyfinSubtitleIndex);
+    return pos >= 0 ? embeddedInPlayer.length + pos + 1 : undefined;
   }
-
+  // Hls / other delivery: not directly selectable by id here.
   return undefined;
 };
 

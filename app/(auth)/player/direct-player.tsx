@@ -451,6 +451,21 @@ export default function DirectPlayerPage() {
 
     // Hide native rendering only for the text subs we overlay ourselves.
     videoRef.current.setSubtitleVisibility?.(!isTextSub);
+
+    // Diagnostic: compare our computed mpv id to mpv's ACTUAL track list, so any
+    // residual Jellyfin→mpv mapping mismatch is visible in device logs.
+    videoRef.current
+      .getSubtitleTracks?.()
+      .then((tracks) => {
+        console.log(
+          `[YOMIFIN SUB] select jellyfinIdx=${currentSubtitleIndex} (lang=${sub?.Language ?? "?"}, "${sub?.DisplayTitle ?? "?"}", text=${isTextSub}) → mpvId=${mpvId}; mpv tracks=`,
+          tracks?.map(
+            (t) =>
+              `#${t.id} ${t.lang ?? "?"} "${t.title ?? ""}" ${t.selected ? "*SEL" : ""} ${t.codec ?? ""}`,
+          ),
+        );
+      })
+      .catch(() => {});
   }, [tracksReady, currentSubtitleIndex, stream?.mediaSource]);
 
   // YOMIFIN: receive mpv's live decoded subtitle text (text subs only; empty for
