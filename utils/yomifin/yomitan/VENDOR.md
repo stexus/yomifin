@@ -49,6 +49,12 @@ to `./`. That is the ONLY change to the copied files unless noted.
 Also ours, one level up in `utils/yomifin/`: `InMemoryDictionaryDatabase.ts` (storage
 swap) and `lookup.test.ts` (Translator+DB integration test, run `bun utils/yomifin/lookup.test.ts`).
 
+**Matching fidelity vs. Yomitan** — for the audit of *why our lookup can't silently miss a
+word Yomitan would find* (which DB seams the Translator calls, which we stub and why that's
+safe, and the known config-level divergences like `maxScanLength` and ZH having no text
+preprocessors), see `../LOOKUP_FIDELITY.md`. Re-run that audit's `rg` check if you
+re-vendor and the Translator's `this._database.*` call set changes.
+
 ## Re-vendor procedure
 
 1. `cd yomitan && git pull` (the upstream clone is gitignored at repo root).
