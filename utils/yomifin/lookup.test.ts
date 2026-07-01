@@ -42,6 +42,22 @@ const termBank: V3[] = [
   ["飲む", "のむ", "v5 vt", "v5", 0, ["to drink"], 8, ""],
   // a reading-only match target + a decoy noun the boundary test must NOT swallow:
   ["本", "ほん", "n", "", 0, ["book"], 9, ""],
+  // --- Phase 6 lookup-fidelity fixtures ---------------------------------------
+  // あっさり: own adverb entry (must headline) AND, via emphatic collapse (っ removed)
+  // → あさり → deinflect → 漁る. Proves textPreprocessors are wired.
+  ["あっさり", "あっさり", "adv", "", 0, ["easily; readily; simply"], 10, ""],
+  ["漁る", "あさる", "v5 vt", "v5", 0, ["to fish for; to forage"], 11, ""],
+  // 計画通り prefix ladder → cycleable panes 計画通り → 計画 → 計.
+  ["計画通り", "けいかくどおり", "n", "", 0, ["as planned"], 12, ""],
+  ["計画", "けいかく", "n", "", 0, ["plan; project"], 13, ""],
+  ["計", "けい", "n", "", 0, ["plan; total"], 14, ""],
+  // Reading-match fixture: the written form is イケ面 but the READING is イケメン.
+  // Looking up the katakana イケメン must still find this entry (Yomitan indexes by
+  // BOTH expression and reading). Proves reading matches surface, not just kanji.
+  ["イケ面", "イケメン", "n", "", 0, ["a good-looking guy"], 15, ""],
+  // Kana-normalization fixture: reading stored in HIRAGANA (そら). A KATAKANA query
+  // ソラ must still find it via the JA text preprocessor (katakana→hiragana variant).
+  ["空", "そら", "n", "", 0, ["sky; the heavens"], 16, ""],
 ];
 const zip = zipSync({
   "index.json": strToU8(
@@ -81,6 +97,14 @@ const cases: [string, string, string, boolean][] = [
   ["飲ませてくれなかった", "飲む", "飲ませて", true],
   // plain exact word, boundary stops before continuation particle を
   ["本を読んだ", "本", "本", false],
+  // Phase 6: あっさり is its own entry and must be the FIRST pane (not bare あ/あっ).
+  ["あっさり", "あっさり", "あっさり", false],
+  // Phase 6: forward-greedy picks the longest prefix 計画通り as the first pane.
+  ["計画通り", "計画通り", "計画通り", false],
+  // Reading match: katakana query イケメン resolves the イケ面 entry via its reading.
+  ["イケメンだね", "イケ面", "イケメン", false],
+  // Kana normalization: katakana query ソラ resolves 空 (reading stored as hiragana そら).
+  ["ソラを見て", "空", "ソラ", false],
 ];
 
 let pass = 0;
@@ -133,5 +157,91 @@ for (const [
   }
 }
 
-console.log(`\n${pass}/${cases.length + 1} passed, ${fail} failed`);
+// --- Phase 6: pane content (entries beyond entries[0]) -----------------------
+// Each of these checks the FULL headword list a lookup surfaces (≈ popup panes):
+// the first pane must be `first`, and every lemma in `includes` must appear.
+// [input, expected first pane, lemmas that MUST appear]
+// Panes mirror Yomitan (ja = letter resolution, group mode, no length filter):
+// EVERY prefix length that matches is returned, sorted longest-surface-first. So the
+// first pane is the longest headword, and shorter prefixes are present but DEMOTED
+// (never headlined) — identical to Yomitan's own ordering.
+const paneCases: [string, string, string[]][] = [
+  // あっさり headlines; emphatic collapse also surfaces 漁る (via あさり). Bare あ / あっ
+  // exist but must NOT be first (they sort last, exactly as Yomitan demotes them).
+  ["あっさり", "あっさり", ["あっさり", "漁る"]],
+  // 計画通り → cycleable panes 計画通り → 計画 → 計, longest first.
+  ["計画通り", "計画通り", ["計画通り", "計画", "計"]],
+];
+
+for (const [input, first, includes] of paneCases) {
+  const res = await dict.lookup(input);
+  const lemmas = res.entries.map((e) => e.term);
+  const firstOk = lemmas[0] === first;
+  const missing = includes.filter((t) => !lemmas.includes(t));
+  const ok = firstOk && missing.length === 0;
+  if (ok) {
+    pass++;
+    console.log(`  PASS  panes ${input}  →  [${lemmas.join(", ")}]`);
+  } else {
+    fail++;
+    console.log(
+      `  FAIL  panes ${input}  →  [${lemmas.join(", ")}] firstOk=${firstOk} missing=[${missing.join(", ")}]`,
+    );
+  }
+}
+
+// --- Phase 7: multi-dictionary priority + enable/disable ---------------------
+// Two dictionaries define the SAME headword. The order of `dictionaryNames` must
+// set the order of the definition blocks (the vendored Translator sorts definition
+// groups by the dictionary's index in the enabledDictionaryMap), and omitting a
+// dictionary from the list must exclude its block entirely.
+function makeDict(title: string, gloss: string) {
+  return zipSync({
+    "index.json": strToU8(
+      JSON.stringify({
+        title,
+        format: 3,
+        revision: "synth-1",
+        sequenced: true,
+      }),
+    ),
+    "term_bank_1.json": strToU8(
+      JSON.stringify([["猫", "ねこ", "n", "", 0, [gloss], 1, ""]]),
+    ),
+  });
+}
+const multiDb = new InMemoryDictionaryDatabase();
+loadDictionaryFromZip(makeDict("DictX", "cat (X)"), multiDb);
+loadDictionaryFromZip(makeDict("DictY", "cat (Y)"), multiDb);
+
+async function dictOrder(names: string[]): Promise<string[]> {
+  const d = new YomifinDictionary(multiDb, { dictionaryNames: names });
+  const res = await d.lookup("猫");
+  return (res.entries[0]?.definitions ?? []).map((g) => g.dictionary);
+}
+
+function checkP7(name: string, cond: boolean, got: string) {
+  if (cond) {
+    pass++;
+    console.log(`  PASS  ${name}  →  [${got}]`);
+  } else {
+    fail++;
+    console.log(`  FAIL  ${name}  →  [${got}]`);
+  }
+}
+{
+  const xy = await dictOrder(["DictX", "DictY"]);
+  checkP7("priority X,Y", xy.join(",") === "DictX,DictY", xy.join(", "));
+  const yx = await dictOrder(["DictY", "DictX"]);
+  checkP7("priority Y,X", yx.join(",") === "DictY,DictX", yx.join(", "));
+  const onlyX = await dictOrder(["DictX"]);
+  checkP7(
+    "disabled Y excluded",
+    onlyX.length === 1 && onlyX[0] === "DictX",
+    onlyX.join(", "),
+  );
+}
+
+const total = cases.length + paneCases.length + 1 + 3;
+console.log(`\n${pass}/${total} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

@@ -43,6 +43,8 @@ interface RenderCtx {
   onLinkPress?: (href: string) => void;
   /** Base text color so inline runs inherit it. */
   color: string;
+  /** Link color (theme-driven). */
+  linkColor: string;
 }
 
 /** Render content valid INSIDE a <Text> (strings + inline nodes). */
@@ -73,7 +75,7 @@ function renderInline(
     return (
       <Text
         key={key}
-        style={[styles.link, style]}
+        style={[styles.link, { color: ctx.linkColor }, style]}
         onPress={ctx.onLinkPress ? () => ctx.onLinkPress?.(href) : undefined}
       >
         {children}
@@ -230,6 +232,8 @@ export interface StructuredContentProps {
   /** A glossary item: string, structured-content tree, or Yomitan wrapper object. */
   content: unknown;
   color?: string;
+  /** Link color (defaults to the classic blue). */
+  linkColor?: string;
   onLinkPress?: (href: string) => void;
 }
 
@@ -237,9 +241,10 @@ export interface StructuredContentProps {
 export function StructuredContent({
   content,
   color = "#e5e5e5",
+  linkColor = "#6cb6ff",
   onLinkPress,
 }: StructuredContentProps) {
-  const ctx: RenderCtx = { onLinkPress, color };
+  const ctx: RenderCtx = { onLinkPress, color, linkColor };
   const tree = normalizeGlossary(content);
   if (tree === null || tree === undefined) return null;
   if (typeof tree === "string") return <Text style={{ color }}>{tree}</Text>;

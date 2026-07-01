@@ -7,6 +7,7 @@
  * open handle is cached for the player screen's lifetime.
  */
 
+import type * as SQLite from "expo-sqlite";
 import { dictionaryDbExists, openDictionaryDb } from "./dictionaryStore";
 import { ensureSchema, makeSqlRunner } from "./expoSqlite";
 import { YomifinDictionary } from "./lookup";
@@ -17,27 +18,56 @@ export interface LoadedDictionary {
   titles: string[];
 }
 
-let cached: LoadedDictionary | null = null;
+/** Cached dict + the open handle backing it, so we can close it on reconfigure/reset. */
+let cached: (LoadedDictionary & { db: SQLite.SQLiteDatabase }) | null = null;
 
 /**
  * Returns the installed dictionary, or null if none has been imported yet (the UI then
  * prompts the user to add one). Cached after first successful open.
+ *
+ * `orderedEnabledTitles` (Phase 7): the enabled dictionaries IN PRIORITY ORDER, from
+ * the user's dictionary config. When given, only those titles are searched and their
+ * order sets the definition-block priority (the vendored Translator sorts by the
+ * dictionary's index in this list). When omitted (or empty), falls back to ALL installed
+ * dictionaries alphabetically. The cache invalidates if the requested list changes.
  */
-export function loadInstalledDictionary(): LoadedDictionary | null {
-  if (cached) return cached;
+export function loadInstalledDictionary(
+  orderedEnabledTitles?: string[],
+): LoadedDictionary | null {
   if (!dictionaryDbExists()) return null;
 
   const db = openDictionaryDb();
   ensureSchema(db);
-  const titles = db
+  const installed = db
     .getAllSync<{ title: string }>(
       "SELECT title FROM dictionaries ORDER BY title",
     )
     .map((r) => r.title);
+  if (installed.length === 0) {
+    db.closeSync();
+    return null;
+  }
+
+  // Restrict to the requested (installed ∩ enabled) titles in the requested order;
+  // fall back to all-installed-alphabetical when no preference was supplied.
+  const installedSet = new Set(installed);
+  const titles =
+    orderedEnabledTitles && orderedEnabledTitles.length > 0
+      ? orderedEnabledTitles.filter((t) => installedSet.has(t))
+      : installed;
   if (titles.length === 0) {
     db.closeSync();
     return null;
   }
+
+  if (cached && sameTitles(cached.titles, titles)) {
+    db.closeSync();
+    return cached;
+  }
+
+  // Config changed → the previous cached dict's handle is now stale; close it before
+  // replacing so we don't leak an open SQLite handle per reconfigure.
+  cached?.db.closeSync();
 
   const dict = new YomifinDictionary(
     new SqliteDictionaryDatabase(makeSqlRunner(db)),
@@ -45,11 +75,18 @@ export function loadInstalledDictionary(): LoadedDictionary | null {
       dictionaryNames: titles,
     },
   );
-  cached = { dict, titles };
+  cached = { dict, titles, db };
   return cached;
+}
+
+function sameTitles(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
 
 /** Drop the cached handle (e.g. after importing/removing a dictionary). */
 export function resetInstalledDictionaryCache(): void {
+  cached?.db.closeSync();
   cached = null;
 }

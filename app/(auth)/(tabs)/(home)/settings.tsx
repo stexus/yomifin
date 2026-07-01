@@ -95,6 +95,11 @@ function SettingsMobile() {
               title='Dictionaries'
             />
             <ListItem
+              onPress={() => router.push("/settings/reader/page")}
+              showArrow
+              title='Reader'
+            />
+            <ListItem
               onPress={() => router.push("/settings/music/page")}
               showArrow
               title={t("home.settings.music.title")}

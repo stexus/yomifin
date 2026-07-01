@@ -24,6 +24,10 @@ interface CenterControlsProps {
   hasNextChapter?: boolean;
   goToPreviousChapter?: () => void;
   goToNextChapter?: () => void;
+  // Phase 5: prev/next SUBTITLE cue navigation.
+  showSubtitleNav?: boolean;
+  onPrevSubtitle?: () => void;
+  onNextSubtitle?: () => void;
 }
 
 export const CenterControls: FC<CenterControlsProps> = ({
@@ -40,6 +44,9 @@ export const CenterControls: FC<CenterControlsProps> = ({
   hasNextChapter = false,
   goToPreviousChapter,
   goToNextChapter,
+  showSubtitleNav = false,
+  onPrevSubtitle,
+  onNextSubtitle,
 }) => {
   const { settings } = useSettings();
   const insets = useControlsSafeAreaInsets();
@@ -55,7 +62,8 @@ export const CenterControls: FC<CenterControlsProps> = ({
         justifyContent: "space-between",
         alignItems: "center",
         transform: [{ translateY: -22.5 }],
-        paddingHorizontal: hasChapters ? "18%" : "28%",
+        paddingHorizontal:
+          hasChapters || (showSubtitleNav && !Platform.isTV) ? "18%" : "28%",
       }}
       pointerEvents={showControls ? "box-none" : "none"}
     >
@@ -119,6 +127,27 @@ export const CenterControls: FC<CenterControlsProps> = ({
         </TouchableOpacity>
       )}
 
+      {!Platform.isTV && showSubtitleNav && (
+        <TouchableOpacity
+          onPress={onPrevSubtitle}
+          hitSlop={8}
+          accessibilityLabel='Previous subtitle'
+        >
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <Ionicons
+              name='caret-back'
+              size={ICON_SIZES.CENTER - 16}
+              color='white'
+            />
+            <Ionicons
+              name='chatbox-ellipses-outline'
+              size={ICON_SIZES.CENTER - 18}
+              color='white'
+            />
+          </View>
+        </TouchableOpacity>
+      )}
+
       <View style={Platform.isTV ? { flex: 1, alignItems: "center" } : {}}>
         <TouchableOpacity onPress={togglePlay}>
           {!isBuffering ? (
@@ -144,6 +173,27 @@ export const CenterControls: FC<CenterControlsProps> = ({
             size={ICON_SIZES.CENTER - 10}
             color='white'
           />
+        </TouchableOpacity>
+      )}
+
+      {!Platform.isTV && showSubtitleNav && (
+        <TouchableOpacity
+          onPress={onNextSubtitle}
+          hitSlop={8}
+          accessibilityLabel='Next subtitle'
+        >
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <Ionicons
+              name='chatbox-ellipses-outline'
+              size={ICON_SIZES.CENTER - 18}
+              color='white'
+            />
+            <Ionicons
+              name='caret-forward'
+              size={ICON_SIZES.CENTER - 16}
+              color='white'
+            />
+          </View>
         </TouchableOpacity>
       )}
 

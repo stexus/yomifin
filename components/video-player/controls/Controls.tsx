@@ -73,6 +73,10 @@ interface Props {
   getTechnicalInfo?: () => Promise<TechnicalInfo>;
   playMethod?: "DirectPlay" | "DirectStream" | "Transcode";
   transcodeReasons?: string[];
+  // Phase 5: prev/next SUBTITLE cue navigation (shown next to the time-skip buttons).
+  showSubtitleNav?: boolean;
+  onPrevSubtitle?: () => void;
+  onNextSubtitle?: () => void;
 }
 
 export const Controls: FC<Props> = ({
@@ -102,6 +106,9 @@ export const Controls: FC<Props> = ({
   getTechnicalInfo,
   playMethod,
   transcodeReasons,
+  showSubtitleNav = false,
+  onPrevSubtitle,
+  onNextSubtitle,
 }) => {
   const offline = useOfflineMode();
   const { settings, updateSettings } = useSettings();
@@ -550,6 +557,9 @@ export const Controls: FC<Props> = ({
               togglePlay={togglePlay}
               handleSkipBackward={handleSkipBackward}
               handleSkipForward={handleSkipForward}
+              showSubtitleNav={showSubtitleNav}
+              onPrevSubtitle={onPrevSubtitle}
+              onNextSubtitle={onNextSubtitle}
               hasChapters={hasChapters}
               hasPreviousChapter={hasPreviousChapter}
               hasNextChapter={hasNextChapter}

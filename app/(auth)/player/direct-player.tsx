@@ -506,6 +506,39 @@ export default function DirectPlayerPage() {
     return `${api.basePath}/Videos/${item.Id}/stream?${p.toString()}`;
   }, [offline, api?.basePath, api?.accessToken, item?.Id, mediaSourceId]);
 
+  // Phase 5: pause while a definition popup is open, resume on close — but only if the
+  // lookup was the one that paused (don't fight a user's manual pause).
+  const pausedByLookupRef = useRef(false);
+  const isPlayingRef = useRef(false);
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
+  const yomifinLookupOpen = useCallback(() => {
+    if (!settings.yomifinPauseOnLookup) return;
+    if (isPlayingRef.current) {
+      pausedByLookupRef.current = true;
+      setIsPlaying(false);
+      videoRef.current?.pause();
+    }
+  }, [settings.yomifinPauseOnLookup]);
+
+  const yomifinLookupClose = useCallback(() => {
+    if (pausedByLookupRef.current) {
+      pausedByLookupRef.current = false;
+      setIsPlaying(true);
+      videoRef.current?.play();
+    }
+  }, []);
+
+  // Phase 5: jump to the previous/next subtitle cue (native mpv sub-seek).
+  const yomifinPrevSubtitle = useCallback(() => {
+    videoRef.current?.subSeek?.(-1);
+  }, []);
+  const yomifinNextSubtitle = useCallback(() => {
+    videoRef.current?.subSeek?.(1);
+  }, []);
+
   // Cheap: snapshot the cue range + frame position at TAP time (no decode/seek).
   const yomifinSnapshotCard = useCallback(
     (): CaptureContext => ({
@@ -1459,6 +1492,9 @@ export default function DirectPlayerPage() {
                   getTechnicalInfo={getTechnicalInfo}
                   playMethod={playMethod}
                   transcodeReasons={transcodeReasons}
+                  showSubtitleNav={currentSubtitleIndex !== -1}
+                  onPrevSubtitle={yomifinPrevSubtitle}
+                  onNextSubtitle={yomifinNextSubtitle}
                 />
               ))}
             {/* YOMIFIN Phase 2: tappable subtitles + Yomitan lookup + popup (top),
@@ -1467,6 +1503,9 @@ export default function DirectPlayerPage() {
             <YomifinErrorBoundary label='lookup-layer'>
               <YomifinLookupLayer
                 text={yomifinSubtitleText}
+                onLookupOpen={yomifinLookupOpen}
+                onLookupClose={yomifinLookupClose}
+                popupPosition={settings.yomifinPopupPosition ?? "right"}
                 onSnapshotCard={yomifinSnapshotCard}
                 onCaptureMedia={yomifinCaptureMedia}
               />

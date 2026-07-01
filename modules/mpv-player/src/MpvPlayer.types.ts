@@ -120,6 +120,8 @@ export interface MpvPlayerViewRef {
   setSubtitleVisibility: (visible: boolean) => Promise<void>;
   getCurrentSubtitleTrack: () => Promise<number>;
   addSubtitleFile: (url: string, select?: boolean) => Promise<void>;
+  /** Phase 5: jump to the previous (-1) / next (+1) subtitle cue (mpv sub-seek). */
+  subSeek: (delta: number) => Promise<void>;
   // Subtitle positioning
   setSubtitlePosition: (position: number) => Promise<void>;
   setSubtitleScale: (scale: number) => Promise<void>;

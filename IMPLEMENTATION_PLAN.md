@@ -378,25 +378,58 @@ Anki on the server. **This completes the MVP.**
 | Lookup pauses video; closing resumes (configurable setting) | **5** |
 | Reduce dim when playback menu is up | **5** |
 | Two-finger tap = pause; double-tap left/right = seek ∓ | **5** |
-| UI + gesture to go back/forward by **subtitle** (not time) | **5** (nav) / **6** (sidebar) |
-| Subtitle **sidebar** with timestamps; tap a line → seek there | **6** |
-| Anki card can use **multiple sentences** for sentence/audio (default 1) | **6** (selection) + **9** (assembly) |
-| Fix lookup logic to match Yomitan (あっさり → あさり / 漁る, no あ/あっ spam) | **7** |
-| Multiple word readings / lookup results as **cycleable panes** | **7** |
-| Support 5–10+ **dictionaries** | **8** |
-| Per-dictionary subtle UI boundary (e.g. background tint) | **8** |
-| Popup light / dark / auto theme from settings | **8** |
-| Anki fields **configurable per note type, at runtime** (not hardcoded) | **9** |
-| Yomitan-style field markers ({audio} {glossary} {single-glossary:DICT} {popup-selection-text}) | **9** |
-| Tap a dictionary section (selects all its text) or a single definition within it | **9** (selection model, designed in 7/8) |
-| **Batch / dedup media** — multiple words from one sentence share one audio+image (no dup files in Anki) | **10** |
+| UI + gesture to go back/forward by **subtitle** (not time) | **5** (nav) / **8** (cue store) |
+| Fix lookup logic to match Yomitan (あっさり → あさり / 漁る, no あ/あっ spam) | **6** |
+| Multiple word readings / lookup results as **cycleable panes** | **6** |
+| Support 5–10+ **dictionaries** | **7** |
+| Per-dictionary subtle UI boundary (e.g. background tint) | **7** |
+| Popup light / dark / auto theme from settings | **7** |
+| Anki fields **configurable per note type, at runtime** (not hardcoded) | **8** |
+| Yomitan-style field markers ({audio} {glossary} {single-glossary:DICT} {popup-selection-text}) | **8** |
+| Tap a dictionary section (selects all its text) or a single definition within it | **8** (selection model, designed in 6/7) |
+| Anki card can use **multiple sentences** for sentence/audio (default 1) | **8** (cue store + assembly) |
+| **Batch / dedup media** — multiple words from one sentence share one audio+image (no dup files in Anki) | **9** |
+| Subtitle **sidebar** with timestamps; tap a line → seek there (de-prioritized) | **10** |
+| **Yomitan settings parity** — expose Yomitan's lookup/scan options (max results, scan length, …) | **11** |
 
 ---
 
-## Phase 5 — Player interaction polish (low risk, high daily value) ← NEXT
+## Phase 5 — Player interaction polish (low risk, high daily value) — MOSTLY DONE ✅ (gestures deferred ⏸️)
 
-Self-contained UX wins, no engine/storage changes. Do these first; they make every
-later phase nicer to test.
+> **Status:** 5 of 6 items shipped; only the **video gestures** (two-finger-tap
+> play/pause + double-tap-L/R-to-seek) are **deferred** — they never worked reliably on
+> the physical iPad. Two approaches both failed on device: (1) extending the existing RN
+> touch pipeline (`useGestureDetection`, `onTouch*` on a `Pressable`) with multi-touch
+> counting + double-tap disambiguation → `trackedTouchCount` warnings, unreliable
+> two-finger, laggy single tap; (2) a react-native-gesture-handler `GestureDetector`
+> wrapping the overlay → the RNGH recognizer fought the dim `Pressable`'s `onPress` (at
+> 0% dim the controls would never hide) and two-finger still didn't fire. Both attempts
+> were fully reverted.
+>
+> **Done (kept):**
+> - Fixed-position/fixed-size `DefinitionPopup` (~⅓ width, near-full height, side
+>   anchored via `yomifinPopupPosition`, tap-outside-to-close+resume). Renders above
+>   controls at `zIndex 100000`.
+> - Pause-on-lookup / resume-on-close (`yomifinPauseOnLookup`, `pausedByLookupRef` so it
+>   never fights a manual pause) wired through `YomifinLookupLayer` → `direct-player`.
+> - Reduced controls dim (`controlsDimOpacity`, default 0.4) in `GestureOverlay`.
+> - Native mpv `sub-seek ±1` (`subSeek(delta)` across the Swift stack + module + TS ref)
+>   for prev/next **cue**, surfaced as buttons in `CenterControls` next to the time-skip
+>   controls (shown only when a subtitle track is selected).
+> - Settings keys (`utils/atoms/settings.ts`) + a **Reader** settings screen
+>   (`settings/reader/page.tsx`, registered in `(home)/_layout.tsx`, linked from
+>   `settings.tsx`).
+>
+> **Deferred gesture work — when we come back:** treat it as its own investigation.
+> Likely correct path: rebuild the *whole* video gesture layer (single tap, double-tap
+> seek, two-finger tap, vertical brightness/volume drag, horizontal skip) in **one** RNGH
+> `Gesture.Race`/`Gesture.Exclusive` composition rather than mixing RN touch responders
+> with RNGH (the mixing caused the `onPress`/recognizer conflicts). Validate two-finger +
+> double-tap on the physical iPad *first*. The `yomifinDoubleTapSeconds` /
+> `yomifinTwoFingerTapPause` / `yomifinDoubleTapSeek` settings keys were intentionally
+> **not** added back — add them with the gesture rebuild.
+>
+> **Note:** `subSeek` is native — it needs an iOS rebuild to take effect.
 
 **Build:**
 1. **Static, fixed popup.** Move `DefinitionPopup` from bottom-anchored/variable-height
@@ -424,7 +457,7 @@ later phase nicer to test.
    path: a native **`sub-seek -1` / `sub-seek 1`** mpv command exposed through
    `modules/mpv-player` (mpv jumps to the prev/next cue boundary natively, no JS cue
    list needed). If exposing a new native command is heavy, defer the *button* to
-   Phase 6 (which builds the JS cue list) but keep the gesture stub here.
+   Phase 8 (which builds the JS cue store) but keep the gesture stub here.
 
 **Settings:** add a **"Yomifin / Reader"** settings group (`utils/atoms/settings.ts`
 `Settings` interface + `defaultValues`, plus a settings screen mirroring the
@@ -438,47 +471,7 @@ pauses; double-tap L/R seeks; prev/next-subtitle moves by cue.
 
 ---
 
-## Phase 6 — Subtitle sidebar (transcript) + multi-cue selection
-
-**Goal:** a tappable transcript of the whole subtitle track alongside the video, and
-the data substrate for "extend the card to neighboring lines."
-
-**Architecture note — reconciling with Pivot B.** Pivot B made *the active-line overlay*
-mpv-driven (one cue at a time) to kill flicker and support PGS. The sidebar needs the
-**whole** cue list, which mpv does not hand us up front. So **reintroduce a one-time
-full-track parse purely as a data source** for the sidebar + cue navigation + multi-cue
-selection — **not** for rendering the active overlay (that stays mpv-driven). Reuse
-`utils/yomifin/{srt,fetchSubtitleSrt}.ts` (already in the tree from Phase 1). For
-TEXT tracks fetch+parse the Jellyfin SRT; for BITMAP/PGS the sidebar is simply
-unavailable (no text to list) — degrade gracefully. Keep the active-cue highlight in
-sync by matching mpv's current `{start,end}` (from `onSubtitleText`) against the parsed
-list.
-
-**Build:**
-1. **Cue store.** Load + parse the full track once per item into a `Cue[]`
-   (`{index, start, end, text}`); expose via a small context/atom so both the sidebar
-   and the Anki layer can read it. Map the currently-active cue from mpv's live
-   `{start,end}`.
-2. **Sidebar UI.** A collapsible panel (flex-row: video shrinks, sidebar takes a fixed
-   width — this is exactly the Phase 0 "sidebar fallback" layout, now used by choice).
-   Each row: timestamp + line text; the **active line is highlighted and auto-scrolls
-   into view**. Tapping a row → `seek(cue.start * 1000)`. A toggle button shows/hides it.
-3. **Wire prev/next-subtitle buttons** (Phase 5) to the cue store as well (the JS path),
-   so they work even without the native `sub-seek`.
-4. **Multi-cue selection substrate.** Track a **selected cue range** `[anchorIdx,
-   …extendIdx]` (default = the single tapped cue). Provide "extend to previous / next
-   line" affordances (buttons in the popup and/or sidebar). This range is what Phase 9
-   turns into the sentence text and the audio clip boundaries (min start … max end).
-   Default span is **1** cue, matching the requirement.
-
-**Exit criteria (on device):** the sidebar lists the whole track with timestamps;
-tapping a line seeks there; the active line tracks playback and auto-scrolls; selecting
-prev/next lines visibly extends the selection range (verified by a debug readout or by
-feeding it into the card in Phase 9).
-
----
-
-## Phase 7 — Lookup-engine fidelity + multi-result cycleable panes
+## Phase 6 — Lookup-engine fidelity + multi-result cycleable panes  ← NEXT
 
 **Goal:** (a) make matching behave like Yomitan; (b) present results as **one headword
 per pane**, cycled with forward/back, instead of one long dump.
@@ -524,7 +517,34 @@ suite is green.
 
 ---
 
-## Phase 8 — Multiple dictionaries + themed, bounded popup UI
+## Phase 7 — Multiple dictionaries + themed, bounded popup UI
+
+> **Status: DONE ✅ (pending final on-device pass).** Implemented JS-only (Metro
+> reload). Highlights + one engine change worth noting:
+> - **Config:** `yomifinDictionaryConfig` settings atom (enable/disable + priority
+>   order + per-dict tint), reconciled against the SQLite inventory by the pure
+>   `utils/yomifin/dictionaryConfig.ts`. Dictionaries screen rebuilt on
+>   `DraggableFlatList` (drag reorder, toggle, tap-swatch tint) with a **fixed** bottom
+>   action bar; multi-select `.zip` import (keep-awake during import). Enabled titles
+>   feed `YomifinDictionary` in priority order.
+> - **Engine change (important):** `lookup.ts` switched `findTerms("simple")` →
+>   **`"group"`** — Yomitan's own popup mode. `"simple"` never merges a headword's
+>   dictionaries, so multi-dict fragmented into duplicate panes; `"group"` = one
+>   headword pane with one definition block PER dictionary, sorted by priority. Phase 6
+>   panes preserved. Still one indexed query for 5–10 dicts.
+> - **Theming:** `components/yomifin/popupTheme.ts` + `yomifinPopupTheme`
+>   (light/dark/**auto**=dark for now, app forces dark). All hardcoded colors removed
+>   from `DefinitionPopup`/`StructuredContent`; per-dict tints derive from the theme.
+> - **Selection scaffolding:** `utils/yomifin/selection.ts` (`PopupSelection`) — tap a
+>   dictionary block or a glossary item to select it (visible state). **Fine-grained
+>   sense-level** selection is deferred to Phase 8 (see the "Sense-level selection" note
+>   under Phase 8) because many dicts pack all senses into one structured-content blob.
+> - **Confirmed (not a gap):** reading match + kana normalization are already fully
+>   vendored/wired — a katakana query resolves hiragana-stored readings and reading-only
+>   matches (e.g. イケメン → イケ面). Locked in by new `lookup.test.ts` cases.
+> - **Tests:** new `dictionaryConfig.test.ts` (config reconciler + selection) as suite
+>   6/6; `lookup.test.ts` gained multi-dict priority/enable + reading/kana cases. All
+>   green. Vendored `yomitan/` untouched.
 
 **Goal:** real multi-dictionary support (5–10+) with clear per-dictionary visual
 boundaries and a themeable popup.
@@ -548,9 +568,9 @@ is idempotent per dictionary). This phase is **management + presentation**.
    (light/dark/**auto** = follow the app/system theme used elsewhere). Replace the
    hardcoded dark colors in `DefinitionPopup`/`StructuredContent` with a small theme
    object; per-dict tints derive from the active theme.
-4. **Selection scaffolding (for Phase 9).** While theming the renderer, make each
+4. **Selection scaffolding (for Phase 8).** While theming the renderer, make each
    **dictionary block** and each **individual definition** a tappable selection target
-   (visually indicate selected state). Selection state is consumed by Phase 9's
+   (visually indicate selected state). Selection state is consumed by Phase 8's
    `{popup-selection-text}` marker — design the data shape now, even if the Anki
    consumption lands next phase.
 
@@ -560,12 +580,22 @@ dictionary block or a single definition visibly selects it.
 
 ---
 
-## Phase 9 — Runtime Anki field configuration + Yomitan-style field markers
+## Phase 8 — Runtime Anki field configuration + Yomitan-style field markers
 
 **Goal:** kill the hardcoded field map. Fields are chosen **per note type at runtime**,
 and each field's value is a **template string** of markers resolved against the current
 pane + selection + media + sentence range. This is the most architectural phase —
 design before building.
+
+**Cue store + multi-cue selection substrate (built here, reused by Phase 10's sidebar).**
+The multi-sentence markers below need the whole subtitle track, which mpv's live
+`sub-text` does not hand us up front. So load + parse the full track once per item into
+a `Cue[]` (`{index, start, end, text}`), exposed via a small context/atom. Reuse
+`utils/yomifin/{srt,fetchSubtitleSrt}.ts` (in the tree since Phase 1); TEXT tracks only
+(BITMAP/PGS degrade to single-cue = mpv's current `{start,end}`). Track a **selected
+cue range** `[anchorIdx…extendIdx]` (default = the single tapped cue, span **1**) with
+"extend to previous / next line" affordances in the popup. This is a *data* substrate —
+no sidebar UI yet (that's Phase 10, which just renders this store).
 
 **Runtime note-type config:**
 - Replace `ankiConfig.ts`'s hardcoded `AnkiFieldMap` with a settings-stored, per-model
@@ -579,8 +609,8 @@ design before building.
 `renderTemplate(template: string, ctx: MarkerContext): string` that substitutes
 Yomitan-style `{marker}` tokens. `MarkerContext` is assembled at card time from: the
 active pane (headword/reading/word-classes/inflection), all that pane's dictionaries,
-the current selection (Phase 8), the captured media (Phase 4), and the selected cue
-range (Phase 6). Initial marker set:
+the current selection (Phase 7), the captured media (Phase 4), and the selected cue
+range (built above). Initial marker set:
 - `{expression}` / `{reading}` / `{word}` — headword + reading of the active pane.
 - `{sentence}` — the selected cue range joined (default 1 cue; more if extended).
 - `{audio}` — **word** audio. Open question / decision needed: we have no Forvo/jpod
@@ -596,16 +626,39 @@ range (Phase 6). Initial marker set:
   (mirrors Yomitan's `{single-glossary-…}`). Resolve `DICT_NAME` against installed
   dictionaries.
 - `{popup-selection-text}` / `{selection}` — the text the user selected in the popup
-  (Phase 8 selection model): a whole dictionary block, or one definition, flattened.
+  (Phase 7 selection model): a whole dictionary block, or one definition, flattened.
 - `{clipboard}`-style extras are out of scope.
 
-**Selection → marker wiring.** Phase 8 gives selectable dictionary blocks / definitions;
+**Selection → marker wiring.** Phase 7 gives selectable dictionary blocks / definitions;
 here we flatten the current selection to text (reuse `scToText` / `normalizeGlossary`
 from `anki.ts`) and expose it as `{popup-selection-text}`. If nothing is selected, the
 marker resolves to the active pane's full glossary (sensible default).
 
+**Sense-level (fine-grained) selection — build here (deferred from Phase 7).** Phase 7
+shipped block-level + coarse-item selection (`utils/yomifin/selection.ts`:
+`PopupSelection = {kind:"dictionary"|"definition", …}`), which selects a whole dictionary
+block or one *glossary item*. The gap: many dictionaries (e.g. JMdict for 読む) pack ALL
+their senses into a SINGLE structured-content blob — one glossary item holding a nested
+`<ol>`/`<ul>` of senses — so "one definition" today = the whole tree; you can't isolate
+sense #3. To fix, descend into the structured-content tree and make individual sense
+nodes tappable:
+  - **Data shape:** extend `PopupSelection` with
+    `{kind:"sense"; paneIndex; dictionary; glossIndex; path:number[]}` where `path` is the
+    index chain locating a node inside that glossary item's SC tree (e.g. the Nth `<li>`
+    of the senses list). `selectionGlossary()` gains a case that walks `path` to return
+    just that subtree; `scToText` already flattens it.
+  - **Renderer:** `components/yomifin/StructuredContent.tsx` needs an optional
+    "selectable node" mode: identify sense boundaries (top-level list items are the
+    pragmatic heuristic; fall back to top-level block children), render each as a
+    tappable target that reports its `path`, and paint a selected state. Thread
+    `selection` + `onSelect(path)` down through the recursive render (currently it only
+    threads `color`/`linkColor`/`onLinkPress`).
+  - **Scope note:** keep the Phase 7 block/item selection as the coarse default; sense
+    selection is the refinement. Confirmed feasible; it's a renderer change, not an
+    engine change (the lookup layer is untouched).
+
 **Multi-sentence card.** The sentence field and the sentence-audio field both read the
-**selected cue range** from Phase 6 (default span 1). Audio: extend
+**selected cue range** from the cue store above (default span 1). Audio: extend
 `extractAudio(start,end,…)` to use `min(starts)…max(ends)` of the selected cues; sentence
 text joins the cues' lines. Verify a 2-cue selection produces a card whose audio + text
 span both lines.
@@ -622,7 +675,7 @@ audio). No field names are hardcoded in source.
 
 ---
 
-## Phase 10 — Media dedup + batch mining (reach)
+## Phase 9 — Media dedup + batch mining (reach)
 
 **Goal:** mining several words from the **same** sentence/frame must not produce
 duplicate audio/images in the Anki collection, and must not re-run the capture pipeline
@@ -643,7 +696,7 @@ across a reinstall.
    e.g. the cue start, or to ~250ms, so taps a few ms apart collapse to one key).
    Filenames become `yomifin_<hash>.m4a` / `yomifin_<hash>.jpg`. Same sentence/frame →
    same filename → Anki stores it once; every card just references it. Note the audio
-   key must use the **selected cue range** (Phase 6/9), so "1 word, 1 line" and
+   key must use the **selected cue range** (Phase 8 cue store), so "1 word, 1 line" and
    "2 words, same 1 line" share a clip, while an extended 2-cue selection is its own key.
 2. **In-session capture cache.** A small `Map<mediaKey, Promise<CapturedMedia>>` in the
    capture layer (`ankiMedia.ts` / `YomifinLookupLayer`) so that within one playback
@@ -675,11 +728,81 @@ file.
 
 ---
 
+## Phase 10 — Subtitle sidebar (transcript)  [de-prioritized — do last]
+
+**Goal:** a tappable transcript of the whole subtitle track alongside the video. Nice
+to have, not important — explicitly the **last** item.
+
+**Cheap by now.** Phase 8 already built + exposed the **cue store** (`Cue[]` parsed from
+the full track) and the active-cue mapping. This phase is essentially just the panel UI
+over that store; no new data plumbing.
+
+**Build:**
+1. **Sidebar UI.** A collapsible panel (flex-row: video shrinks, sidebar takes a fixed
+   width — exactly the Phase 0 "sidebar fallback" layout, now used by choice). Each row:
+   timestamp + line text; the **active line is highlighted and auto-scrolls into view**.
+   Tapping a row → `seek(cue.start * 1000)`. A toggle button shows/hides it. For
+   BITMAP/PGS tracks (no text) the sidebar is simply unavailable — degrade gracefully.
+2. **Reuse for navigation.** Wire any deferred Phase 5 prev/next-subtitle buttons to the
+   same cue store (JS path), so they work without the native `sub-seek`.
+
+**Exit criteria (on device):** the sidebar lists the whole track with timestamps;
+tapping a line seeks there; the active line tracks playback and auto-scrolls into view.
+
+---
+
+## Phase 11 — Yomitan settings parity
+
+**Goal:** stop hardcoding lookup behavior; surface the Yomitan-equivalent options as real
+user settings so the engine can be tuned the way Yomitan users expect. This is a
+**separate, incremental** item — it can be picked up piecemeal alongside/after the phases
+above, wherever a hardcoded knob is annoying.
+
+**Approach.** Audit the options the vendored Translator + `findTerms` already accept but
+that we currently pass as constants, and lift each into the **Yomifin / Reader** settings
+group with Yomitan's defaults. Mirror Yomitan's own settings names/semantics so behavior
+is predictable. Candidate knobs (verify each against the vendored
+`utils/yomifin/yomitan/` + our `lookup.ts` call site — only expose ones the engine truly
+honors):
+- **Max results** — cap on the number of returned entries/panes (`maxResults`-style).
+- **Scan length** — max characters scanned from the tap point for the longest match
+  (`scanLength`); today this is an implicit constant in the forward-greedy scan.
+- **Deinflection / text-transform toggles** — the per-language `textPreprocessors`
+  Yomitan exposes (e.g. collapse emphatic sequences, halfwidth/fullwidth, alphabetic
+  case, hiragana↔katakana). Phase 6 wires these into the pipeline; here they become
+  **user-toggleable** with Yomitan-matching defaults.
+- **`removeNonJapaneseCharacters`** and other flags currently hardcoded in the
+  `findTerms` call.
+- **Sort / grouping mode** — result ranking (term/frequency), if the vendored code
+  supports it, matching Yomitan's "sort frequency dictionary" idea.
+- **Frequency dictionaries display** (only if a frequency dict is imported) — defer if
+  no frequency data is present.
+
+**Build:**
+1. Enumerate the real, honored options at the `findTerms`/Translator seam (don't invent
+   settings the engine ignores). One line per option: current hardcoded value → Yomitan
+   default → settings key.
+2. Add the keys to `utils/atoms/settings.ts` (interface + `defaultValues` = Yomitan
+   defaults) and to the Reader settings screen.
+3. Thread them from settings → the `findTerms` options object in `lookup.ts` (replace the
+   constants). Keep the language layer pure — pass options in, don't read settings inside
+   `utils/yomifin/`.
+4. Add/extend `lookup.test.ts` cases that pin a couple of knobs (e.g. `maxResults=1`
+   returns one pane; a longer `scanLength` still finds the same longest match). Run
+   `./scripts/yomifin-test.sh`.
+
+**Exit criteria (on device):** changing max results visibly caps the number of
+cycleable panes; changing scan length changes how far a long compound is matched;
+toggling a text-transform (e.g. emphatic collapse) changes the あっさり result; defaults
+match Yomitan out of the box. No lookup knob remains a source-level constant.
+
+---
+
 ## Later / parked (not next — pulled from the old Phases 5–8)
 
 - **Profiles** — { language, deinflection settings, dictionary set, deck, note type,
   field templates } as a switchable bundle (JA vs ZH switches engine + destination).
-  Natural follow-on once Phase 9's runtime config exists.
+  Natural follow-on once Phase 8's runtime config exists.
 - **Chinese parity** — validate longest-match lookup against real ZH dictionaries
   (`language-descriptors.js` already includes ZH; expect verification, not new code).
 - **ASS subtitles** — parse ASS, strip override tags, render dialogue as tappable plain
@@ -692,29 +815,45 @@ file.
 ## How to drive this with Claude Code
 
 - **One phase at a time.** Do not let Claude Code skip ahead or write later phases as
-  if earlier risks are resolved. **We are at Phase 5** (MVP + Phase 4 are DONE).
-- **Investigations before builds** where a phase calls for it — notably **Phase 7**
-  (lookup-engine fidelity) and **Phase 9** (marker engine / runtime fields): get the
+  if earlier risks are resolved. **Phase 5 is MOSTLY DONE** (some items deferred — see
+  the Phase 5 header). MVP + Phase 4 are DONE; **next up is Phase 6**
+  (lookup-engine fidelity + cycleable panes).
+- **Roadmap order (revised):** 6 lookup fidelity + panes → 7 dictionaries + theming →
+  8 runtime Anki fields/markers (+ cue store) → 9 media dedup/batch → **10 sidebar
+  (de-prioritized, last)**. **Phase 11 (Yomitan settings parity)** is a *separate,
+  incremental* item — fold it in wherever a hardcoded lookup knob becomes annoying.
+- **Investigations before builds** where a phase calls for it — notably **Phase 6**
+  (lookup-engine fidelity) and **Phase 8** (marker engine / runtime fields): get the
   map before cutting.
 - **Honor exit criteria** as literal gates. A phase isn't done until its criterion is
   demonstrably met on the physical iPad.
 - **Keep the language layer isolated + guarded:** run `./scripts/yomifin-test.sh`
   after any change under `utils/yomifin/`; keep the lookup/popup inside
   `YomifinErrorBoundary`.
-- **Two new architectural seams to respect:** (1) the **pane model** (Phase 7) — one
-  headword per pane, its dicts inside it; (2) the **marker engine** (Phase 9) — all
+- **Two new architectural seams to respect:** (1) the **pane model** (Phase 6) — one
+  headword per pane, its dicts inside it; (2) the **marker engine** (Phase 8) — all
   Anki field values flow through `renderTemplate`, nothing hardcoded. The **selection
-  model** spans Phases 8–9; design its data shape in 8, consume it in 9.
+  model** spans Phases 7–8; design its data shape in 7, consume it in 8.
 - Pivots A/B/C (SQLite storage, mpv-driven subtitles, on-device media) are settled —
-  don't reopen them. Phase 6 reintroduces a full-track parse **only as a sidebar data
-  source**, not for the active-line overlay.
+  don't reopen them. The full-track parse (Phase 8 cue store, rendered by Phase 10's
+  sidebar) is a **data source only**, never the active-line overlay (that stays
+  mpv-driven).
 
 ## Suggested next Claude Code prompt
 
-> Read CONTEXT.md and IMPLEMENTATION_PLAN.md. The MVP and Phase 4 are DONE; we are
-> starting **Phase 5 (player interaction polish)**. Implement it item by item, smallest
-> change first: static/fixed popup above the controls, configurable pause-on-lookup /
-> resume-on-close, reduced controls dim, two-finger-tap pause + double-tap L/R seek,
-> and prev/next-subtitle navigation. Add the new settings keys to
-> `utils/atoms/settings.ts` and a Reader settings screen. Honor the Phase 5 exit
-> criteria on the physical iPad before moving on.
+> Read CONTEXT.md and IMPLEMENTATION_PLAN.md. Phase 5 is mostly done; we are starting
+> **Phase 6 — Lookup-engine fidelity + multi-result cycleable panes**. Do the
+> INVESTIGATION first: reproduce the あっさり case against the vendored Yomitan
+> Translator and determine why the app surfaces bare あ / あっ and misses あさり / 漁る
+> — check (1) whether the JA text preprocessors (`collapseEmphaticSequences` in
+> `utils/yomifin/yomitan/language-descriptors.js`) are actually wired into the
+> `findTerms` pipeline we lifted (our call passes `textReplacements: [null]`), and
+> (2) how results are merged/sorted across scan lengths (are short prefixes headlined
+> instead of demoted?). Report which it is, the one-line vendored seam, and the fix —
+> do NOT change code yet. Then, after I confirm, implement the fix with a regression
+> case in `utils/yomifin/lookup.test.ts` (あっさり ⇒ includes あさり/漁る with full
+> あっさり first; 計画通り ⇒ 計画通り, 計画, 計) and run `./scripts/yomifin-test.sh`.
+> Only after the engine fix is green, reshape `DefinitionPopup` around the **pane
+> model**: one headword per pane (≈ today's `LookupEntry`, all its dictionaries kept
+> inside the pane), shown one at a time with ◀ / ▶ and an index. Honor the Phase 6
+> exit criteria on the physical iPad.

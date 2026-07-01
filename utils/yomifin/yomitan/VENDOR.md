@@ -32,6 +32,10 @@ to `./`. That is the ONLY change to the copied files unless noted.
 | `safe-performance.js` | `core/safe-performance.js` | none (imports `./log.js`) |
 | `CJK-util.js` | `language/CJK-util.js` | none |
 | `japanese.js` | `language/ja/japanese.js` | flatten imports |
+| `japanese-text-preprocessors.js` | `language/ja/japanese-text-preprocessors.js` | flatten imports (`../../../lib/kanji-processor.js`→`./kanji-processor.js`) |
+| `japanese-wanakana.js` | `language/ja/japanese-wanakana.js` | none (imports already `./`) |
+| `japanese-kana-romaji-dicts.js` | `language/ja/japanese-kana-romaji-dicts.js` | none (pure data) |
+| `kanji-processor.js` | `dev/lib/kanji-processor.js` | none (`export * from "kanji-processor"`; the npm dep is in `package.json`) |
 | `korean.js` | `language/ko/korean.js` | flatten imports |
 | `chinese.js` | `language/zh/chinese.js` | flatten imports |
 
@@ -39,7 +43,7 @@ to `./`. That is the ONLY change to the copied files unless noted.
 | File | Purpose |
 |---|---|
 | `log.js` | minimal console-backed stub replacing `core/log.js` (upstream pulls in EventDispatcher + ExtensionError) |
-| `language-descriptors.js` | **trimmed** to JA+ZH with empty textPreprocessors (upstream registers ~50 languages + heavy deps); see header comment |
+| `language-descriptors.js` | **trimmed** to JA+ZH (upstream registers ~50 languages, some with Hermes-hostile `\p{}` regex). The JA `textPreprocessors` are wired to Yomitan's REAL upstream object (`japanese-text-preprocessors.js`, vendored above), so matching fidelity (emphatic collapse あっさり→あさり→漁る, width/kana folding, kanji variants) is upstream's, not re-implemented. ZH preprocessors stay empty until Chinese parity. See header comment |
 | `deinflect-smoke.test.mjs` | deinflector regression test (run via `../../../scripts/yomifin-deinflect-smoke.sh`) |
 
 Also ours, one level up in `utils/yomifin/`: `InMemoryDictionaryDatabase.ts` (storage
@@ -51,9 +55,13 @@ swap) and `lookup.test.ts` (Translator+DB integration test, run `bun utils/yomif
 2. Re-copy the files in the tables above, re-apply the import-path flattening
    (subdir/parent prefixes → `./`). Leave `log.js` and `language-descriptors.js`
    (ours) alone unless the descriptor shape changed upstream.
-3. Bump the pinned commit above.
+3. Bump the pinned commit above. If upstream adds/removes a JA text preprocessor,
+   mirror the `import { … } from './japanese-text-preprocessors.js'` list and the
+   `textPreprocessors: { … }` object in `language-descriptors.js`. If upstream bumps
+   `kanji-processor`, bump it in the app's `package.json` too.
 4. `./scripts/yomifin-deinflect-smoke.sh` AND `bun utils/yomifin/lookup.test.ts`
-   — both must stay green (regression guards).
+   — both must stay green (regression guards). The lookup test includes the
+   あっさり⇒漁る emphatic-collapse case that proves the preprocessors stay wired.
 
 ## Maintenance notes
 

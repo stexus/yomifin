@@ -59,15 +59,16 @@ function scToText(node: SCContent): string {
   return inner;
 }
 
-/** Flatten a lookup result's glossary blocks into a single plain-text gloss. */
-function flattenGloss(result: LookupResult): string {
+/** Flatten ONE headword's glossary blocks into a single plain-text gloss. */
+function flattenGloss(
+  entry: LookupResult["entries"][number] | undefined,
+): string {
+  if (!entry) return "";
   const lines: string[] = [];
-  for (const entry of result.entries) {
-    for (const group of entry.definitions) {
-      for (const item of group.glossary) {
-        const text = scToText(normalizeGlossary(item)).trim();
-        if (text) lines.push(text);
-      }
+  for (const group of entry.definitions) {
+    for (const item of group.glossary) {
+      const text = scToText(normalizeGlossary(item)).trim();
+      if (text) lines.push(text);
     }
   }
   return lines.join("\n").trim();
@@ -76,6 +77,8 @@ function flattenGloss(result: LookupResult): string {
 /** Data captured at tap time and assembled into a note. */
 export interface CardData {
   result: LookupResult;
+  /** Which headword pane the user is viewing — the card mines this one. Default 0. */
+  activeIndex?: number;
   /** Full subtitle cue text, frozen at tap time. */
   sentence: string;
   /** Phase 4: optional on-device screenshot + audio clip. */
@@ -87,14 +90,14 @@ function buildFields(
   config: AnkiConfig,
   data: CardData,
 ): Record<string, string> {
-  const entry = data.result.entries[0];
+  const entry = data.result.entries[data.activeIndex ?? 0];
   const f = config.fields;
   const fields: Record<string, string> = {};
   if (f.expression)
     fields[f.expression] = entry?.term || data.result.matchedText || "";
   if (f.reading) fields[f.reading] = entry?.reading ?? "";
   if (f.sentence) fields[f.sentence] = data.sentence ?? "";
-  if (f.glossary) fields[f.glossary] = flattenGloss(data.result);
+  if (f.glossary) fields[f.glossary] = flattenGloss(entry);
   // Phase 4 media references (filenames are stored separately via storeMediaFile).
   const m = data.media;
   if (f.sentenceAudio && m?.audioFilename)

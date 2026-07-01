@@ -8,11 +8,12 @@
  * `multi-language-transformer.js`, and `translator.js` are unmodified and consume
  * `languageDescriptorMap` from here unchanged.
  *
- * NOTE: textPreprocessors are intentionally EMPTY for now. Upstream's JA preprocessors
- * (width/kana/kanji normalization) pull in wanakana + a 618-line romaji table + the
- * external `kanji-processor` npm package. They are a fidelity enhancement, not the
- * lookup gate, and can be added back additively later (see PHASE2_YOMITAN.md). With
- * empty preprocessors the Translator simply looks up the raw (deinflected) text.
+ * NOTE: the JA textPreprocessors are Yomitan's REAL upstream object, vendored as-is
+ * (`japanese-text-preprocessors.js`) — not re-implemented here — so re-vendoring stays a
+ * cheap diff. This gives full matching fidelity: emphatic collapsing (あっさり → あさり →
+ * 漁る), half/full-width, hiragana↔katakana, romaji→kana, CJK-compat, and kanji-variant
+ * folding (萬 → 万, via the tiny `kanji-processor` npm dep). All are Hermes-safe (no \p{}).
+ * ZH preprocessors stay empty until Chinese parity is picked up (see roadmap).
  *
  * Re-vendor note: this file is OURS, not copied — when bumping the upstream pin,
  * re-check that the descriptor shape (fields consumed by languages.js) still matches.
@@ -21,6 +22,16 @@
 import {normalizePinyin, isStringPartiallyChinese} from './chinese.js';
 import {japaneseTransforms} from './japanese-transforms.js';
 import {isStringPartiallyJapanese} from './japanese.js';
+import {
+    alphabeticToHiragana,
+    alphanumericWidthVariants,
+    collapseEmphaticSequences,
+    convertHalfWidthCharacters,
+    convertHiraganaToKatakana,
+    normalizeCJKCompatibilityCharacters,
+    normalizeCombiningCharacters,
+    standardizeKanji,
+} from './japanese-text-preprocessors.js';
 
 /** @type {import('language-descriptors').LanguageDescriptorAny[]} */
 const languageDescriptors = [
@@ -30,7 +41,16 @@ const languageDescriptors = [
         name: 'Japanese',
         exampleText: '読め',
         isTextLookupWorthy: isStringPartiallyJapanese,
-        textPreprocessors: {},
+        textPreprocessors: {
+            convertHalfWidthCharacters,
+            alphabeticToHiragana,
+            alphanumericWidthVariants,
+            convertHiraganaToKatakana,
+            collapseEmphaticSequences,
+            normalizeCombiningCharacters,
+            normalizeCJKCompatibilityCharacters,
+            standardizeKanji,
+        },
         languageTransforms: japaneseTransforms,
     },
     {

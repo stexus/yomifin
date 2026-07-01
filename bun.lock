@@ -57,6 +57,7 @@
         "fflate": "^0.8.3",
         "i18next": "^26.3.0",
         "jotai": "2.20.0",
+        "kanji-processor": "^1.0.2",
         "lodash": "4.18.1",
         "nativewind": "^2.0.11",
         "patch-package": "^8.0.0",
@@ -1240,6 +1241,8 @@
     "jsonfile": ["jsonfile@4.0.0", "", { "optionalDependencies": { "graceful-fs": "^4.1.6" } }, "sha512-m6F1R3z8jjlf2imQHS2Qez5sjKWQzbuuhuJ/FKYFRZvPE3PuHcSMVZzfsLhGVOkfd20obL5SWEBew5ShlquNxg=="],
 
     "jsonify": ["jsonify@0.0.1", "", {}, "sha512-2/Ki0GcmuqSrgFyelQq9M05y7PS0mEwuIzrf3f1fPqkVDVRvZrPZtVSMHxdgo8Aq0sxAOb/cr2aqqA3LeWHVPg=="],
+
+    "kanji-processor": ["kanji-processor@1.0.2", "", {}, "sha512-3nP/Sdt4BYLxqYv263EIXfA+m93N1o1vIxE4U3TzAuYlJT2BuSjncvqnOjcL/wrSNkMA+lBEMHHH477+KSYiBg=="],
 
     "klaw-sync": ["klaw-sync@6.0.0", "", { "dependencies": { "graceful-fs": "^4.1.11" } }, "sha512-nIeuVSzdCCs6TDPTqI8w1Yre34sSq7AkZ4B3sfOBbI2CgVSB4Du4aLQijFU2+lhAFCwt9+42Hel6lQNIv6AntQ=="],
 

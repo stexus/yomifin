@@ -107,8 +107,13 @@ export class YomifinDictionary {
       text.length > this._maxScanLength
         ? text.slice(0, this._maxScanLength)
         : text;
+    // "group" mode = Yomitan's own popup mode: entries with the same headword
+    // (term+reading+inflection) are merged into ONE entry carrying one definition
+    // block PER dictionary (sorted by dictionary priority). This is what the Phase 6
+    // pane model + Phase 7 per-dictionary boundaries require. "simple" (the old mode)
+    // never groups, so multi-dictionary results fragmented into duplicate panes.
     const { dictionaryEntries, originalTextLength } =
-      await this._translator.findTerms("simple", scanText, {
+      await this._translator.findTerms("group", scanText, {
         matchType: "exact",
         deinflect: true,
         language: this._language,
@@ -127,6 +132,10 @@ export class YomifinDictionary {
     return {
       matchedLength: originalTextLength,
       matchedText: scanText.slice(0, originalTextLength),
+      // Entries arrive already sorted by the vendored Translator's own
+      // `_sortTermDictionaryEntries` (longest matched surface first), so panes are
+      // longest-headword-first and shorter prefixes are demoted — exactly Yomitan's
+      // ordering. We do NOT filter: Yomitan itself returns shorter prefixes too.
       // biome-ignore lint/suspicious/noExplicitAny: mapping the vendored result shape
       entries: (dictionaryEntries as any[]).map(mapEntry),
     };

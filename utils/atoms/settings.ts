@@ -294,6 +294,23 @@ export type Settings = {
   openSubtitlesApiKey?: string;
   // TV-only: Inactivity timeout for auto-logout
   inactivityTimeout: InactivityTimeout;
+  // Yomifin / Reader
+  yomifinPauseOnLookup: boolean;
+  yomifinPopupPosition: "left" | "right";
+  controlsDimOpacity: number;
+  /** Popup color theme. "auto" follows the app (dark-only for now → dark). */
+  yomifinPopupTheme: "light" | "dark" | "auto";
+  /**
+   * Per-dictionary UI/lookup preferences, keyed by dictionary title:
+   *   enabled — include in lookups (disabled dicts are filtered out of results)
+   *   order   — priority order (0 = highest; definition blocks sort by this)
+   *   tint    — accent color (hex) for the per-dictionary boundary in the popup
+   * New dictionaries not present here default to enabled + appended + a stable tint.
+   */
+  yomifinDictionaryConfig: Record<
+    string,
+    { enabled: boolean; order: number; tint: string }
+  >;
 };
 
 export interface Lockable<T> {
@@ -395,6 +412,12 @@ export const defaultValues: Settings = {
   audioTranscodeMode: AudioTranscodeMode.Auto,
   // TV-only: Inactivity timeout (disabled by default)
   inactivityTimeout: InactivityTimeout.Disabled,
+  // Yomifin / Reader
+  yomifinPauseOnLookup: true,
+  yomifinPopupPosition: "right",
+  controlsDimOpacity: 0.4,
+  yomifinPopupTheme: "dark",
+  yomifinDictionaryConfig: {},
 };
 
 const loadSettings = (): Partial<Settings> => {

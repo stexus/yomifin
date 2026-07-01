@@ -842,6 +842,14 @@ final class MPVLayerRenderer {
         let flag = select ? "select" : "cached"
         commandSync(handle, ["sub-add", url, flag])
     }
+
+    // YOMIFIN Phase 5: jump to the previous/next subtitle cue boundary natively
+    // (mpv `sub-seek -1` / `sub-seek 1`), so navigation snaps to cues without a JS
+    // cue list.
+    func subSeek(_ delta: Int) {
+        guard let handle = mpv else { return }
+        commandSync(handle, ["sub-seek", String(delta)])
+    }
     
     // MARK: - Subtitle Positioning
     

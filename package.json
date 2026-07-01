@@ -80,6 +80,7 @@
     "fflate": "^0.8.3",
     "i18next": "^26.3.0",
     "jotai": "2.20.0",
+    "kanji-processor": "^1.0.2",
     "lodash": "4.18.1",
     "nativewind": "^2.0.11",
     "patch-package": "^8.0.0",

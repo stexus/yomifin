@@ -8,12 +8,26 @@
  * mpv-driven: the overlay text comes from mpv's `sub-text` (perfect sync, PGS-safe),
  * not from a re-fetched SRT + interpolation.
  */
-import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { useSettings } from "@/utils/atoms/settings";
 import type { CaptureContext, CapturedMedia } from "@/utils/yomifin/ankiMedia";
+import {
+  enabledTitlesInOrder,
+  resolveDictionaryConfig,
+  tintMap,
+} from "@/utils/yomifin/dictionaryConfig";
+import { listInstalledDictionaries } from "@/utils/yomifin/dictionaryStore";
 import { loadInstalledDictionary } from "@/utils/yomifin/loadInstalledDictionary";
 import type { LookupResult, YomifinDictionary } from "@/utils/yomifin/lookup";
 import DefinitionPopup from "./DefinitionPopup";
+import { getPopupTheme } from "./popupTheme";
 import TappableSubtitleOverlay from "./TappableSubtitleOverlay";
 import YomifinErrorBoundary from "./YomifinErrorBoundary";
 
@@ -22,6 +36,10 @@ interface Props {
   text: string;
   /** Optional: pause playback while a definition is open (nice-to-have). */
   onLookupOpen?: () => void;
+  /** Phase 5: called when the definition popup closes (resume playback). */
+  onLookupClose?: () => void;
+  /** Phase 5: which side to anchor the fixed popup. */
+  popupPosition?: "left" | "right";
   /**
    * Phase 4 — cheap, called at TAP: snapshot the cue range + frame position so the
    * (later) media capture matches the tapped moment. No decoding/seeking here.
@@ -43,11 +61,20 @@ type DictStatus = "loading" | "ready" | "none" | "error";
 export default function YomifinLookupLayer({
   text,
   onLookupOpen,
+  onLookupClose,
+  popupPosition = "right",
   onSnapshotCard,
   onCaptureMedia,
 }: Props) {
+  const { settings } = useSettings();
+  const dictConfig = settings.yomifinDictionaryConfig ?? {};
+  const theme = useMemo(
+    () => getPopupTheme(settings.yomifinPopupTheme),
+    [settings.yomifinPopupTheme],
+  );
   const dictRef = useRef<YomifinDictionary | null>(null);
   const [status, setStatus] = useState<DictStatus>("loading");
+  const [tints, setTints] = useState<Record<string, string>>({});
   const [result, setResult] = useState<LookupResult | null>(null);
   // Subtitle cue text frozen at tap time (Phase 3: the card's sentence), so it stays
   // correct even if playback advances while the popup is open.
@@ -60,9 +87,13 @@ export default function YomifinLookupLayer({
   // Open the installed dictionary db once for the player screen's lifetime. Opening is
   // instant (no parse); if none is installed yet, the overlay still shows text but taps
   // do nothing (status "none").
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reload when the config changes
   useEffect(() => {
     try {
-      const loaded = loadInstalledDictionary();
+      const installed = listInstalledDictionaries().map((d) => d.title);
+      const resolved = resolveDictionaryConfig(installed, dictConfig);
+      setTints(tintMap(resolved));
+      const loaded = loadInstalledDictionary(enabledTitlesInOrder(resolved));
       if (loaded) {
         dictRef.current = loaded.dict;
         setStatus("ready");
@@ -73,7 +104,13 @@ export default function YomifinLookupLayer({
       console.error("[YOMIFIN DICT] open failed:", err);
       setStatus("error");
     }
-  }, []);
+  }, [JSON.stringify(dictConfig)]);
+
+  // Close + resume (used by both the ✕ button and the tap-outside backdrop).
+  const closeLookup = () => {
+    setResult(null);
+    onLookupClose?.();
+  };
 
   const handleWordTap = async (input: string) => {
     const dict = dictRef.current;
@@ -102,6 +139,12 @@ export default function YomifinLookupLayer({
 
   return (
     <>
+      {/* Tap-outside-to-close backdrop. Sits BELOW the subtitle overlay (zIndex 9999)
+          so tapping another word runs a new lookup rather than closing; taps anywhere
+          else dismiss + resume. Only mounted while a definition is open. */}
+      {result ? (
+        <Pressable style={styles.backdrop} onPress={closeLookup} />
+      ) : null}
       <TappableSubtitleOverlay
         text={text}
         onWordTap={status === "ready" ? handleWordTap : undefined}
@@ -127,7 +170,10 @@ export default function YomifinLookupLayer({
       {result ? (
         <YomifinErrorBoundary label='popup'>
           <DefinitionPopup
+            key={cardBaseRef.current}
             result={result}
+            theme={theme}
+            dictTints={tints}
             sentence={sentence}
             getMedia={() => {
               const ctx = cardCtxRef.current;
@@ -135,7 +181,8 @@ export default function YomifinLookupLayer({
                 ? onCaptureMedia(ctx, cardBaseRef.current)
                 : undefined;
             }}
-            onClose={() => setResult(null)}
+            position={popupPosition}
+            onClose={closeLookup}
           />
         </YomifinErrorBoundary>
       ) : null}
@@ -144,6 +191,14 @@ export default function YomifinLookupLayer({
 }
 
 const styles = StyleSheet.create({
+  backdrop: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 9990,
+  },
   badge: {
     position: "absolute",
     top: 12,

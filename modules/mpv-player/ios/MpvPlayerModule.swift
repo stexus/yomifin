@@ -153,6 +153,11 @@ public class MpvPlayerModule: Module {
       AsyncFunction("addSubtitleFile") { (view: MpvPlayerView, url: String, select: Bool) in
         view.addSubtitleFile(url: url, select: select)
       }
+
+      // YOMIFIN Phase 5: prev/next subtitle cue navigation (mpv sub-seek).
+      AsyncFunction("subSeek") { (view: MpvPlayerView, delta: Int) in
+        view.subSeek(delta)
+      }
       
       // Subtitle positioning functions
       AsyncFunction("setSubtitlePosition") { (view: MpvPlayerView, position: Int) in

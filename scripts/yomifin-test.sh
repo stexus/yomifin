@@ -32,8 +32,12 @@ echo "── [4/5] sqlite backend (parity with in-memory + optional real db) ─
 bun utils/yomifin/SqliteDictionaryDatabase.test.ts
 
 echo
-echo "── [5/5] dictionary importer (idempotent + parity, synthetic + real) ─"
+echo "── [5/6] dictionary importer (idempotent + parity, synthetic + real) ─"
 bun utils/yomifin/importDictionary.test.ts
+
+echo
+echo "── [6/6] dictionary config reconciler + popup selection model ──────"
+bun utils/yomifin/dictionaryConfig.test.ts
 
 echo
 echo "✅ all yomifin regression guards passed"

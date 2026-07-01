@@ -370,6 +370,11 @@ class MpvPlayerView: ExpoView {
 	func addSubtitleFile(url: String, select: Bool = true) {
 		renderer?.addSubtitleFile(url: url, select: select)
 	}
+
+	// YOMIFIN Phase 5: prev/next subtitle cue navigation.
+	func subSeek(_ delta: Int) {
+		renderer?.subSeek(delta)
+	}
 	
 	// MARK: - Audio Track Controls
 	
