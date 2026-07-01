@@ -179,184 +179,15 @@ only, so a new reading on an existing Expression is still rejected).
 
 ---
 
-## Phase –1 — Environment (prerequisite, do once)
+## Phases –1 → 4 — DONE ✅ (detail archived)
 
-**Goal:** be able to build and run *unmodified* Streamyfin on the iPad.
-
-**Build infrastructure (PROVISIONAL — see CONTEXT §1a; don't get married to it):**
-intended setup is Linux desktop → SSH → headless M4 Mac Mini (build box) → WiFi →
-iPad. Fall back to coding directly on the Mac if this is more friction than it's
-worth. One-time setup steps to expect:
-- Install Xcode on the Mini headlessly (`xcodes`, then `sudo xcodebuild -license
-  accept`).
-- One VNC/Screen Sharing session to set up Apple ID + development certificate +
-  device/provisioning in Xcode's GUI.
-- Pair the iPad by cable ONCE to enable wireless deploy; thereafter use
-  `xcrun devicectl` over WiFi (needs explicit `--device <id>`).
-- Add `security unlock-keychain` to the build script to avoid the SSH signing
-  failure. Budget an afternoon for signing/keychain specifically.
-
-**Then:**
-- Set up the Node/Expo toolchain and CocoaPods on the Mini.
-- Clone Streamyfin, get it building, run it on the physical iPad (not just the
-  simulator — the simulator may not exercise the libmpv path correctly).
-- Connect it to the real Jellyfin server; confirm a video plays via its libmpv
-  backend.
-
-**Exit criteria:** unmodified Streamyfin plays a Jellyfin video on the physical iPad,
-built and deployed via the chosen infrastructure. **If this fails, stop** —
-everything downstream depends on it. Do not modify anything yet.
-
----
-
-## Phase 0 — THE OVERLAY SPIKE (the hinge) — DONE ✅ PASS
-
-**Result:** overlay-on-mpv PASSED on the physical iPad. libmpv renders into an
-`AVSampleBufferDisplayLayer` (a normal CALayer in a plain UIView/ExpoView), not a
-raw Metal/GL surface; `MpvPlayerView` doesn't swallow touches; and Streamyfin
-already overlays interactive RN `<Controls>` as siblings of the player. A hardcoded
-tappable 猫 label mounted over playing video received taps and logged. **Overlay is
-the adopted container; sidebar is a trivial future fallback.** Seam map written to
-`PHASE0_SEAMS.md`. Throwaway spike code removed.
-
-
-**Goal:** prove (or kill) overlay-on-mpv with the smallest possible change.
-
-**Investigation first (Claude Code task):** map Streamyfin's player. Produce a short
-report identifying seams (a)–(d) from `CONTEXT.md §5`: the video-surface view, how to
-read current timestamp, how to snapshot a frame, how to access subtitle tracks and
-disable mpv's own subtitle rendering. Do not refactor — just locate and document.
-
-**The spike:** render ONE hardcoded tappable label (e.g. the word 猫) positioned
-**on top of** the libmpv video surface. Tapping it logs to console. Nothing else.
-
-**Exit criteria (branch point):**
-- **PASS** — the label sits over playing video and receives the tap →
-  **overlay architecture confirmed.** Proceed with overlay as the container in all
-  later phases. Sidebar becomes a trivial future fallback.
-- **FAIL** — the mpv surface won't accept touchable overlays (swallows touches /
-  refuses sibling views) → **fall back to the sidebar container** (flex row: mpv view
-  at reduced width + a sidebar view holding the tappable text). Re-run this same
-  one-label tap test inside the sidebar to confirm, then proceed with sidebar.
-
-Either way you exit Phase 0 with a **known container** for tappable text. All
-remaining phases are container-agnostic — only the *mount location* of the text
-differs; the engine, parsing, and card logic are identical.
-
-**Throwaway code is expected here.** Do not build for reuse; build to learn.
-
----
-
-## Phase 1 — Tappable subtitles synced to playback — DONE ✅ PASS
-
-**Result:** PASS on the physical iPad. Fetched one Jellyfin SRT (287 cues parsed),
-mpv's own subs disabled, the active line renders bottom-center over the video and
-updates with playback, and tapping a word logs the correct from-token-to-end-of-line
-text. Tap anchors are per-grapheme (Intl.Segmenter word granularity is not present
-in this Hermes build → per-grapheme fallback) — acceptable, since Phase 2 owns real
-boundaries. Code (isolated language layer): `utils/yomifin/{srt,segment,fetchSubtitleSrt}.ts`,
-`components/yomifin/TappableSubtitleOverlay.tsx`, wired in
-`app/(auth)/player/direct-player.tsx`.
-
-**Original goal:** real subtitle text, tappable, synced to the video, in the chosen container.
-
-1. Fetch ONE SRT file for the playing item from Jellyfin as data. Parse it
-   (lines + start/end timings). SRT only for now.
-2. Disable mpv's own subtitle rendering (`sub-visibility=no` / don't load the sub
-   track into mpv).
-3. Read mpv's current playback timestamp; determine the active subtitle line.
-4. Render the active line as tappable word-spans (segment the line into tap anchors;
-   the segmenter can be crude here — even naive — because Phase 2 owns real
-   boundaries). Tap → log the tapped token + the text from that token to end of line.
-5. Advance/replace the line as playback time crosses boundaries.
-
-**Exit criteria:** playing a Jellyfin video, the correct subtitle line shows in the
-container and updates with playback; tapping a word logs the correct "from-here-to-
-end-of-line" text.
-
----
-
-## Phase 2 — Real Yomitan lookup (second-biggest risk)
-
-**Goal:** tapping a word produces a real dictionary definition via harvested Yomitan
-core. This is where "working Yomitan support" is actually proven.
-
-**Investigation first (Claude Code task):** map Yomitan's core. Identify and assess
-extraction difficulty for: the **deinflector**, the **dictionary-database / lookup
-layer** (and its IndexedDB dependency), and the **structured-content renderer**.
-Output: which modules to lift, what their external dependencies are, and the plan to
-repoint storage to **SQLite or in-memory**.
-
-**Build:**
-1. Harvest the Yomitan core modules into the RN app, discarding the extension shell
-   (storage, DOM scanning, messaging, background/content-script split).
-2. Load ONE dictionary the crude way (in memory is fine for MVP; do not solve
-   large-scale SQLite storage yet). Use a Japanese dictionary first (deinflection is
-   the harder, more valuable path to prove).
-3. Wire Phase 1's tap → forward-greedy lookup (deinflection for JA) → result.
-4. Render the definition in a popup using the **structured-content renderer** (needed
-   even for "definitions only").
-
-**Exit criteria:** tapping a conjugated Japanese word in a real subtitle resolves to
-its dictionary entry and shows a correctly rendered definition popup. (Chinese
-longest-match can be validated next, but JA-with-deinflection is the gate.)
-
-**DONE ✅** — plus two pivots that changed *how* this works vs the text above:
-storage is **SQLite** (not in-memory; see STATUS → Pivot A) and subtitle text is
-**mpv-driven** (not app-fetched SRT; see STATUS → Pivot B). Code lives in
-`utils/yomifin/` (deinflect, termMatching, Sqlite/InMemory DBs, importer, lookup,
-structuredContent) and `components/yomifin/` (overlay, popup, StructuredContent,
-error boundary, lookup layer).
-
----
-
-## Phase 3 — One Anki card (sentence only)  ← NEXT
-
-**Goal:** close the loop end to end.
-
-1. Popup gets a "make card" button.
-2. On press, assemble a note: the looked-up word + the current full subtitle sentence.
-   No audio, no image yet.
-3. POST a complete note to the 24/7 server's AnkiConnect (`addNote`) into a
-   **hardcoded** deck/note-type for now (profiles are v2).
-4. Confirm the card appears in Anki.
-
-**Exit criteria:** tapping a word and pressing "make card" lands a sentence card in
-Anki on the server. **This completes the MVP.**
-
-### Implementation notes (current insight after Pivots A/B)
-
-- **Where the sentence comes from (changed by Pivot B):** the current sentence is the
-  live mpv subtitle text — already in `direct-player`'s `yomifinSubtitleText` state and
-  passed to `YomifinLookupLayer` as the `text` prop. **Capture it at tap time** (in
-  `handleWordTap`) so it's frozen even if playback continues, and thread it into
-  `DefinitionPopup` (which currently only gets the `LookupResult`). The tapped line is
-  also available in `TappableSubtitleOverlay.handleTokenPress` (`line`).
-- **Where the word/reading/definition come from:** the `LookupResult` already has
-  `entries[0].term` (lemma), `.reading`, `.definitions`, and `.matchedText` (surface).
-  Decide field mapping: e.g. Expression=lemma, Reading=reading, Sentence=captured
-  subtitle, optionally a plain-text gloss. (Glossary is structured content — for the
-  Anki field, flatten to text or send minimal HTML; don't ship the RN tree.)
-- **No CORS in React Native.** AnkiConnect's CORS allow-list is a *browser* concern;
-  native `fetch` from RN bypasses it. The user must still set AnkiConnect
-  `webBindAddress` to `0.0.0.0` (or LAN IP) so it's reachable off-localhost. POST:
-  `fetch('http://<server>:8765', {method:'POST', body: JSON.stringify({action:'addNote',
-  version:6, params:{note:{deckName, modelName, fields:{...}, tags:['yomifin'],
-  options:{allowDuplicate:false}}}})})`. Response is `{result, error}` — surface
-  `error` to the user (e.g. duplicate, missing deck/model).
-- **Config:** add a minimal **Anki settings screen** (mirror the Dictionaries screen
-  pattern: `settings/anki/page.tsx` + route + ListItem) holding server URL, deck,
-  model, and field names. Persist with the app's settings store. Runtime-configurable
-  field mapping is the Phase 5 goal but a basic version here avoids recompiles.
-- **Error isolation:** the "make card" action is async + network — wrap in try/catch,
-  show a success/failure toast; the popup is already inside `YomifinErrorBoundary`.
-- **Phase 4 readiness (don't build yet, but preserve the data):** the
-  `onSubtitleText` event already carries `{start, end}` (the cue's time range) — these
-  are exactly the clip boundaries the server-side ffmpeg step will need. `direct-player`
-  has the Jellyfin `item` + current `progress`. Consider capturing `{itemId, start,
-  end}` alongside the sentence at card time so Phase 4 (audio/image) is a drop-in.
-- **Duplicate handling:** `allowDuplicate:false` + show AnkiConnect's duplicate error
-  is the MVP; `canAddNotes` pre-check and dedupe UX are later polish.
+Phases **–1 (environment), 0 (overlay spike), 1 (tappable subtitles), 2 (Yomitan
+lookup), 3 (one Anki card), 4 (quality media cards)** are complete and on-device
+validated. The authoritative summary — what shipped, the three architecture pivots
+(A: SQLite storage, B: mpv-driven subtitles, C: on-device media), and the native seams
+— is the **STATUS & HANDOFF** section above. Their original per-phase narrative (goals,
+proves/exit-criteria, spike results, seam maps) was moved to
+**`IMPLEMENTATION_PLAN_ARCHIVE.md`** to keep this file focused on the active roadmap.
 
 ---
 
@@ -364,11 +195,15 @@ Anki on the server. **This completes the MVP.**
 
 > **This roadmap supersedes the old Phases 5–8** (profiles / ZH parity / ASS / online
 > subs). Those were de-prioritized. The new priority is to make the *mining + reading*
-> experience excellent: a subtitle sidebar, configurable runtime Anki fields with
-> Yomitan-style field markers, multiple dictionaries with themed UI, multi-result
-> cycleable lookup panes, lookup-engine fidelity, and player-interaction polish.
-> Chinese parity, ASS, and online subtitle sources are pushed to a **"Later / parked"**
-> bucket at the bottom — not dropped, just not next.
+> experience excellent: configurable runtime Anki fields with Yomitan-style field
+> markers, multiple dictionaries with themed UI, lookup-engine fidelity, and
+> player-interaction polish. Chinese parity, ASS, subtitle styling, profiles, online
+> subtitle sources, and the **cycleable-panes popup UI** are collected in **Phase 11
+> (Quality of Life)** — not dropped, just batched into one experience-cleanup pass. The
+> subtitle sidebar is **Phase 12** (last).
+>
+> **Current position (2026-07-01):** Phases 5, 6, 7 are **done**; **Phase 8 (runtime
+> Anki fields) is in progress / next**.
 
 ### Requirements → phase map (so nothing is lost)
 
@@ -380,17 +215,19 @@ Anki on the server. **This completes the MVP.**
 | Two-finger tap = pause; double-tap left/right = seek ∓ | **5** |
 | UI + gesture to go back/forward by **subtitle** (not time) | **5** (nav) / **8** (cue store) |
 | Fix lookup logic to match Yomitan (あっさり → あさり / 漁る, no あ/あっ spam) | **6** |
-| Multiple word readings / lookup results as **cycleable panes** | **6** |
+| Multiple word readings / lookup results as **cycleable panes** (pane *model* done in 6; UI in 11) | **11** |
 | Support 5–10+ **dictionaries** | **7** |
 | Per-dictionary subtle UI boundary (e.g. background tint) | **7** |
 | Popup light / dark / auto theme from settings | **7** |
 | Anki fields **configurable per note type, at runtime** (not hardcoded) | **8** |
 | Yomitan-style field markers ({audio} {glossary} {single-glossary:DICT} {popup-selection-text}) | **8** |
-| Tap a dictionary section (selects all its text) or a single definition within it | **8** (selection model, designed in 6/7) |
+| Tap a dictionary section (selects all its text) or a single definition within it | **8** (block/item selection shipped in 7; sense-level in 8) |
 | Anki card can use **multiple sentences** for sentence/audio (default 1) | **8** (cue store + assembly) |
 | **Batch / dedup media** — multiple words from one sentence share one audio+image (no dup files in Anki) | **9** |
-| Subtitle **sidebar** with timestamps; tap a line → seek there (de-prioritized) | **10** |
-| **Yomitan settings parity** — expose Yomitan's lookup/scan options (max results, scan length, …) | **11** |
+| **Downscale the card picture** (configurable resolution/quality) to save space | **9** |
+| Prominent **top** current-entry indicator ("3 / 15") + swipe / edge-tap to change entry | **11** |
+| Subtitle **sidebar** with timestamps; tap a line → seek there (de-prioritized) | **12** |
+| **Yomitan settings parity** — expose Yomitan's lookup/scan options (max results, scan length, …) | **10** |
 
 ---
 
@@ -471,10 +308,19 @@ pauses; double-tap L/R seeks; prev/next-subtitle moves by cue.
 
 ---
 
-## Phase 6 — Lookup-engine fidelity + multi-result cycleable panes  ← NEXT
+## Phase 6 — Lookup-engine fidelity + pane model — DONE ✅
 
-**Goal:** (a) make matching behave like Yomitan; (b) present results as **one headword
-per pane**, cycled with forward/back, instead of one long dump.
+> **Status: DONE ✅.** Lookup matching now behaves like Yomitan and results are grouped
+> into one pane per headword (each pane carries all that headword's dictionaries). The
+> fidelity audit (`utils/yomifin/LOOKUP_FIDELITY.md`) proves exactly one seam
+> (`findTermsBulk`) decides term existence and it's fully implemented; Phase 7 later
+> switched `findTerms("simple")` → `"group"` (Yomitan's popup mode) so a headword's
+> dictionaries merge into one pane. Regression cases are in `lookup.test.ts`.
+> **The *cycler UI* (one pane at a time, top index, swipe / edge-tap navigation) is
+> NOT part of this phase — it moved to Phase 11 (Quality of Life).**
+
+**Goal:** (a) make matching behave like Yomitan; (b) group results into **one headword
+per pane** (data model), each carrying all its dictionary definitions.
 
 **Investigation first (do before building):** reproduce the あっさり case against the
 vendored Translator and diagnose. Yomitan resolves あっさり → あっさり (own entry), and
@@ -506,18 +352,16 @@ via **emphatic-sequence collapsing** (っ removal) → あさり → deinflect �
    `LookupResult.entries` already maps 1:1 to headwords — group/order them into
    `panes[]` (e.g. 計画通り → [計画通り, 計画, 計〈けい〉, 計〈はか〉]). Keep all dict
    definitions for a headword *inside that pane*; do not flatten across panes.
-3. **Cycler UI.** `DefinitionPopup` shows **one pane at a time** with **◀ / ▶** and an
-   index ("2 / 4"). The main pane stays compact; cycling swaps the headword + its
-   definitions. No giant scroll dump on the primary view.
 
-**Exit criteria (on device):** tapping あっさり yields あっさり (first) plus
-あさり / 漁る and does **not** headline bare あ / あっ; tapping 計画通り yields
-cycleable panes 計画通り → 計画 → 計, each showing only its own dictionaries; the test
-suite is green.
+(The *cycler UI* that presents these panes one-at-a-time is Phase 11.)
+
+**Exit criteria (met):** tapping あっさり yields あっさり (first) plus
+あさり / 漁る and does **not** headline bare あ / あっ; tapping 計画通り yields panes
+計画通り → 計画 → 計, each showing only its own dictionaries; the test suite is green.
 
 ---
 
-## Phase 7 — Multiple dictionaries + themed, bounded popup UI
+## Phase 7 — Multiple dictionaries + themed, bounded popup UI — DONE ✅
 
 > **Status: DONE ✅ (pending final on-device pass).** Implemented JS-only (Metro
 > reload). Highlights + one engine change worth noting:
@@ -587,7 +431,7 @@ and each field's value is a **template string** of markers resolved against the 
 pane + selection + media + sentence range. This is the most architectural phase —
 design before building.
 
-**Cue store + multi-cue selection substrate (built here, reused by Phase 10's sidebar).**
+**Cue store + multi-cue selection substrate (built here, reused by Phase 12's sidebar).**
 The multi-sentence markers below need the whole subtitle track, which mpv's live
 `sub-text` does not hand us up front. So load + parse the full track once per item into
 a `Cue[]` (`{index, start, end, text}`), exposed via a small context/atom. Reuse
@@ -595,7 +439,7 @@ a `Cue[]` (`{index, start, end, text}`), exposed via a small context/atom. Reuse
 (BITMAP/PGS degrade to single-cue = mpv's current `{start,end}`). Track a **selected
 cue range** `[anchorIdx…extendIdx]` (default = the single tapped cue, span **1**) with
 "extend to previous / next line" affordances in the popup. This is a *data* substrate —
-no sidebar UI yet (that's Phase 10, which just renders this store).
+no sidebar UI yet (that's Phase 12, which just renders this store).
 
 **Runtime note-type config:**
 - Replace `ankiConfig.ts`'s hardcoded `AnkiFieldMap` with a settings-stored, per-model
@@ -614,9 +458,7 @@ range (built above). Initial marker set:
 - `{expression}` / `{reading}` / `{word}` — headword + reading of the active pane.
 - `{sentence}` — the selected cue range joined (default 1 cue; more if extended).
 - `{audio}` — **word** audio. Open question / decision needed: we have no Forvo/jpod
-  pipeline on device. Options: (a) ship a configurable audio-source URL like Yomitan;
-  (b) on-device TTS; (c) reuse the **sentence** audio clip. Pick the smallest viable
-  one and document; don't block the phase on perfect word audio.
+  pipeline on device. Options: (a) ship a configurable audio-source URL like Yomitan.
 - `{sentence-audio}` — the `[sound:…]` ref for the clip over the **selected cue range**
   (this is the multi-sentence audio requirement: range = min start … max end of the
   selected cues; default 1).
@@ -715,6 +557,12 @@ across a reinstall.
      in the sidebar/popup that lets the user tap several words on the current cue, then
      commit all cards at once — still one capture, N notes. Only build if (a) isn't
      enough in practice.
+5. **Downscale the picture (space saving).** Add a setting for capture image resolution
+   / quality (e.g. max width or a JPEG quality factor) and downscale before base64 +
+   `storeMediaFile`, so cards don't carry full-frame stills. Cheapest path: pass a size
+   cap to the native `captureScreenshot` seam (or downscale in `ankiMedia.ts` after
+   capture). Default to a sensible cap (e.g. ~720px wide). Combined with dedup, this
+   keeps the media footprint small.
 
 **Open question (decide during build):** the hash should be stable but cheap on Hermes;
 a short FNV/CRC over the key string is plenty (no crypto needed). Confirm two genuinely
@@ -728,30 +576,7 @@ file.
 
 ---
 
-## Phase 10 — Subtitle sidebar (transcript)  [de-prioritized — do last]
-
-**Goal:** a tappable transcript of the whole subtitle track alongside the video. Nice
-to have, not important — explicitly the **last** item.
-
-**Cheap by now.** Phase 8 already built + exposed the **cue store** (`Cue[]` parsed from
-the full track) and the active-cue mapping. This phase is essentially just the panel UI
-over that store; no new data plumbing.
-
-**Build:**
-1. **Sidebar UI.** A collapsible panel (flex-row: video shrinks, sidebar takes a fixed
-   width — exactly the Phase 0 "sidebar fallback" layout, now used by choice). Each row:
-   timestamp + line text; the **active line is highlighted and auto-scrolls into view**.
-   Tapping a row → `seek(cue.start * 1000)`. A toggle button shows/hides it. For
-   BITMAP/PGS tracks (no text) the sidebar is simply unavailable — degrade gracefully.
-2. **Reuse for navigation.** Wire any deferred Phase 5 prev/next-subtitle buttons to the
-   same cue store (JS path), so they work without the native `sub-seek`.
-
-**Exit criteria (on device):** the sidebar lists the whole track with timestamps;
-tapping a line seeks there; the active line tracks playback and auto-scrolls into view.
-
----
-
-## Phase 11 — Yomitan settings parity
+## Phase 10 — Yomitan settings parity
 
 **Goal:** stop hardcoding lookup behavior; surface the Yomitan-equivalent options as real
 user settings so the engine can be tuned the way Yomitan users expect. This is a
@@ -769,8 +594,8 @@ honors):
   (`scanLength`); today this is an implicit constant in the forward-greedy scan.
 - **Deinflection / text-transform toggles** — the per-language `textPreprocessors`
   Yomitan exposes (e.g. collapse emphatic sequences, halfwidth/fullwidth, alphabetic
-  case, hiragana↔katakana). Phase 6 wires these into the pipeline; here they become
-  **user-toggleable** with Yomitan-matching defaults.
+  case, hiragana↔katakana). Phase 6 already wired these into the pipeline; here they
+  become **user-toggleable** with Yomitan-matching defaults.
 - **`removeNonJapaneseCharacters`** and other flags currently hardcoded in the
   `findTerms` call.
 - **Sort / grouping mode** — result ranking (term/frequency), if the vendored code
@@ -796,64 +621,101 @@ cycleable panes; changing scan length changes how far a long compound is matched
 toggling a text-transform (e.g. emphatic collapse) changes the あっさり result; defaults
 match Yomitan out of the box. No lookup knob remains a source-level constant.
 
+## Phase 11 — Quality of Life (batched experience cleanup)
+
+A grab-bag of polish done in one pass. Independent items; no strict internal order.
+
+**Cycleable-panes popup UI (moved here from Phase 6).** The pane *model* already exists
+(Phase 6: one headword per pane, all its dictionaries inside). This is the *presentation*:
+- `DefinitionPopup` shows **one pane at a time** instead of a long scroll dump.
+- The current-entry indicator must be **prominent and at the TOP** (e.g. "3 / 15" beside
+  the headword), not buried at the bottom where the eye never goes.
+- Navigation between panes: **horizontal swipe** across the popup, **and** taps on the
+  **left / right edges** of the box (◀ / ▶ hit zones), so both work.
+- *Exit check:* tapping 計画通り shows cycleable panes 計画通り → 計画 → 計; the
+  "N / M" index is clearly visible at the top; swipe and edge-tap both change panes.
+
+**Profiles** — { language, deinflection settings, dictionary set, deck, note type, field
+templates } as a switchable bundle (JA vs ZH switches engine + destination). Should
+switch **automatically** based on audio or subtitle language, defaulting to the JA
+profile. Natural follow-on once Phase 8's runtime config exists.
+
+**Chinese parity** — validate longest-match lookup against real ZH dictionaries
+(`language-descriptors.js` already includes ZH; expect verification, not new code).
+
+**ASS subtitles** — parse ASS, strip override tags, render dialogue as tappable plain
+text (accept loss of typesetting in the tappable layer).
+
+**Better subtitle formatting** — black outline for readability; runtime style changes;
+movable vertical offset, font size, etc.
+
+**Online subtitle sources** — pull subs from APIs (e.g. jimaku.cc) into an internal
+track. On-device syncing of downloaded subs to an internal track via a backend like
+alass/ffsubsync (feasibility TBD).
+
 ---
+## Phase 12 — Subtitle sidebar (transcript)  [de-prioritized — do last]
 
-## Later / parked (not next — pulled from the old Phases 5–8)
+**Goal:** a tappable transcript of the whole subtitle track alongside the video. Nice
+to have, not important — explicitly the **last** item.
 
-- **Profiles** — { language, deinflection settings, dictionary set, deck, note type,
-  field templates } as a switchable bundle (JA vs ZH switches engine + destination).
-  Natural follow-on once Phase 8's runtime config exists.
-- **Chinese parity** — validate longest-match lookup against real ZH dictionaries
-  (`language-descriptors.js` already includes ZH; expect verification, not new code).
-- **ASS subtitles** — parse ASS, strip override tags, render dialogue as tappable plain
-  text (accept loss of typesetting in the tappable layer).
-- **Online subtitle sources** — pull subs from APIs (e.g. jimaku.cc) into an internal
-  track.
+**Cheap by now.** Phase 8 already built + exposed the **cue store** (`Cue[]` parsed from
+the full track) and the active-cue mapping. This phase is essentially just the panel UI
+over that store; no new data plumbing.
+
+**Build:**
+1. **Sidebar UI.** A collapsible panel (flex-row: video shrinks, sidebar takes a fixed
+   width — exactly the Phase 0 "sidebar fallback" layout, now used by choice). Each row:
+   timestamp + line text; the **active line is highlighted and auto-scrolls into view**.
+   Tapping a row → `seek(cue.start * 1000)`. A toggle button shows/hides it. For
+   BITMAP/PGS tracks (no text) the sidebar is simply unavailable — degrade gracefully.
+2. **Reuse for navigation.** Wire any deferred Phase 5 prev/next-subtitle buttons to the
+   same cue store (JS path), so they work without the native `sub-seek`.
+
+**Exit criteria (on device):** the sidebar lists the whole track with timestamps;
+tapping a line seeks there; the active line tracks playback and auto-scrolls into view.
 
 ---
 
 ## How to drive this with Claude Code
 
 - **One phase at a time.** Do not let Claude Code skip ahead or write later phases as
-  if earlier risks are resolved. **Phase 5 is MOSTLY DONE** (some items deferred — see
-  the Phase 5 header). MVP + Phase 4 are DONE; **next up is Phase 6**
-  (lookup-engine fidelity + cycleable panes).
-- **Roadmap order (revised):** 6 lookup fidelity + panes → 7 dictionaries + theming →
-  8 runtime Anki fields/markers (+ cue store) → 9 media dedup/batch → **10 sidebar
-  (de-prioritized, last)**. **Phase 11 (Yomitan settings parity)** is a *separate,
-  incremental* item — fold it in wherever a hardcoded lookup knob becomes annoying.
-- **Investigations before builds** where a phase calls for it — notably **Phase 6**
-  (lookup-engine fidelity) and **Phase 8** (marker engine / runtime fields): get the
-  map before cutting.
+  if earlier risks are resolved. **MVP + Phases 5, 6, 7 are DONE**; **next up is
+  Phase 8** (runtime Anki fields + Yomitan-style markers).
+- **Roadmap order (current):** ~~5 player polish~~ → ~~6 lookup fidelity + pane model~~
+  → ~~7 dictionaries + theming~~ → **8 runtime Anki fields/markers (+ cue store) ← NEXT**
+  → 9 media dedup/batch → 10 Yomitan settings parity → 11 Quality of Life (cycler UI +
+  profiles + ZH + ASS + subtitle styling + online subs) → **12 sidebar (last)**.
+- **Investigations before builds** where a phase calls for it — notably **Phase 8**
+  (marker engine / runtime fields): get the map before cutting.
 - **Honor exit criteria** as literal gates. A phase isn't done until its criterion is
   demonstrably met on the physical iPad.
 - **Keep the language layer isolated + guarded:** run `./scripts/yomifin-test.sh`
   after any change under `utils/yomifin/`; keep the lookup/popup inside
   `YomifinErrorBoundary`.
-- **Two new architectural seams to respect:** (1) the **pane model** (Phase 6) — one
+- **Two architectural seams to respect:** (1) the **pane model** (Phase 6, done) — one
   headword per pane, its dicts inside it; (2) the **marker engine** (Phase 8) — all
   Anki field values flow through `renderTemplate`, nothing hardcoded. The **selection
-  model** spans Phases 7–8; design its data shape in 7, consume it in 8.
+  model** spans Phases 7–8: Phase 7 shipped block/item selection; Phase 8 adds
+  sense-level selection + consumes it via `{popup-selection-text}`.
 - Pivots A/B/C (SQLite storage, mpv-driven subtitles, on-device media) are settled —
-  don't reopen them. The full-track parse (Phase 8 cue store, rendered by Phase 10's
+  don't reopen them. The full-track parse (Phase 8 cue store, rendered by Phase 12's
   sidebar) is a **data source only**, never the active-line overlay (that stays
   mpv-driven).
 
 ## Suggested next Claude Code prompt
 
-> Read CONTEXT.md and IMPLEMENTATION_PLAN.md. Phase 5 is mostly done; we are starting
-> **Phase 6 — Lookup-engine fidelity + multi-result cycleable panes**. Do the
-> INVESTIGATION first: reproduce the あっさり case against the vendored Yomitan
-> Translator and determine why the app surfaces bare あ / あっ and misses あさり / 漁る
-> — check (1) whether the JA text preprocessors (`collapseEmphaticSequences` in
-> `utils/yomifin/yomitan/language-descriptors.js`) are actually wired into the
-> `findTerms` pipeline we lifted (our call passes `textReplacements: [null]`), and
-> (2) how results are merged/sorted across scan lengths (are short prefixes headlined
-> instead of demoted?). Report which it is, the one-line vendored seam, and the fix —
-> do NOT change code yet. Then, after I confirm, implement the fix with a regression
-> case in `utils/yomifin/lookup.test.ts` (あっさり ⇒ includes あさり/漁る with full
-> あっさり first; 計画通り ⇒ 計画通り, 計画, 計) and run `./scripts/yomifin-test.sh`.
-> Only after the engine fix is green, reshape `DefinitionPopup` around the **pane
-> model**: one headword per pane (≈ today's `LookupEntry`, all its dictionaries kept
-> inside the pane), shown one at a time with ◀ / ▶ and an index. Honor the Phase 6
-> exit criteria on the physical iPad.
+> Read CONTEXT.md and IMPLEMENTATION_PLAN.md. Phases 5–7 are done; we are starting
+> **Phase 8 — Runtime Anki field configuration + Yomitan-style field markers**. This is
+> the most architectural phase, so DESIGN before building: write a short plan for (a)
+> the **cue store + multi-cue selection substrate** (full-track parse via
+> `utils/yomifin/{srt,fetchSubtitleSrt}.ts`, a `Cue[]` context, a selected cue range
+> defaulting to 1), (b) the **marker engine** `renderTemplate(template, ctx)` and its
+> `MarkerContext`, and (c) how `ankiConfig.ts`'s hardcoded field map is replaced by a
+> per-model, settings-stored mapping fed from AnkiConnect `modelFieldNames`. Confirm the
+> marker set with me ({expression} {reading} {sentence} {sentence-audio} {picture}
+> {glossary} {single-glossary:DICT} {popup-selection-text}) and the open question on
+> {audio} (word audio source) before writing code. Then implement incrementally, keep
+> the language layer pure (settings passed in, not read inside `utils/yomifin/`), add
+> tests, run `./scripts/yomifin-test.sh`, and honor the Phase 8 exit criteria on the
+> physical iPad.
