@@ -20,8 +20,6 @@ set shell := ["bash", "-uc"]
 # iPad's RN/expo device UDID (from `xcrun xctrace list devices`).
 DEVICE_UDID := env_var_or_default("DEVICE_UDID", "00008027-000641082130402E")
 
-# Helper: run a command inside the Nix dev shell.
-nix := "nix develop --command bash -c"
 
 # Default: list all recipes.
 default:
@@ -41,29 +39,29 @@ xcode-license:
 
 # Install JS deps and pull native submodules.
 deps:
-    {{nix}} 'bun i && bun run submodule-reload'
+    bun i && bun run submodule-reload
 
 # Install the Metal toolchain (required for the MPVKit/libmpv native build).
 metal-toolchain:
-    {{nix}} 'bun run ios:install-metal-toolchain'
+    bun run ios:install-metal-toolchain
 
 # Generate ios/ (and run pod install). Re-run after native/app.json changes.
 prebuild:
-    {{nix}} 'bun run prebuild'
+    bun run prebuild
 
 # --- Local build (this Mac) ----------------------------------------------
 
 # Build + deploy to the iPad from this Mac.
 local:
-    {{nix}} 'EXPO_TV=0 bunx expo run:ios --device {{DEVICE_UDID}}'
+    EXPO_TV=0 bunx expo run:ios --device {{DEVICE_UDID}}
 
 # JS/TS-only dev loop — start Metro (no native rebuild for JS changes).
 dev:
-    {{nix}} 'bunx expo start --dev-client'
+    bunx expo start --dev-client
 
 # List attached devices + their UDIDs.
 devices:
-    {{nix}} 'xcrun xctrace list devices'
+    xcrun xctrace list devices
 
 # --- Remote build (run while SSH'd into the headless Mac build box) -------
 
@@ -79,11 +77,11 @@ remote-ci:
 
 # Clean-regenerate the native ios/ project.
 clean:
-    {{nix}} 'bun run clean'
+    bun run clean
 
 # Run the full JS check suite (typecheck, lint, format, i18n, doctor).
 test:
-    {{nix}} 'bun run test'
+    bun run test
 
 # Yomifin regression guards (see YOMIFIN_CONTEXT.md §8).
 yomifin-test:
