@@ -26,7 +26,7 @@ function deinflectForms(source) {
 // lemma directly. Cases like 見せてくれた→見せる or 静かじゃない→静か are intentionally
 // NOT here: they resolve via the Translator's forward-greedy substring shortening
 // (見せて→見せる) or zero-deinflection exact match on a shorter substring (静か),
-// which is the next Phase 2 build step, not the raw deinflector. See PHASE2_YOMITAN.md.
+// which is the next Phase 2 build step, not the raw deinflector. See docs/yomifin/archive/PHASE2_YOMITAN.md.
 /** @type {[string, string][]} input → expected lemma that must appear among candidates */
 const cases = [
     ['好きでした', '好き'],

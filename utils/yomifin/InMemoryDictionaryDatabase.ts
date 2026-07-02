@@ -1,6 +1,6 @@
 /*
  * In-memory implementation of the narrow DictionaryDatabase interface the vendored
- * Translator needs (see PHASE2_YOMITAN.md). Kept for tests / small dictionaries; the
+ * Translator needs (see docs/yomifin/archive/PHASE2_YOMITAN.md). Kept for tests / small dictionaries; the
  * device path uses SqliteDictionaryDatabase (in-memory is too heavy on device — a full
  * JMdict is ~300MB heap and minutes to parse). Both share termMatching.ts so results
  * are identical.

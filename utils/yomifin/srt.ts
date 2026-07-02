@@ -1,7 +1,7 @@
 /**
  * Minimal SRT parser for the yomifin tappable-subtitle layer (Phase 1).
  *
- * SRT only for now (CONTEXT §7). Produces cues with ms timings + text.
+ * SRT only for now. Produces cues with ms timings + text.
  * We deliberately keep this tiny and dependency-free.
  */
 

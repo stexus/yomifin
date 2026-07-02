@@ -6,7 +6,7 @@
  * classification / grouping / style mapping logic lives in the RN-free, unit-tested
  * utils/yomifin/structuredContent.ts; this file turns that into <View>/<Text>.
  * Definitions-only scope: images are skipped, links render as styled (tappable) text,
- * tables degrade to simple rows. See PHASE2_YOMITAN.md.
+ * tables degrade to simple rows. See docs/yomifin/archive/PHASE2_YOMITAN.md.
  *
  * Robustness: a glossary item may be a plain string, a structured-content tree, OR a
  * Yomitan WRAPPER object ({type:'structured-content'|'text'|'image', ...}); we normalize

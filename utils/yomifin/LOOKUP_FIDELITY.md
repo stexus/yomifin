@@ -76,19 +76,19 @@ because they're choices, not missing code:
 | `partsOfSpeechFilter` (per-dict) | `true` | deinflected hits filtered by POS conditions from the entry's `rules` | Yomitan default is also on. A dictionary with missing/wrong `rules` could drop a *deinflected* match — same as Yomitan would |
 | `allowSecondarySearches` (per-dict) | `false` | all dicts are primary | **more** permissive than marking some secondary — not a miss source |
 | `sortFrequencyDictionary` | `null` | ranking only | affects order, never existence |
-| `maxScanLength` (ours, `lookup.ts`) | `16` | caps the forward-greedy scan | **the one real cap**: a single match longer than 16 chars won't fully resolve. Fine for words; a knob to lift (Phase 11) |
+| `maxScanLength` (ours, `lookup.ts`) | `16` | caps the forward-greedy scan | **the one real cap**: a single match longer than 16 chars won't fully resolve. Fine for words; a knob to lift (FEATURES.md → Yomitan settings parity) |
 
 ## 4. Known, documented divergences (not bugs — scope/config)
 
 1. **`maxScanLength = 16`** — our forward-greedy cap in `lookup.ts`. Long compounds/phrases
-   beyond 16 chars won't match their full form. Lift/expose per Phase 11 (Yomitan settings
+   beyond 16 chars won't match their full form. Lift/expose per FEATURES.md (Yomitan settings
    parity). Low impact for word lookup.
 2. **Chinese has no text preprocessors** — `language-descriptors.js` sets `zh
    textPreprocessors: {}` (and no deinflection, which ZH doesn't need). So there is **no
    simplified↔traditional folding**: a query in one script won't match an entry stored in
    the other. Expected until Chinese parity (parked). ZH still matches exact form + reading.
 3. **Frequency/pitch/kanji/tag metadata absent** — `findTermMetaBulk`/`findTagMetaBulk`/
-   `findKanji*` are stubs. By design (definitions-only scope, CONTEXT §3.10). Affects
+   `findKanji*` are stubs. By design (definitions-only scope). Affects
    display/sort, never whether a definition is found.
 4. **Trimmed language set** — `language-descriptors.js` registers only JA + ZH (upstream
    has ~50, several with Hermes-hostile `\p{}` regex). Other languages aren't supported by

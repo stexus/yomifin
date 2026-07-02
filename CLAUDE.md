@@ -2,6 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Yomifin (this fork's language-learning layer)
+
+This fork adds "yomifin": tappable subtitles → Yomitan-style dictionary lookup →
+one-press Anki cards. **Before touching anything yomifin-related, read
+`YOMIFIN_CONTEXT.md`** (architecture, settled decisions, gotchas, build/deploy)
+and pick work from **`FEATURES.md`** (the feature tracker). Run
+`./scripts/yomifin-test.sh` after any change under `utils/yomifin/`.
+
 ## Learned Facts Index
 
 IMPORTANT: When encountering issues related to these topics, or when implementing new features that touch these areas, prefer retrieval-led reasoning -- read the relevant fact file in `.claude/learned-facts/` before relying on assumptions.

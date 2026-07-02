@@ -1,7 +1,7 @@
 /**
  * Subtitle line segmentation into TAP ANCHORS (Phase 1).
  *
- * Per CONTEXT §4 the segmenter only produces tap targets — the dictionary (Phase 2)
+ * The segmenter only produces tap targets — the dictionary (Phase 2)
  * decides real word boundaries via forward-greedy lookup. So a crude segmenter is
  * fine here. We try Intl.Segmenter (word granularity) and fall back to per-grapheme.
  */

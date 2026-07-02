@@ -6,7 +6,7 @@
  * media + selected cue range). This kills the hardcoded field map: `buildFields`
  * renders every configured field template through `renderTemplate`.
  *
- * Supported markers (see IMPLEMENTATION_PLAN.md Phase 8):
+ * Supported markers:
  *   {expression} {word}          headword of the active pane
  *   {reading}                    reading/kana of the active pane
  *   {furigana}                   headword as HTML ruby (読む → <ruby>読<rt>よ</rt>…)
@@ -28,7 +28,7 @@
  *   {picture}                    captured frame <img> ref
  *
  * Yomitan-parity note: this is the portable subset of Yomitan's marker set. The
- * pitch/frequency markers are out of scope (CONTEXT §3.10: definitions only), and
+ * pitch/frequency markers are out of scope (definitions-only scope), and
  * Yomitan's full Handlebars template system is NOT vendored — it runs in an offscreen
  * iframe with DOM access (HTML structured-content generation, media provider), which
  * doesn't lift into Hermes/RN cheaply. Revisit only if conditional templates become a

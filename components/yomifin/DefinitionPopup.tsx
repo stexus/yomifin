@@ -24,7 +24,7 @@
  *   - Marker-gated capture: media capture / word-audio fetch run only if some field
  *     template actually references {picture} / {sentence-audio} / {audio}.
  *
- * Definitions-only scope (CONTEXT §3.10): no pitch/frequency display.
+ * Definitions-only scope: no pitch/frequency display.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import {

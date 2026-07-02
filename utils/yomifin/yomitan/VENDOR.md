@@ -3,7 +3,7 @@
 These files are **snapshotted (vendored) from Yomitan**, not consumed as a package
 (Yomitan ships only as a browser extension; there is nothing to `npm update`). Keep
 them as close to upstream as possible so re-vendoring stays a cheap diff. See
-`../../../PHASE2_YOMITAN.md` for the extraction map and rationale.
+`../../../docs/yomifin/archive/PHASE2_YOMITAN.md` for the extraction map and rationale.
 
 ## Upstream source
 

@@ -5,12 +5,12 @@
 # Designed to be run on the Mac build box OVER SSH (the "remote flow"):
 #   Linux desktop --ssh--> headless Mac --wifi--> iPad
 #
-# Why this script exists (see YOMIFIN_CONTEXT.md §8 / §1a):
+# Why this script exists (see YOMIFIN_CONTEXT.md, Dev environment & build):
 #   An SSH session does NOT auto-unlock the login keychain the way a GUI login
 #   does, so `codesign` fails with errSecInternalComponent / "User interaction
 #   is not allowed". We unlock the keychain explicitly before building.
 #   (The signing key's partition list must already include codesign — done once
-#   via `security set-key-partition-list`; see YOMIFIN_CONTEXT.md §8.)
+#   via `security set-key-partition-list`; see YOMIFIN_CONTEXT.md (Dev environment & build).)
 #
 # Nix is found over SSH because Determinate Nix writes PATH setup to /etc/zshenv,
 # which non-interactive SSH commands source.

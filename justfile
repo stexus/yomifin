@@ -1,6 +1,6 @@
 # justfile — Yomifin / Streamyfin dev recipes
 #
-# Wraps the workflows documented in YOMIFIN_CONTEXT.md §8.
+# Wraps the workflows documented in YOMIFIN_CONTEXT.md (Dev environment & build).
 # Everything runs inside the Nix dev shell (`nix develop`) so the toolchain
 # (bun, node, cocoapods, jdk) is reproducible on any Apple Silicon Mac.
 #
@@ -83,6 +83,6 @@ clean:
 test:
     bun run test
 
-# Yomifin regression guards (see YOMIFIN_CONTEXT.md §8).
+# Yomifin regression guards (run after any change under utils/yomifin/).
 yomifin-test:
     ./scripts/yomifin-test.sh

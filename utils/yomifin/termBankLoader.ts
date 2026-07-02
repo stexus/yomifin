@@ -1,7 +1,7 @@
 /*
  * Minimal Yomitan dictionary loader: unzip a .zip dictionary and feed its term banks
  * into an InMemoryDictionaryDatabase. This is the crude in-memory load the MVP calls
- * for (PHASE2_YOMITAN.md) — NOT the full Yomitan importer (no media, no schema
+ * for (docs/yomifin/archive/PHASE2_YOMITAN.md) — NOT the full Yomitan importer (no media, no schema
  * validation, no kanji/meta banks, no SQLite). Those are later phases.
  *
  * Term-bank v3 tuple (dictionary-term-bank-v3-schema.json):

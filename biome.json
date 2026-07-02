@@ -4,6 +4,8 @@
     "includes": [
       "**/*",
       "!node_modules",
+      "!.direnv",
+      "!yomitan",
       "!ios",
       "!android",
       "!Streamyfin.app",

@@ -6,7 +6,7 @@
  * end of the line", get back the forward-greedy matched length + the resolved
  * dictionary entries (term, reading, how it deinflected, and the glossary to render).
  *
- * See PHASE2_YOMITAN.md. The glossary entries are returned untouched (plain strings or
+ * See docs/yomifin/archive/PHASE2_YOMITAN.md. The glossary entries are returned untouched (plain strings or
  * Yomitan structured-content objects) for the structured-content renderer to handle.
  */
 import type { InMemoryDictionaryDatabase } from "./InMemoryDictionaryDatabase";

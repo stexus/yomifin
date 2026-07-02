@@ -1,7 +1,7 @@
 /*
  * Loads the bundled Yomitan dictionary asset into an in-memory YomifinDictionary.
  *
- * MVP path (PHASE2_YOMITAN.md): one dictionary, loaded crudely into memory. The .zip
+ * MVP path (docs/yomifin/archive/PHASE2_YOMITAN.md): one dictionary, loaded crudely into memory. The .zip
  * is bundled as a binary asset (metro.config.js adds 'zip' to assetExts); we resolve
  * it via expo-asset, read the bytes via expo-file-system, then unzip + index.
  *
