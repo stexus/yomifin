@@ -83,33 +83,71 @@ composition — never mix RN responders with RNGH. Validate two-finger + double-
 on the iPad before building the rest. Add settings keys
 (`yomifinDoubleTapSeconds`, etc.) only with this rebuild.
 
-### 6. Pane cycler polish
+### 6. Stremio addon sources (separate tab, mining-capable)
+Play content resolved via Stremio addons alongside Jellyfin, with the full mining
+pipeline (tappable subs → lookup → Anki card with audio+image). **Prerequisites
+are already met:** the user has debrid services (Real-Debrid-style) set up and
+Stremio addons configured — so `/stream/` resolution returns range-seekable HTTPS
+direct links, which is exactly what mpv playback AND the capture seams need. Do
+NOT build on-device torrent playback; debrid-resolved (or plain HTTP) streams only.
+
+Why mining mostly survives the source swap (verified against the code):
+- Tappable subs are mpv-driven (Pivot B) — embedded subs work for any source; the
+  mpv module already supports external subtitle URLs (`externalSubtitles` load
+  option + `addSubtitleFile(url)` → `sub-add`).
+- `captureScreenshot`/`extractAudio` take a `sourceUrl` — any range-seekable HTTPS
+  URL works (that's what the debrid links are); `""` falls back to the playing URL.
+- Lookup/popup/Anki are source-agnostic. `{document-title}` comes from addon meta.
+- Cue store: the only Jellyfin-specific seam (`Stream.srt` fetch). External SRT
+  URLs feed `parseSrt` directly; embedded-only subs degrade to single-cue (already
+  handled). Build alongside "Online subtitle sources" (below) — same external-SRT
+  → cue-store path.
+
+Architecture boundary (design before building):
+1. `utils/stremio/` — pure, bun-testable addon client mirroring the yomifin
+   pattern: manifest fetch/validation, catalog/meta/stream resolution, addon list
+   + debrid config in settings. Stremio addons are plain HTTP JSON APIs
+   (`manifest.json`, `/catalog/{type}/{id}.json`, `/meta/`, `/stream/`,
+   `/subtitles/`). Tests against recorded fixtures.
+2. Separate tab: catalogs → meta → stream picker, shell UI over (1).
+3. A second, MINIMAL player route taking `{url, title, subtitleUrls}` — do NOT
+   thread Stremio through `direct-player.tsx` with conditionals. First extract the
+   yomifin wiring (cue store, capture context, pause-on-lookup, popup mount) from
+   `direct-player.tsx` into a shared hook/component both players use — this is the
+   one risky step (touches the load-bearing file): one careful session + a full
+   Jellyfin-side device regression pass before building the new route on top.
+
+Exit criteria (on device): browse an addon catalog, play a debrid-resolved stream,
+subtitles tappable (embedded AND an external SRT), mine a card whose audio+image
+capture from the stream URL; the Jellyfin player path is demonstrably unregressed.
+
+### 7. Pane cycler polish
 Cycler exists (footer ◀ n/m ▶). Wanted: prominent index at the TOP beside the
 headword, horizontal swipe across the popup, and left/right edge-tap zones.
 Pure popup UI change.
 
-### 7. Profiles (JA/ZH bundles)
+### 8. Profiles (JA/ZH bundles)
 { language, dictionary set, deck, model, field templates, word-audio sources } as
 a switchable bundle; auto-select by audio/subtitle track language, default JA.
 Natural composition of existing runtime configs — design the settings shape so
 current single-profile config becomes "the JA profile" without migration pain.
 
-### 8. Chinese parity
+### 9. Chinese parity
 `language-descriptors.js` already registers ZH (longest-match, no deinflection).
 Expect verification, not new code — plus: ZH has **no text preprocessors**, so no
 simplified↔traditional folding (documented divergence, LOOKUP_FIDELITY §4). Adding
 an st/ts folding preprocessor is the real work. Needs a real ZH dictionary import
 to validate.
 
-### 9. Subtitle rendering QoL
+### 10. Subtitle rendering QoL
 ASS support (parse, strip override tags, render dialogue as tappable plain text);
 overlay styling (outline, font size, vertical offset — runtime settings).
 
-### 10. Online subtitle sources
+### 11. Online subtitle sources
 Pull subs from APIs (e.g. jimaku.cc) into an internal track; feasibility of
 on-device sync (alass/ffsubsync-style) TBD.
 
-### 11. Subtitle sidebar (transcript) — do last
+### 12. Subtitle sidebar (transcript) — do last
 Collapsible flex-row panel over the existing cue store (`yomifinCuesAtom` already
 holds the full parsed track): timestamp + line rows, active line highlighted +
 auto-scrolled, tap row → `seek(cue.start*1000)`. Bitmap tracks: unavailable,
