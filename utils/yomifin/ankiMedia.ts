@@ -50,6 +50,12 @@ export interface CapturedMedia {
   audioBase64?: string;
 }
 
+/** Which media the card's field templates actually reference (Phase 8 gating). */
+export interface MediaWant {
+  image: boolean;
+  audio: boolean;
+}
+
 /** Native file paths want a plain path, not a `file://` URI. */
 function plainPath(uri: string): string {
   return uri.replace(/^file:\/\//, "");
@@ -57,80 +63,85 @@ function plainPath(uri: string): string {
 
 /**
  * Capture frame + audio clip for one card. Call this on "+ Anki card" press (NOT on
- * tap). `ctx` is the tap-time snapshot; `sourceUrl` is the static/original stream
- * ("" => native uses the playing URL); `baseName` is unique per card.
+ * tap). `ctx` is the tap-time snapshot (its cue range may have been widened by the
+ * popup's multi-cue selection); `sourceUrl` is the static/original stream ("" =>
+ * native uses the playing URL); `baseName` is unique per card. `want` gates each
+ * capture on whether some field template actually references it (Phase 8).
  */
 export async function captureCardMedia(
   player: MediaCapturer,
   ctx: CaptureContext,
   baseName: string,
   sourceUrl: string,
+  want: MediaWant = { image: true, audio: true },
 ): Promise<CapturedMedia> {
   const out: CapturedMedia = {};
   console.log(
-    `[YOMIFIN MEDIA] capture start base=${baseName} cue=[${ctx.cueStart.toFixed(2)},${ctx.cueEnd.toFixed(2)}] frame@${ctx.framePos.toFixed(2)} src=${sourceUrl ? "static" : "playing"}`,
+    `[YOMIFIN MEDIA] capture start base=${baseName} want={img:${want.image},aud:${want.audio}} cue=[${ctx.cueStart.toFixed(2)},${ctx.cueEnd.toFixed(2)}] frame@${ctx.framePos.toFixed(2)} src=${sourceUrl ? "static" : "playing"}`,
   );
 
   // --- image (frame at tap position) ---
-  try {
-    const imgFile = new File(Paths.cache, `${baseName}.jpg`);
-    const ok = await player.captureScreenshot(
-      plainPath(imgFile.uri),
-      sourceUrl,
-      ctx.framePos,
-    );
-    if (ok && imgFile.exists) {
-      out.imageBase64 = await imgFile.base64();
-      out.imageFilename = `yomifin_${baseName}.jpg`;
-      console.log(
-        `[YOMIFIN MEDIA] screenshot ok: ${out.imageBase64.length} b64 chars -> ${out.imageFilename}`,
-      );
-    } else {
-      console.warn(
-        `[YOMIFIN MEDIA] screenshot produced no image (native returned ${ok}, exists=${imgFile.exists}). Check native [captureScreenshot] logs.`,
-      );
-    }
-    if (imgFile.exists) imgFile.delete();
-  } catch (e) {
-    console.warn(
-      `[YOMIFIN MEDIA] screenshot failed: ${(e as Error)?.message ?? e}`,
-    );
-  }
-
-  // --- audio clip ([cueStart, cueEnd] of source) ---
-  try {
-    if (ctx.cueEnd > ctx.cueStart) {
-      const aid = await player.getCurrentAudioTrack().catch(() => 0);
-      const audFile = new File(Paths.cache, `${baseName}.m4a`);
-      const ok = await player.extractAudio(
-        ctx.cueStart,
-        ctx.cueEnd,
-        aid ?? 0,
-        plainPath(audFile.uri),
+  if (want.image)
+    try {
+      const imgFile = new File(Paths.cache, `${baseName}.jpg`);
+      const ok = await player.captureScreenshot(
+        plainPath(imgFile.uri),
         sourceUrl,
+        ctx.framePos,
       );
-      if (ok && audFile.exists) {
-        out.audioBase64 = await audFile.base64();
-        out.audioFilename = `yomifin_${baseName}.m4a`;
+      if (ok && imgFile.exists) {
+        out.imageBase64 = await imgFile.base64();
+        out.imageFilename = `yomifin_${baseName}.jpg`;
         console.log(
-          `[YOMIFIN MEDIA] audio ok (aid=${aid}): ${out.audioBase64.length} b64 chars -> ${out.audioFilename}`,
+          `[YOMIFIN MEDIA] screenshot ok: ${out.imageBase64.length} b64 chars -> ${out.imageFilename}`,
         );
       } else {
         console.warn(
-          `[YOMIFIN MEDIA] audio produced no clip (native returned ${ok}, exists=${audFile.exists}).`,
+          `[YOMIFIN MEDIA] screenshot produced no image (native returned ${ok}, exists=${imgFile.exists}). Check native [captureScreenshot] logs.`,
         );
       }
-      if (audFile.exists) audFile.delete();
-    } else {
+      if (imgFile.exists) imgFile.delete();
+    } catch (e) {
       console.warn(
-        `[YOMIFIN MEDIA] skipping audio: invalid cue range [${ctx.cueStart},${ctx.cueEnd}]`,
+        `[YOMIFIN MEDIA] screenshot failed: ${(e as Error)?.message ?? e}`,
       );
     }
-  } catch (e) {
-    console.warn(
-      `[YOMIFIN MEDIA] audio extraction failed: ${(e as Error)?.message ?? e}`,
-    );
-  }
+
+  // --- audio clip ([cueStart, cueEnd] of the SELECTED cue range) ---
+  if (want.audio)
+    try {
+      if (ctx.cueEnd > ctx.cueStart) {
+        const aid = await player.getCurrentAudioTrack().catch(() => 0);
+        const audFile = new File(Paths.cache, `${baseName}.m4a`);
+        const ok = await player.extractAudio(
+          ctx.cueStart,
+          ctx.cueEnd,
+          aid ?? 0,
+          plainPath(audFile.uri),
+          sourceUrl,
+        );
+        if (ok && audFile.exists) {
+          out.audioBase64 = await audFile.base64();
+          out.audioFilename = `yomifin_${baseName}.m4a`;
+          console.log(
+            `[YOMIFIN MEDIA] audio ok (aid=${aid}): ${out.audioBase64.length} b64 chars -> ${out.audioFilename}`,
+          );
+        } else {
+          console.warn(
+            `[YOMIFIN MEDIA] audio produced no clip (native returned ${ok}, exists=${audFile.exists}).`,
+          );
+        }
+        if (audFile.exists) audFile.delete();
+      } else {
+        console.warn(
+          `[YOMIFIN MEDIA] skipping audio: invalid cue range [${ctx.cueStart},${ctx.cueEnd}]`,
+        );
+      }
+    } catch (e) {
+      console.warn(
+        `[YOMIFIN MEDIA] audio extraction failed: ${(e as Error)?.message ?? e}`,
+      );
+    }
 
   console.log(
     `[YOMIFIN MEDIA] capture done: image=${!!out.imageFilename} audio=${!!out.audioFilename}`,

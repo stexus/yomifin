@@ -126,6 +126,17 @@ export default function IndexLayout() {
         }}
       />
       <Stack.Screen
+        name='settings/anki/page'
+        options={{
+          title: "Anki",
+          headerShown: !Platform.isTV,
+          headerBlurEffect: "none",
+          headerTransparent: Platform.OS === "ios",
+          headerShadowVisible: false,
+          headerLeft: () => <HeaderBackButton />,
+        }}
+      />
+      <Stack.Screen
         name='settings/reader/page'
         options={{
           title: "Reader",

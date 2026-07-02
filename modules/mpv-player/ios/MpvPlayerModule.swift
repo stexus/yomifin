@@ -210,15 +210,29 @@ public class MpvPlayerModule: Module {
       }
 
       // YOMIFIN Phase 4 (Anki media capture). On-device, MPVKit ffmpeg + SW render API.
+      // Phase 8: the heavy work (throwaway-handle seek/decode/encode) is dispatched OFF
+      // the main thread — view-taking AsyncFunctions run on main by default, which froze
+      // the whole UI (spinner + playback) for the duration of a capture. The throwaway
+      // handles never touch the view/layer, so a background queue is safe.
       // captureScreenshot(view, path, sourceUrl, pos) -> Bool : frame at `pos` (no subs/
       // OSD) to a JPG path. sourceUrl="" => use the playing URL (local/offline).
-      AsyncFunction("captureScreenshot") { (view: MpvPlayerView, path: String, sourceUrl: String, pos: Double) throws -> Bool in
-        return try view.captureScreenshot(to: path, sourceUrl: sourceUrl, pos: pos)
+      AsyncFunction("captureScreenshot") { (view: MpvPlayerView, path: String, sourceUrl: String, pos: Double, promise: Promise) in
+        DispatchQueue.global(qos: .userInitiated).async {
+          do {
+            let ok = try view.captureScreenshot(to: path, sourceUrl: sourceUrl, pos: pos)
+            promise.resolve(ok)
+          } catch {
+            promise.reject(error)
+          }
+        }
       }
       // extractAudio(view, start, end, audioId, path, sourceUrl) -> Bool : AAC .m4a clip
       // of [start,end]. audioId<=0 = current track; sourceUrl="" => playing URL.
-      AsyncFunction("extractAudio") { (view: MpvPlayerView, start: Double, end: Double, audioId: Int, path: String, sourceUrl: String) -> Bool in
-        return view.extractAudioClip(start: start, end: end, audioId: audioId, sourceUrl: sourceUrl, to: path)
+      AsyncFunction("extractAudio") { (view: MpvPlayerView, start: Double, end: Double, audioId: Int, path: String, sourceUrl: String, promise: Promise) in
+        DispatchQueue.global(qos: .userInitiated).async {
+          let ok = view.extractAudioClip(start: start, end: end, audioId: audioId, sourceUrl: sourceUrl, to: path)
+          promise.resolve(ok)
+        }
       }
 
       // Video scaling functions

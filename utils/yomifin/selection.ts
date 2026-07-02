@@ -1,17 +1,29 @@
 /*
- * Popup selection model (Phase 7 scaffolding, consumed by Phase 8's
- * {popup-selection-text} marker).
+ * Popup selection model (Phase 7 scaffolding + Phase 8 sense-level refinement),
+ * consumed by Phase 8's {popup-selection-text} marker.
  *
- * The definition popup lets the user tap a whole DICTIONARY block or a single
- * DEFINITION within it to mark it selected. This module defines that selection's data
- * shape and a pure resolver from a selection to the glossary items it refers to — so
- * Phase 8 can flatten those items to text (via the existing anki.ts flattener) without
- * the popup needing to know anything about Anki.
+ * Selection granularity, coarse → fine:
+ *   "dictionary" — a whole dictionary block within the active pane
+ *   "definition" — one glossary item within that block
+ *   "sense"      — one sense NODE inside a single glossary item's structured-content
+ *                  tree (JMdict packs all senses into one item; `path` is the index
+ *                  chain locating the tapped node — see senses.ts)
+ *   "segment"    — one TEXTUAL sense inside a blob item with no structure (㊀㊁… /
+ *                  ①②… lines; see senses.ts senseSegments). Addressed by index and
+ *                  re-derived at resolve time — selection is ephemeral per popup, so
+ *                  the derivation can't drift under it.
  *
- * `null` means "nothing selected" — Phase 8 should fall back to the active pane's full
- * glossary in that case.
+ * `null` means "nothing selected" — the marker engine falls back to the active pane's
+ * full glossary in that case.
  */
 import type { LookupResult } from "./lookup";
+import {
+  type SensePath,
+  senseSegments,
+  serializePath,
+  subtreeAtPath,
+} from "./senses";
+import { normalizeGlossary, scToText } from "./structuredContent";
 
 export type PopupSelection =
   | { kind: "dictionary"; paneIndex: number; dictionary: string }
@@ -21,6 +33,22 @@ export type PopupSelection =
       dictionary: string;
       /** index of the glossary item within that dictionary's DefinitionGroup */
       glossIndex: number;
+    }
+  | {
+      kind: "sense";
+      paneIndex: number;
+      dictionary: string;
+      glossIndex: number;
+      /** index chain locating the sense node inside the glossary item's SC tree */
+      path: SensePath;
+    }
+  | {
+      kind: "segment";
+      paneIndex: number;
+      dictionary: string;
+      glossIndex: number;
+      /** index into senseSegments(glossary item) */
+      segIndex: number;
     }
   | null;
 
@@ -33,12 +61,22 @@ export function selectionEquals(a: PopupSelection, b: PopupSelection): boolean {
   if (a.kind === "definition" && b.kind === "definition") {
     return a.glossIndex === b.glossIndex;
   }
+  if (a.kind === "sense" && b.kind === "sense") {
+    return (
+      a.glossIndex === b.glossIndex &&
+      serializePath(a.path) === serializePath(b.path)
+    );
+  }
+  if (a.kind === "segment" && b.kind === "segment") {
+    return a.glossIndex === b.glossIndex && a.segIndex === b.segIndex;
+  }
   return true;
 }
 
 /**
- * Resolve a selection to the glossary items it refers to (Phase 8 flattens these).
- * Returns an empty array if the selection is null or no longer resolvable.
+ * Resolve a selection to the glossary items (or sense subtree) it refers to.
+ * Returns an empty array if the selection is null or no longer resolvable — callers
+ * treat that as "no selection" and fall back to the full glossary.
  */
 export function selectionGlossary(
   result: LookupResult,
@@ -53,5 +91,30 @@ export function selectionGlossary(
   if (!group) return [];
   if (selection.kind === "dictionary") return group.glossary;
   const item = group.glossary[selection.glossIndex];
-  return item === undefined ? [] : [item];
+  if (item === undefined) return [];
+  if (selection.kind === "definition") return [item];
+  if (selection.kind === "segment") {
+    const segment = senseSegments(item)[selection.segIndex];
+    return segment === undefined ? [] : [segment];
+  }
+  const subtree = subtreeAtPath(item, selection.path);
+  return subtree === undefined ? [] : [subtree];
+}
+
+/**
+ * Flatten the current selection to plain text for {popup-selection-text}.
+ * "" when nothing is selected / resolvable (the marker then falls back to the full
+ * glossary — the sensible default per the plan).
+ */
+export function flattenSelectionText(
+  result: LookupResult,
+  selection: PopupSelection,
+): string {
+  const items = selectionGlossary(result, selection);
+  const lines: string[] = [];
+  for (const item of items) {
+    const text = scToText(normalizeGlossary(item)).trim();
+    if (text) lines.push(text);
+  }
+  return lines.join("\n").trim();
 }

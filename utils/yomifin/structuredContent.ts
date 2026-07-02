@@ -49,6 +49,22 @@ export function normalizeGlossary(content: unknown): SCContent {
   return content as SCContent;
 }
 
+/**
+ * Recursively flatten structured content (or a plain string) to text. Newlines after
+ * list items / <br> keep multi-sense entries readable when shipped to Anki.
+ * (Moved here from anki.ts in Phase 8 so the selection/marker layer can reuse it.)
+ */
+export function scToText(node: SCContent): string {
+  if (node === null || node === undefined) return "";
+  if (typeof node === "string") return node;
+  if (Array.isArray(node)) return node.map(scToText).join("");
+  const tag = (node as { tag?: string }).tag;
+  const inner = scToText((node as { content?: SCContent }).content);
+  if (tag === "br") return `${inner}\n`;
+  if (tag === "li") return `${inner}\n`;
+  return inner;
+}
+
 /** Block-level tags get their own container (View); everything else is inline (Text). */
 export const BLOCK_TAGS = new Set([
   "div",

@@ -1,65 +1,86 @@
 /*
- * Phase 3 (Anki) — HARDCODED config seam.
+ * Phase 8 — RUNTIME Anki config (supersedes the Phase 3 hardcoded seam).
  *
- * Per IMPLEMENTATION_PLAN.md Phase 3, step 3: deck/note-type/fields are hardcoded for
- * the first end-to-end test ("hardcode-to-prove first"). This is the single source of
- * truth so the later Anki settings screen (Phase 5 / plan §"Config") is a drop-in:
- * replace `getAnkiConfig()` with a read from the settings store, nothing else changes.
- *
- * EDIT THESE for your server before the first card test:
- *  - url:   AnkiConnect endpoint. Anki must have `webBindAddress` = 0.0.0.0 (or the
- *           LAN IP) so it's reachable off-localhost. No CORS concern from RN (native
- *           fetch bypasses the browser allow-list).
- *  - deck/model: must already exist in Anki.
- *  - fields: map the note-type's field NAMES to the data we send. Any field whose name
- *           is left blank ("") is skipped.
+ * `getAnkiConfig()` is still the single seam everything downstream goes through
+ * (STATUS promised this), but it now reads the settings store
+ * (`Settings.yomifinAnkiConfig`, written by Settings → Anki). Fields are no longer a
+ * hardcoded name map: the note type is chosen at runtime (AnkiConnect `modelNames` /
+ * `modelFieldNames`) and each discovered field carries a MARKER TEMPLATE rendered by
+ * utils/yomifin/markers.ts at card time. The old hardcoded map survives only as the
+ * DEFAULT the settings screen seeds.
  */
+import { storage } from "@/utils/mmkv";
+import { seedFieldTemplates } from "./ankiFieldSeeds";
+import {
+  DEFAULT_WORD_AUDIO_SOURCES,
+  type WordAudioSourceConfig,
+} from "./wordAudioSources";
 
-export interface AnkiFieldMap {
-  /** Field name for the headword/lemma (e.g. "Expression"). */
-  expression: string;
-  /** Field name for the reading/kana (e.g. "Reading"). "" to skip. */
-  reading: string;
-  /** Field name for the source subtitle sentence (e.g. "Sentence"). "" to skip. */
-  sentence: string;
-  /** Field name for a plain-text gloss (e.g. "Meaning"). "" to skip. */
-  glossary: string;
-  /** Field name for the sentence audio clip (e.g. "SentenceAudio"). "" to skip. */
-  sentenceAudio: string;
-  /** Field name for the screenshot image (e.g. "Picture"). "" to skip. */
-  picture: string;
-}
+export { seedFieldTemplates };
 
 export interface AnkiConfig {
+  /** AnkiConnect endpoint (Anki needs webBindAddress=0.0.0.0 to be reachable). */
   url: string;
   deckName: string;
   modelName: string;
-  fields: AnkiFieldMap;
+  /**
+   * Note-type field name → marker template (e.g. "Expression" → "{expression}").
+   * "" = leave that field blank. Rendered by renderTemplate() at card time.
+   */
+  fieldTemplates: Record<string, string>;
   tags: string[];
   allowDuplicate: boolean;
+  /** Ordered sources for the {audio} (word audio) marker. */
+  wordAudioSources: WordAudioSourceConfig[];
 }
 
-// >>> HARDCODED — edit for your server/note-type. <<<
-const HARDCODED: AnkiConfig = {
+/**
+ * Default config — the old Phase 3 hardcoded values, expressed as templates. This is
+ * what the settings screen seeds on first open; it also keeps a fresh install working
+ * against the original test deck without any setup.
+ */
+export const DEFAULT_ANKI_CONFIG: AnkiConfig = {
   url: "http://10.0.0.193:8765",
   deckName: "Testing",
   modelName: "Lapis-Jp",
-  fields: {
-    expression: "Expression",
-    reading: "ExpressionReading",
-    sentence: "Sentence",
-    glossary: "Glossary",
-    sentenceAudio: "SentenceAudio",
-    picture: "Picture",
+  fieldTemplates: {
+    Expression: "{expression}",
+    ExpressionReading: "{reading}",
+    Sentence: "{sentence}",
+    Glossary: "{glossary}",
+    SentenceAudio: "{sentence-audio}",
+    Picture: "{picture}",
   },
   tags: ["yomifin"],
   allowDuplicate: false,
+  wordAudioSources: DEFAULT_WORD_AUDIO_SOURCES,
 };
 
 /**
- * Returns the active Anki config. Phase 3: always the hardcoded values above.
- * Phase 5: swap this body to read from the settings store.
+ * Returns the active Anki config: the settings-stored one, defaulted per-key so a
+ * partially-configured store still yields something usable. Imperative mmkv read
+ * (same "settings" blob the jotai atom persists) so non-React code can call it.
  */
 export function getAnkiConfig(): AnkiConfig {
-  return HARDCODED;
+  try {
+    const raw = storage.getString("settings");
+    const stored = raw
+      ? (JSON.parse(raw).yomifinAnkiConfig as Partial<AnkiConfig> | null)
+      : null;
+    if (!stored) return DEFAULT_ANKI_CONFIG;
+    return {
+      ...DEFAULT_ANKI_CONFIG,
+      ...stored,
+      fieldTemplates:
+        stored.fieldTemplates ?? DEFAULT_ANKI_CONFIG.fieldTemplates,
+      tags: stored.tags ?? DEFAULT_ANKI_CONFIG.tags,
+      wordAudioSources:
+        stored.wordAudioSources && stored.wordAudioSources.length > 0
+          ? stored.wordAudioSources
+          : DEFAULT_ANKI_CONFIG.wordAudioSources,
+    };
+  } catch (e) {
+    console.warn("[YOMIFIN ANKI] config read failed, using defaults:", e);
+    return DEFAULT_ANKI_CONFIG;
+  }
 }

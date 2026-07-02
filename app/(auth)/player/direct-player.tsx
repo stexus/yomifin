@@ -13,7 +13,7 @@ import {
 import { File } from "expo-file-system";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { useLocalSearchParams, useNavigation } from "expo-router";
-import { useAtomValue } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Platform, useWindowDimensions, View } from "react-native";
@@ -53,6 +53,10 @@ import { apiAtom, userAtom } from "@/providers/JellyfinProvider";
 import { OfflineModeProvider } from "@/providers/OfflineModeProvider";
 import { getSubtitlesForItem } from "@/utils/atoms/downloadedSubtitles";
 import { useSettings } from "@/utils/atoms/settings";
+import {
+  yomifinCueRangeAtom,
+  yomifinCuesAtom,
+} from "@/utils/atoms/yomifinCueStore";
 import { getDefaultPlaySettings } from "@/utils/jellyfin/getDefaultPlaySettings";
 import { getPrimaryImageUrl } from "@/utils/jellyfin/image/getPrimaryImageUrl";
 import { getStreamUrl } from "@/utils/jellyfin/media/getStreamUrl";
@@ -65,7 +69,13 @@ import { msToTicks, ticksToSeconds } from "@/utils/time";
 import {
   type CaptureContext,
   captureCardMedia,
+  type MediaWant,
 } from "@/utils/yomifin/ankiMedia";
+import {
+  buildSrtUrl,
+  fetchSubtitleSrt,
+} from "@/utils/yomifin/fetchSubtitleSrt";
+import { parseSrt } from "@/utils/yomifin/srt";
 
 import { generateDeviceProfile } from "../../../utils/profiles/native";
 
@@ -172,6 +182,10 @@ export default function DirectPlayerPage() {
     start: 0,
     end: 0,
   });
+  // YOMIFIN Phase 8: cue store — the full parsed track for the selected TEXT subtitle
+  // (multi-sentence cards + Phase 12 sidebar read this).
+  const setYomifinCues = useSetAtom(yomifinCuesAtom);
+  const setYomifinCueRange = useSetAtom(yomifinCueRangeAtom);
 
   const initialPlaybackTicksRef = useRef<number>(
     playbackPositionFromUrl
@@ -478,6 +492,60 @@ export default function DirectPlayerPage() {
       .catch(() => {});
   }, [tracksReady, currentSubtitleIndex, stream?.mediaSource]);
 
+  // YOMIFIN Phase 8: load the FULL subtitle track once per item/track into the cue
+  // store. mpv's live `sub-text` only hands us the current cue, but the multi-sentence
+  // markers ({sentence}, {sentence-audio}) need neighbors. TEXT tracks only — Jellyfin
+  // converts embedded/external text subs to SRT via the Stream.srt route; BITMAP (PGS)
+  // leaves the store empty and everything degrades to the single live cue.
+  useEffect(() => {
+    let cancelled = false;
+    setYomifinCues([]);
+    setYomifinCueRange(null);
+    if (!tracksReady || currentSubtitleIndex === -1) return;
+    if (offline || !api?.basePath || !api.accessToken || !item?.Id) return;
+    const sub = stream?.mediaSource?.MediaStreams?.find(
+      (s) => s.Type === "Subtitle" && s.Index === currentSubtitleIndex,
+    );
+    if (sub?.IsTextSubtitleStream !== true) return;
+    const url = buildSrtUrl(
+      api.basePath,
+      item.Id,
+      mediaSourceId,
+      currentSubtitleIndex,
+      api.accessToken,
+    );
+    fetchSubtitleSrt(url)
+      .then((srt) => {
+        if (cancelled) return;
+        const cues = parseSrt(srt);
+        console.log(
+          `[YOMIFIN CUES] loaded ${cues.length} cues for track ${currentSubtitleIndex}`,
+        );
+        setYomifinCues(cues);
+      })
+      .catch((e) => {
+        console.warn(
+          `[YOMIFIN CUES] full-track fetch failed (multi-sentence disabled): ${
+            (e as Error).message
+          }`,
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    tracksReady,
+    currentSubtitleIndex,
+    stream?.mediaSource,
+    offline,
+    api?.basePath,
+    api?.accessToken,
+    item?.Id,
+    mediaSourceId,
+    setYomifinCues,
+    setYomifinCueRange,
+  ]);
+
   // YOMIFIN: receive mpv's live decoded subtitle text (text subs only; empty for
   // bitmap/PGS or when no cue is showing). This drives the tappable overlay in perfect
   // sync with playback — no SRT re-fetch, no clock interpolation, no flicker.
@@ -550,11 +618,12 @@ export default function DirectPlayerPage() {
   );
 
   // Expensive: runs ONLY on "+ Anki card" press. Best-effort (partial/empty on failure).
+  // `want` gates each capture on whether a field template references it (Phase 8).
   const yomifinCaptureMedia = useCallback(
-    async (ctx: CaptureContext, baseName: string) => {
+    async (ctx: CaptureContext, baseName: string, want: MediaWant) => {
       const v = videoRef.current;
       if (!v) return {};
-      return captureCardMedia(v, ctx, baseName, yomifinCaptureSourceUrl);
+      return captureCardMedia(v, ctx, baseName, yomifinCaptureSourceUrl, want);
     },
     [yomifinCaptureSourceUrl],
   );
@@ -1508,6 +1577,11 @@ export default function DirectPlayerPage() {
                 popupPosition={settings.yomifinPopupPosition ?? "right"}
                 onSnapshotCard={yomifinSnapshotCard}
                 onCaptureMedia={yomifinCaptureMedia}
+                documentTitle={
+                  item?.SeriesName
+                    ? `${item.SeriesName} - ${item?.Name ?? ""}`
+                    : (item?.Name ?? "")
+                }
               />
             </YomifinErrorBoundary>
           </View>

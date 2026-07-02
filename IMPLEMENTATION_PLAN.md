@@ -202,8 +202,122 @@ proves/exit-criteria, spike results, seam maps) was moved to
 > (Quality of Life)** — not dropped, just batched into one experience-cleanup pass. The
 > subtitle sidebar is **Phase 12** (last).
 >
+
+
 > **Current position (2026-07-01):** Phases 5, 6, 7 are **done**; **Phase 8 (runtime
-> Anki fields) is in progress / next**.
+> Anki fields) is DONE — on-device validated through two feedback rounds** — except
+> TWO open follow-ups (below). One native change (off-main-thread capture) needs an
+> `expo run:ios` rebuild; everything else is JS-only.
+>
+> **Phase 8 open follow-ups (accepted, not yet built):**
+> 1. **HTML-formatted glossary markers (Yomitan-parity output).** Today `{glossary}`,
+>    `{single-glossary:…}` and `{popup-selection-text}` ship PLAIN TEXT (scToText).
+>    Yomitan ships rendered HTML (`<div class="yomitan-glossary"><ol><li
+>    data-dictionary=…><i>(DICT)</i>…`, inline styles, ruby, `data-sc-name` attrs).
+>    Plan: a pure `scToHtml` serializer (SC JSON ≈ mini-HTML already — same recursion
+>    as scToText/StructuredContent, NO DOM needed) + Yomitan's wrapper markup. Known
+>    gap: dictionary-internal images (gaiji) need importer media support + Anki
+>    upload — phase-able separately.
+> 2. **Word-audio playback in the popup** (🔊 next to the headword; reuse the fetched
+>    clip for {audio} on card add).
+>
+> **Phase 8 — what shipped (2026-07-01):**
+> - **Marker engine** `utils/yomifin/markers.ts`: pure `renderTemplate(template, ctx)`
+>   for `{expression}/{word} {reading} {sentence} {glossary}
+>   {single-glossary:DICT}` (also `-DICT`, case-insensitive) `{popup-selection-text}/
+>   {selection}` (falls back to full glossary) `{audio} {sentence-audio} {picture}`.
+>   Unknown markers stay verbatim. `collectMarkers()` gates capture/word-audio work on
+>   what the templates actually use.
+> - **Runtime config**: `ankiConfig.ts` rewritten — `AnkiConfig` is now url/deck/model/
+>   `fieldTemplates` (field name → template)/tags/wordAudioSources, stored in
+>   `Settings.yomifinAnkiConfig`; `getAnkiConfig()` stays the seam (imperative mmkv
+>   read, defaults = old hardcoded map as templates). **Settings → Anki** screen
+>   (`settings/anki/page.tsx`): connect → `deckNames`/`modelNames` chips →
+>   `modelFieldNames` → per-field template inputs (seeded by `ankiFieldSeeds.ts` name
+>   heuristics, user edits preserved per model), tags, allow-duplicate, word-audio
+>   sources, marker reference, first-field dedupe hint. `anki.ts` `buildFields` renders
+>   every template through the engine; discovery helpers `fetchDeckNames/ModelNames/
+>   ModelFieldNames` exported.
+> - **Sense-level selection** (deferred from Phase 7): `senses.ts` — TWO tiers.
+>   **Structural** `senseTargets()` (first ≥2-item ol/ul via block descent → its
+>   `<li>`s; fallback ≥2 top-level blocks) + `subtreeAtPath()`; `PopupSelection` gains
+>   `{kind:"sense", …, path}`; `StructuredContent` gains a selectable-node mode
+>   (path-threaded recursion, tappable + highlighted senses). **Textual**
+>   `senseSegments()` (device feedback: 三省堂/新明解-style dicts pack senses as ㊀㊁… /
+>   ①②… lines in ONE blob with no structure): when the structural tier finds nothing,
+>   locate the item's inline sequence (descending single-block wrappers), split into
+>   lines at `<br>`/`\n`/before circled glyphs, group lines by sense markers (≥2
+>   marker lines → marker-anchored groups; else per-line); the popup renders each
+>   segment as its own tappable `StructuredContent` fragment; `PopupSelection` gains
+>   `{kind:"segment", …, segIndex}` (re-derived at resolve time — ephemeral, can't
+>   dangle). Both tiers degrade to Phase 7 coarse selection, never crash. If a layout
+>   resists both tiers but its text has ≥2 sense glyphs, the popup logs the raw item
+>   shape (`[YOMIFIN SENSES] unsegmented…`) so the heuristic can be extended from
+>   evidence. `flattenSelectionText()` feeds `{popup-selection-text}`.
+> - **Manual trim fallback (✎)** — the universal escape hatch for whatever the
+>   heuristics can't segment (gaiji-image markers, "just these two clauses"): the ✎
+>   footer button or a LONG-PRESS on any selection target (dictionary block /
+>   definition / sense / segment) opens that target's FLATTENED text in an editable
+>   `TextInput` (native selection/editing works there because it's genuinely plain
+>   text — RN can't read selection back from styled Text, which is why tap-first +
+>   this fallback beats full manual selection). "Use this text" →
+>   `CardData.customSelectionText`, which OVERRIDES the structured selection for
+>   `{popup-selection-text}`; an ✎ chip shows the active custom text with ✕ to clear;
+>   resets per lookup.
+> - **Cue store + multi-sentence** (substrate for Phase 12): `utils/atoms/
+>   yomifinCueStore.ts` (`yomifinCuesAtom`, `yomifinCueRangeAtom`) + pure `cues.ts`
+>   (time→index anchoring with overlap+tolerance, extend/clamp, joined `rangeText`,
+>   `rangeSpanSec` = min start…max end). `direct-player` fetches the full track once
+>   per item/track (Jellyfin `Stream.srt` → `parseSrt`; TEXT only, BITMAP/offline →
+>   empty store → degrade to single live cue). Popup shows a sentence strip with
+>   ‹＋/＋› extend-to-prev/next-line buttons and a ↺ reset-to-tapped-cue button
+>   (shown when span > 1; device feedback — undo an accidental over-extension);
+>   `{sentence}` joins the range and the audio clip spans it (`captureCardMedia`
+>   takes the widened range + `want` flags).
+> - **Word audio `{audio}`**: Yomitan source SEMANTICS ported (not the file — upstream
+>   is welded to RequestBuilder/parse5/TTS): `wordAudioSources.ts` (pure: jpod101 URL +
+>   invalid-clip SHA-256 sentinel, jisho page scrape, custom URL with `{term}/{reading}`
+>   + Yomitan `audioSourceList` JSON, base64) + `wordAudio.ts` (fetch driver, ordered
+>   fallthrough, timeouts, best-effort). Configurable in the Anki settings screen.
+> - **Tests**: 4 new bun suites (markers / senses / cues / wordAudio+seeding), all in
+>   `./scripts/yomifin-test.sh` (now 10 suites, all green). tsc + biome clean.
+>
+> **Phase 8 feedback round 2 (2026-07-01) — shipped:**
+> - **{popup-selection-text} no longer falls back to the glossary** when nothing is
+>   selected (it silently duplicated {glossary} on every card); it renders "" now.
+>   `{selection-text}` accepted as an alias.
+> - **Yomitan marker parity (portable subset):** added `{furigana}` `{furigana-plain}`
+>   (via the VENDORED `distributeFurigana` — same segmentation as Yomitan),
+>   `{cloze-prefix/body/suffix}` (split frozen at tap time, extended across the
+>   selected cue range), `{conjugation}`, `{dictionary}`, `{tags}`,
+>   `{document-title}` (threaded from `direct-player`: series – episode). NOT done —
+>   and deliberately: Yomitan's full **Handlebars** template system runs in an
+>   offscreen iframe with DOM access (HTML structured-content generation, media
+>   provider, ~30 helpers); it does not lift into Hermes/RN cheaply and most of its
+>   dynamic value targets data we don't surface (pitch/frequency). Revisit only if
+>   conditional templates become a concrete need.
+> - **Settings → Anki marker picker:** every field row has a `{…}` button opening a
+>   chip list of ALL markers, including one `{single-glossary:Title}` chip per
+>   INSTALLED dictionary (no hand-typing titles); tap = append to that field.
+> - **Sentence strip:** ↺ is now leftmost and always rendered (dimmed when span=1) so
+>   the ＋ buttons never shift.
+> - **Add-card latency + parallelism:** capture + word-audio now run via
+>   `Promise.all`; the spinner is flushed to screen before heavy work; the add task
+>   runs detached (closing the popup / resuming playback doesn't cancel it — toast
+>   reports the outcome). **NATIVE (needs `expo run:ios` rebuild):**
+>   `captureScreenshot`/`extractAudio` were view-bound AsyncFunctions → ran on the
+>   MAIN thread, freezing UI+playback for the capture duration; both now dispatch to
+>   a background queue and resolve a Promise (the throwaway handles never touch the
+>   view, so this is safe).
+>
+> **Phase 8 on-device validation checklist — PASSED (user-confirmed 2026-07-01):**
+> (1) Settings → Anki: connect, pick deck+model, real fields with seeded templates +
+> `{…}` marker picker; (2) card lands with fields reflecting markers; (3)
+> `{single-glossary:…}` has only that dict; (4) sense selection works for JMdict
+> `<li>` senses AND ㊀㊁-style blob dicts (textual segmentation), plus the ✎ manual
+> trim fallback; (5) 2-cue selection yields multi-line sentence + spanning audio, ↺
+> resets; (6) `{audio}` word audio via jpod101/jisho; (7) best-effort text card
+> holds.
 
 ### Requirements → phase map (so nothing is lost)
 

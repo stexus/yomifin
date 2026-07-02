@@ -311,6 +311,13 @@ export type Settings = {
     string,
     { enabled: boolean; order: number; tint: string }
   >;
+  /**
+   * Phase 8 — runtime Anki card config (AnkiConnect url, deck, note type, per-field
+   * marker templates, word-audio sources). null = not configured yet → the
+   * DEFAULT_ANKI_CONFIG seam in utils/yomifin/ankiConfig.ts applies. Written by
+   * Settings → Anki; consumed imperatively by getAnkiConfig().
+   */
+  yomifinAnkiConfig: import("@/utils/yomifin/ankiConfig").AnkiConfig | null;
 };
 
 export interface Lockable<T> {
@@ -418,6 +425,7 @@ export const defaultValues: Settings = {
   controlsDimOpacity: 0.4,
   yomifinPopupTheme: "dark",
   yomifinDictionaryConfig: {},
+  yomifinAnkiConfig: null,
 };
 
 const loadSettings = (): Partial<Settings> => {

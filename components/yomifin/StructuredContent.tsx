@@ -13,7 +13,7 @@
  * those here so the renderer always gets a valid tree, and never throws on odd input.
  */
 import type React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import {
   classify,
   getListBullet,
@@ -45,6 +45,51 @@ interface RenderCtx {
   color: string;
   /** Link color (theme-driven). */
   linkColor: string;
+  /**
+   * Phase 8 sense selection: serialized paths (see utils/yomifin/senses.ts) of the
+   * nodes that should render as tappable selection targets. Path semantics: each
+   * step indexes the node's children (array elements, or toChildArray(content)).
+   */
+  senseSet: Set<string> | null;
+  /** Serialized path of the currently selected sense (highlight). */
+  selectedPath: string | null;
+  onSelectPath?: (path: number[]) => void;
+  /** Long-press on a sense target (popup opens the manual ✎ text editor). */
+  onLongPressPath?: (path: number[]) => void;
+  /** Selected-state colors (theme-driven). */
+  selectedBg?: string;
+  selectedBorder?: string;
+}
+
+/** Wrap a rendered node in a tappable selection target when its path is a sense. */
+function selectableWrap(
+  rendered: React.ReactNode,
+  path: number[],
+  ctx: RenderCtx,
+  key: string,
+): React.ReactNode {
+  const ser = path.join(".");
+  if (!ctx.senseSet?.has(ser)) return rendered;
+  const selected = ctx.selectedPath === ser;
+  return (
+    <Pressable
+      key={`${key}.sel`}
+      onPress={ctx.onSelectPath ? () => ctx.onSelectPath?.(path) : undefined}
+      onLongPress={
+        ctx.onLongPressPath ? () => ctx.onLongPressPath?.(path) : undefined
+      }
+      style={[
+        styles.sense,
+        selected && {
+          backgroundColor: ctx.selectedBg,
+          borderColor: ctx.selectedBorder,
+          borderWidth: StyleSheet.hairlineWidth,
+        },
+      ]}
+    >
+      {rendered}
+    </Pressable>
+  );
 }
 
 /** Render content valid INSIDE a <Text> (strings + inline nodes). */
@@ -93,13 +138,22 @@ function renderInline(
   );
 }
 
-/** Render a group of children: inline runs wrapped in one <Text>, blocks standalone. */
+/**
+ * Render a group of children: inline runs wrapped in one <Text>, blocks standalone.
+ * `path` is the parent node's sense path; child i's path is [...path, i] where i is
+ * the child's ORIGINAL index (groupChildren partitions children in order, so a
+ * running counter recovers it). Inline runs are never sense targets.
+ */
 function renderGroups(
   children: SCContent[],
   ctx: RenderCtx,
   key: string,
+  path: number[],
 ): React.ReactNode[] {
+  let childIndex = 0;
   return groupChildren(children).map((group, gi) => {
+    const startIndex = childIndex;
+    childIndex += group.nodes.length;
     if (group.kind === "inline") {
       return (
         <Text key={`${key}.g${gi}`} style={{ color: ctx.color }}>
@@ -111,9 +165,18 @@ function renderGroups(
         </Text>
       );
     }
+    // Block groups hold exactly one node (see groupChildren).
+    const nodePath = [...path, startIndex];
     return (
       <View key={`${key}.g${gi}`}>
-        {group.nodes.map((n, i) => renderBlock(n, ctx, `${key}.g${gi}.${i}`))}
+        {group.nodes.map((n, i) =>
+          selectableWrap(
+            renderBlock(n, ctx, `${key}.g${gi}.${i}`, nodePath),
+            nodePath,
+            ctx,
+            `${key}.g${gi}.${i}`,
+          ),
+        )}
       </View>
     );
   });
@@ -124,6 +187,7 @@ function renderBlock(
   node: SCContent,
   ctx: RenderCtx,
   key: string,
+  path: number[],
 ): React.ReactNode {
   if (node === null || node === undefined) return null;
   if (typeof node === "string") {
@@ -134,7 +198,7 @@ function renderBlock(
     );
   }
   if (Array.isArray(node)) {
-    return <View key={key}>{renderGroups(node, ctx, key)}</View>;
+    return <View key={key}>{renderGroups(node, ctx, key, path)}</View>;
   }
 
   const el = node as SCNode;
@@ -168,7 +232,8 @@ function renderBlock(
             itemNode && typeof itemNode === "object" && itemNode.tag === "li"
               ? toChildArray(itemNode.content)
               : [item];
-          return (
+          const itemPath = [...path, index];
+          const row = (
             <View key={`${key}.li${index}`} style={styles.listItem}>
               {bullet ? (
                 <Text style={[styles.bullet, { color: ctx.color }]}>
@@ -183,10 +248,12 @@ function renderBlock(
                     color: (itemStyle.color as string) ?? ctx.color,
                   },
                   `${key}.li${index}`,
+                  itemPath,
                 )}
               </View>
             </View>
           );
+          return selectableWrap(row, itemPath, ctx, `${key}.li${index}`);
         })}
       </View>
     );
@@ -200,7 +267,7 @@ function renderBlock(
   ) {
     return (
       <View key={key} style={[styles.table, style]}>
-        {renderGroups(toChildArray(el.content), ctx, key)}
+        {renderGroups(toChildArray(el.content), ctx, key, path)}
       </View>
     );
   }
@@ -213,6 +280,7 @@ function renderBlock(
               toChildArray((cell as SCNode)?.content ?? cell),
               ctx,
               `${key}.c${ci}`,
+              [...path, ci],
             )}
           </View>
         ))}
@@ -223,7 +291,7 @@ function renderBlock(
   // div / details / summary / unknown block → container
   return (
     <View key={key} style={style}>
-      {renderGroups(toChildArray(el.content), ctx, key)}
+      {renderGroups(toChildArray(el.content), ctx, key, path)}
     </View>
   );
 }
@@ -235,6 +303,17 @@ export interface StructuredContentProps {
   /** Link color (defaults to the classic blue). */
   linkColor?: string;
   onLinkPress?: (href: string) => void;
+  /**
+   * Phase 8 sense selection (optional "selectable node" mode): serialized sense
+   * paths (utils/yomifin/senses.ts senseTargets + serializePath) to render as
+   * tappable targets, the currently-selected one, and the tap callback.
+   */
+  selectablePaths?: string[];
+  selectedPath?: string | null;
+  onSelectPath?: (path: number[]) => void;
+  onLongPressPath?: (path: number[]) => void;
+  selectedBg?: string;
+  selectedBorder?: string;
 }
 
 /** Render one glossary item (normalized to a structured-content tree). */
@@ -243,8 +322,27 @@ export function StructuredContent({
   color = "#e5e5e5",
   linkColor = "#6cb6ff",
   onLinkPress,
+  selectablePaths,
+  selectedPath = null,
+  onSelectPath,
+  onLongPressPath,
+  selectedBg,
+  selectedBorder,
 }: StructuredContentProps) {
-  const ctx: RenderCtx = { onLinkPress, color, linkColor };
+  const ctx: RenderCtx = {
+    onLinkPress,
+    color,
+    linkColor,
+    senseSet:
+      selectablePaths && selectablePaths.length > 0
+        ? new Set(selectablePaths)
+        : null,
+    selectedPath,
+    onSelectPath,
+    onLongPressPath,
+    selectedBg,
+    selectedBorder,
+  };
   const tree = normalizeGlossary(content);
   if (tree === null || tree === undefined) return null;
   if (typeof tree === "string") return <Text style={{ color }}>{tree}</Text>;
@@ -253,13 +351,14 @@ export function StructuredContent({
       {classify(tree) === "inline" ? (
         <Text style={{ color }}>{renderInline(tree, ctx, "r")}</Text>
       ) : (
-        renderBlock(tree, ctx, "r")
+        renderBlock(tree, ctx, "r", [])
       )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  sense: { borderRadius: 5, paddingHorizontal: 2 },
   link: { color: "#6cb6ff", textDecorationLine: "underline" },
   list: { gap: 2 },
   listItem: { flexDirection: "row", alignItems: "flex-start" },
