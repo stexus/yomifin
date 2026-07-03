@@ -319,6 +319,21 @@ export type Settings = {
    */
   yomifinAnkiConfig: import("@/utils/yomifin/ankiConfig").AnkiConfig | null;
   /**
+   * Profiles (JA/ZH bundles — utils/yomifin/profiles.ts). `yomifinActiveProfile` is
+   * the manual selection (the player auto-overrides it from the subtitle/audio track
+   * language); `yomifinProfiles` stores per-profile dictionary + Anki config. The
+   * LEGACY keys above remain the JA profile's fallback storage (no migration).
+   */
+  yomifinActiveProfile: import("@/utils/yomifin/profiles").ProfileId;
+  yomifinProfiles: Partial<
+    Record<
+      import("@/utils/yomifin/profiles").ProfileId,
+      import("@/utils/yomifin/profiles").YomifinProfileData
+    >
+  >;
+  /** Max lookup entries (≈ popup panes) per tap. Yomitan's default is 32. */
+  yomifinMaxResults: number;
+  /**
    * Video gesture layer (RNGH rebuild): double-tap left/right of the screen seeks
    * backward/forward by this many seconds. 0 disables double-tap seeking (single
    * taps then toggle controls with no recognition delay).
@@ -434,6 +449,9 @@ export const defaultValues: Settings = {
   yomifinPopupTheme: "dark",
   yomifinDictionaryConfig: {},
   yomifinAnkiConfig: null,
+  yomifinActiveProfile: "ja",
+  yomifinProfiles: {},
+  yomifinMaxResults: 32,
   yomifinDoubleTapSeconds: 10,
   yomifinTwoFingerTapPause: true,
 };

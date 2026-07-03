@@ -25,7 +25,11 @@ For a term to be **found**, three vendored stages run, all wired and tested:
    combining-character normalization, CJK-compatibility normalization, kanji
    standardization. Each yields extra search candidates, so a katakana query finds a
    hiragana-stored reading and vice-versa. *Proven live* by `lookup.test.ts`
-   (`あっさり→あさり→漁る`, `イケメン→イケ面`, `ソラ→空`).
+   (`あっさり→あさり→漁る`, `イケメン→イケ面`, `ソラ→空`). ZH gets OUR
+   `foldScriptVariants` preprocessor (`yomitan/chinese-text-preprocessors.js`, backed
+   by the `chinese-simple2traditional` dep — char-level, Hermes-safe): every candidate
+   is expanded with its simplified and traditional conversions, so 汉语 matches a
+   漢語-stored entry and vice versa. *Proven* by the zh cases in `lookup.test.ts`.
 2. **Deinflection** (`japanese-transforms.js`, the upstream ruleset). Reduces conjugations
    to lemmas before the DB hit. *Proven* by `deinflect-smoke.test.mjs` + `lookup.test.ts`.
 3. **DB match** (`this._database.findTermsBulk`). Our `SqliteDictionaryDatabase` /
@@ -70,23 +74,23 @@ because they're choices, not missing code:
 |---|---|---|---|
 | `matchType` | `"exact"` | exact term/reading | Same as Yomitan's normal scan. `findTermsBulk` returns `[]` for prefix/suffix (wildcard search only — unused) |
 | `deinflect` | `true` | conjugations resolve | parity |
-| `language` | `"ja"` | selects JA preprocessors + transforms | ZH path has **no** preprocessors (see §4) |
+| `language` | profile language (`"ja"`/`"zh"`) | selects that language's preprocessors + transforms | ZH: script folding only, no deinflection (ZH doesn't need it) |
 | `searchResolution` | `"letter"` | scan granularity | matches Yomitan default |
 | `removeNonJapaneseCharacters` | `false` | keeps non-JA chars in the scan | permissive; unlikely to drop matches |
 | `partsOfSpeechFilter` (per-dict) | `true` | deinflected hits filtered by POS conditions from the entry's `rules` | Yomitan default is also on. A dictionary with missing/wrong `rules` could drop a *deinflected* match — same as Yomitan would |
 | `allowSecondarySearches` (per-dict) | `false` | all dicts are primary | **more** permissive than marking some secondary — not a miss source |
 | `sortFrequencyDictionary` | `null` | ranking only | affects order, never existence |
-| `maxScanLength` (ours, `lookup.ts`) | `16` | caps the forward-greedy scan | **the one real cap**: a single match longer than 16 chars won't fully resolve. Fine for words; a knob to lift (FEATURES.md → Yomitan settings parity) |
+| `maxScanLength` (ours, `lookup.ts`) | `16` | caps the forward-greedy scan | **the one real cap**: a single match longer than 16 chars won't fully resolve. Fine for words; still hardcoded (lift if it ever bites) |
+| `maxResults` (ours, `lookup.ts`) | Settings → Reader (default `32`, Yomitan's default) | trims the ENTRY TAIL after sorting | order/headline unaffected; can only hide short-prefix panes, never the match |
 
 ## 4. Known, documented divergences (not bugs — scope/config)
 
 1. **`maxScanLength = 16`** — our forward-greedy cap in `lookup.ts`. Long compounds/phrases
    beyond 16 chars won't match their full form. Lift/expose per FEATURES.md (Yomitan settings
    parity). Low impact for word lookup.
-2. **Chinese has no text preprocessors** — `language-descriptors.js` sets `zh
-   textPreprocessors: {}` (and no deinflection, which ZH doesn't need). So there is **no
-   simplified↔traditional folding**: a query in one script won't match an entry stored in
-   the other. Expected until Chinese parity (parked). ZH still matches exact form + reading.
+2. ~~Chinese has no text preprocessors~~ — **closed** (Chinese parity, 2026-07-02):
+   `foldScriptVariants` (ours) gives simplified↔traditional folding; zh registers it in
+   `language-descriptors.js`. No deinflection for ZH by design (ZH doesn't inflect).
 3. **Frequency/pitch/kanji/tag metadata absent** — `findTermMetaBulk`/`findTagMetaBulk`/
    `findKanji*` are stubs. By design (definitions-only scope). Affects
    display/sort, never whether a definition is found.

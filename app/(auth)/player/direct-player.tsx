@@ -76,6 +76,7 @@ import {
   buildSrtUrl,
   fetchSubtitleSrt,
 } from "@/utils/yomifin/fetchSubtitleSrt";
+import { profileIdForLanguageTag } from "@/utils/yomifin/profiles";
 import { parseSrt } from "@/utils/yomifin/srt";
 
 import { generateDeviceProfile } from "../../../utils/profiles/native";
@@ -599,6 +600,24 @@ export default function DirectPlayerPage() {
       videoRef.current?.play();
     }
   }, []);
+
+  // YOMIFIN profiles: auto-select the lookup profile (JA/ZH) from the playing tracks'
+  // language tags — subtitle track first (it's what we're reading), then audio. An
+  // unknown/absent tag yields null and the lookup layer falls back to the manually
+  // selected profile (Settings, default JA).
+  const yomifinLanguageHint = useMemo(() => {
+    const streams = stream?.mediaSource?.MediaStreams ?? [];
+    const sub = streams.find(
+      (s) => s.Type === "Subtitle" && s.Index === currentSubtitleIndex,
+    );
+    const audio = streams.find(
+      (s) => s.Type === "Audio" && s.Index === currentAudioIndex,
+    );
+    return (
+      profileIdForLanguageTag(sub?.Language) ??
+      profileIdForLanguageTag(audio?.Language)
+    );
+  }, [stream?.mediaSource, currentSubtitleIndex, currentAudioIndex]);
 
   // YOMIFIN: verify the running BINARY has the native two-finger-tap seam and say so
   // loudly in Metro — a stale binary makes the gesture silently dead, which has
@@ -1627,6 +1646,7 @@ export default function DirectPlayerPage() {
                 popupPosition={settings.yomifinPopupPosition ?? "right"}
                 onSnapshotCard={yomifinSnapshotCard}
                 onCaptureMedia={yomifinCaptureMedia}
+                languageHint={yomifinLanguageHint}
                 documentTitle={
                   item?.SeriesName
                     ? `${item.SeriesName} - ${item?.Name ?? ""}`

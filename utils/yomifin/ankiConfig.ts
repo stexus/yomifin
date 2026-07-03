@@ -12,6 +12,12 @@
 import { storage } from "@/utils/mmkv";
 import { seedFieldTemplates } from "./ankiFieldSeeds";
 import {
+  activeProfileId,
+  type ProfileId,
+  type ProfileSettingsSource,
+  resolveProfile,
+} from "./profiles";
+import {
   DEFAULT_WORD_AUDIO_SOURCES,
   type WordAudioSourceConfig,
 } from "./wordAudioSources";
@@ -67,13 +73,21 @@ export const DEFAULT_ANKI_CONFIG: AnkiConfig = {
  * Returns the active Anki config: the settings-stored one, defaulted per-key so a
  * partially-configured store still yields something usable. Imperative mmkv read
  * (same "settings" blob the jotai atom persists) so non-React code can call it.
+ *
+ * Profiles: `profileId` selects which profile's config to read (the popup threads
+ * the EFFECTIVE profile — track-language override included); omitted = the
+ * manually-active profile. JA falls back to the legacy `yomifinAnkiConfig` key
+ * (profiles.ts no-migration design).
  */
-export function getAnkiConfig(): AnkiConfig {
+export function getAnkiConfig(profileId?: ProfileId): AnkiConfig {
   try {
     const raw = storage.getString("settings");
-    const stored = raw
-      ? (JSON.parse(raw).yomifinAnkiConfig as Partial<AnkiConfig> | null)
-      : null;
+    const settings = raw
+      ? (JSON.parse(raw) as ProfileSettingsSource)
+      : ({} as ProfileSettingsSource);
+    const id = profileId ?? activeProfileId(settings);
+    const stored = resolveProfile(settings, id)
+      .ankiConfig as Partial<AnkiConfig> | null;
     if (!stored) return DEFAULT_ANKI_CONFIG;
     return {
       ...DEFAULT_ANKI_CONFIG,

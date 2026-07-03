@@ -17,6 +17,7 @@ import type { CapturedMedia } from "./ankiMedia";
 import { furiganaHtml, furiganaPlain } from "./furigana";
 import type { LookupResult } from "./lookup";
 import { collectMarkers, type MarkerContext, renderTemplate } from "./markers";
+import type { ProfileId } from "./profiles";
 import {
   flattenSelectionHtml,
   flattenSelectionText,
@@ -200,6 +201,12 @@ export interface CardData {
   media?: CapturedMedia;
   /** Phase 8: optional word audio for the {audio} marker. */
   wordAudio?: WordAudioResult | null;
+  /**
+   * Which profile's Anki config (deck/model/templates) the card targets — the
+   * EFFECTIVE profile at lookup time (track-language override included). Omitted =
+   * the manually-active profile.
+   */
+  profileId?: ProfileId;
 }
 
 /**
@@ -309,7 +316,7 @@ async function storeMedia(
  * user-facing message (duplicate, missing deck/model, unreachable) on failure.
  */
 export async function addAnkiCard(data: CardData): Promise<number> {
-  const config = getAnkiConfig();
+  const config = getAnkiConfig(data.profileId);
   const markers = collectMarkers(config.fieldTemplates);
   // Upload media first so the field references resolve — but only media a template
   // actually references (best-effort: a media upload failure shouldn't block a text

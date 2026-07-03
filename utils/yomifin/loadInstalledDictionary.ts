@@ -18,8 +18,18 @@ export interface LoadedDictionary {
   titles: string[];
 }
 
+/** Lookup knobs threaded from settings/profile (utils/yomifin stays pure — passed in). */
+export interface LoadDictionaryOptions {
+  /** Translator language ("ja" | "zh") — the active profile's language. */
+  language?: string;
+  /** Max entries (≈ popup panes) per lookup. */
+  maxResults?: number;
+}
+
 /** Cached dict + the open handle backing it, so we can close it on reconfigure/reset. */
-let cached: (LoadedDictionary & { db: SQLite.SQLiteDatabase }) | null = null;
+let cached:
+  | (LoadedDictionary & { db: SQLite.SQLiteDatabase; optsKey: string })
+  | null = null;
 
 /**
  * Returns the installed dictionary, or null if none has been imported yet (the UI then
@@ -29,10 +39,12 @@ let cached: (LoadedDictionary & { db: SQLite.SQLiteDatabase }) | null = null;
  * the user's dictionary config. When given, only those titles are searched and their
  * order sets the definition-block priority (the vendored Translator sorts by the
  * dictionary's index in this list). When omitted (or empty), falls back to ALL installed
- * dictionaries alphabetically. The cache invalidates if the requested list changes.
+ * dictionaries alphabetically. The cache invalidates if the requested list, the
+ * language, or any lookup knob changes.
  */
 export function loadInstalledDictionary(
   orderedEnabledTitles?: string[],
+  options?: LoadDictionaryOptions,
 ): LoadedDictionary | null {
   if (!dictionaryDbExists()) return null;
 
@@ -60,7 +72,12 @@ export function loadInstalledDictionary(
     return null;
   }
 
-  if (cached && sameTitles(cached.titles, titles)) {
+  const optsKey = `${options?.language ?? "ja"}|${options?.maxResults ?? ""}`;
+  if (
+    cached &&
+    cached.optsKey === optsKey &&
+    sameTitles(cached.titles, titles)
+  ) {
     db.closeSync();
     return cached;
   }
@@ -73,9 +90,11 @@ export function loadInstalledDictionary(
     new SqliteDictionaryDatabase(makeSqlRunner(db)),
     {
       dictionaryNames: titles,
+      language: options?.language,
+      maxResults: options?.maxResults,
     },
   );
-  cached = { dict, titles, db };
+  cached = { dict, titles, db, optsKey };
   return cached;
 }
 

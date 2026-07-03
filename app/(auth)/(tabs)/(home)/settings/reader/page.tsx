@@ -8,6 +8,7 @@
  *   - controlsDimOpacity:   how much the video dims when the controls are up.
  *   - yomifinDoubleTapSeconds: double-tap L/R seek amount (0 = off).
  *   - yomifinTwoFingerTapPause: two-finger tap toggles play/pause.
+ *   - yomifinMaxResults:     lookup entry (≈ popup pane) cap, Yomitan default 32.
  */
 import { Platform, ScrollView, Switch, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -15,6 +16,7 @@ import { useSettings } from "@/utils/atoms/settings";
 
 const DIM_STEPS = [0, 0.2, 0.4, 0.6, 0.8];
 const DOUBLE_TAP_STEPS = [0, 3, 5, 10, 15, 30];
+const MAX_RESULTS_STEPS = [4, 8, 16, 32];
 
 export default function ReaderSettingsPage() {
   const insets = useSafeAreaInsets();
@@ -82,6 +84,28 @@ export default function ReaderSettingsPage() {
                 yomifinPopupTheme: v as "light" | "dark" | "auto",
               })
             }
+          />
+        </View>
+
+        {/* Lookup result cap */}
+        <View style={{ gap: 8 }}>
+          <Text style={styles.title}>Max lookup results</Text>
+          <Text style={styles.subtitle}>
+            How many dictionary entries (popup panes) one tap can return.
+            Yomitan's default is 32; lower trims the tail of short-prefix panes
+            on dense dictionaries.
+          </Text>
+          <Segmented
+            options={MAX_RESULTS_STEPS.map((s) => ({
+              label: String(s),
+              value: String(s),
+            }))}
+            value={String(
+              MAX_RESULTS_STEPS.includes(settings.yomifinMaxResults ?? 32)
+                ? (settings.yomifinMaxResults ?? 32)
+                : 32,
+            )}
+            onChange={(v) => updateSettings({ yomifinMaxResults: Number(v) })}
           />
         </View>
 

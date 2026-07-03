@@ -59,6 +59,12 @@ export interface YomifinDictionaryOptions {
    * practical loss of matches. Default 16.
    */
   maxScanLength?: number;
+  /**
+   * Max entries (≈ popup panes) a lookup returns. Yomitan's own default is 32.
+   * Caps the tail of short-prefix panes on dense dictionaries; never affects WHICH
+   * entry headlines (entries are longest-surface-first before the cap applies).
+   */
+  maxResults?: number;
 }
 
 /** Builds the enabledDictionaryMap the Translator expects from a list of names. */
@@ -85,6 +91,7 @@ export class YomifinDictionary {
   private _enabledDictionaryMap: Map<string, unknown>;
   private _mainDictionary: string;
   private _maxScanLength: number;
+  private _maxResults: number;
 
   constructor(db: YomifinDatabase, options: YomifinDictionaryOptions) {
     this._translator = new Translator(db);
@@ -95,6 +102,7 @@ export class YomifinDictionary {
     );
     this._mainDictionary = options.dictionaryNames[0] ?? "";
     this._maxScanLength = options.maxScanLength ?? 16;
+    this._maxResults = options.maxResults ?? 32;
   }
 
   /**
@@ -136,8 +144,12 @@ export class YomifinDictionary {
       // `_sortTermDictionaryEntries` (longest matched surface first), so panes are
       // longest-headword-first and shorter prefixes are demoted — exactly Yomitan's
       // ordering. We do NOT filter: Yomitan itself returns shorter prefixes too.
+      // The maxResults cap (Yomitan parity knob) trims the tail AFTER sorting, so
+      // the headline pane and its order are unaffected.
       // biome-ignore lint/suspicious/noExplicitAny: mapping the vendored result shape
-      entries: (dictionaryEntries as any[]).map(mapEntry),
+      entries: (dictionaryEntries as any[])
+        .slice(0, this._maxResults)
+        .map(mapEntry),
     };
   }
 }

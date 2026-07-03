@@ -6,8 +6,10 @@
  * (modelFieldNames), and assign each field a Yomitan-style MARKER TEMPLATE. Templates
  * are rendered at card time by utils/yomifin/markers.ts.
  *
- * Persists to Settings.yomifinAnkiConfig; getAnkiConfig() (utils/yomifin/ankiConfig.ts)
- * reads it and falls back to the seeded defaults when unset.
+ * Profiles: the config is PER-PROFILE (JA/ZH — utils/yomifin/profiles.ts); the
+ * segmented control at the top switches the active profile and reloads its config.
+ * Persists to Settings.yomifinProfiles[profile].ankiConfig; getAnkiConfig(profile)
+ * reads it (JA falls back to the legacy yomifinAnkiConfig key) and defaults per-key.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -35,6 +37,12 @@ import {
   seedFieldTemplates,
 } from "@/utils/yomifin/ankiConfig";
 import { listInstalledDictionaries } from "@/utils/yomifin/dictionaryStore";
+import {
+  activeProfileId,
+  PROFILE_IDS,
+  PROFILE_LABELS,
+  withProfileData,
+} from "@/utils/yomifin/profiles";
 import type { WordAudioSourceConfig } from "@/utils/yomifin/wordAudioSources";
 
 const MARKER_HELP: Array<[string, string]> = [
@@ -63,10 +71,13 @@ const MARKER_HELP: Array<[string, string]> = [
 
 export default function AnkiSettingsPage() {
   const insets = useSafeAreaInsets();
-  const { updateSettings } = useSettings();
+  const { settings, updateSettings } = useSettings();
+  const profileId = activeProfileId(settings);
 
   // Local working copy; every change persists immediately (like the other pages).
-  const [config, setConfig] = useState<AnkiConfig>(() => getAnkiConfig());
+  const [config, setConfig] = useState<AnkiConfig>(() =>
+    getAnkiConfig(profileId),
+  );
   const [connecting, setConnecting] = useState(false);
   const [connected, setConnected] = useState(false);
   const [decks, setDecks] = useState<string[]>([]);
@@ -98,9 +109,30 @@ export default function AnkiSettingsPage() {
   const persist = useCallback(
     (next: AnkiConfig) => {
       setConfig(next);
-      updateSettings({ yomifinAnkiConfig: next });
+      updateSettings({
+        yomifinProfiles: withProfileData(settings.yomifinProfiles, profileId, {
+          ankiConfig: next,
+        }),
+      });
     },
-    [updateSettings],
+    [updateSettings, settings.yomifinProfiles, profileId],
+  );
+
+  // Switching profile reloads that profile's stored config and drops the
+  // connection-derived lists (the other profile may target another deck/server).
+  const switchProfile = useCallback(
+    (pid: (typeof PROFILE_IDS)[number]) => {
+      if (pid === profileId) return;
+      updateSettings({ yomifinActiveProfile: pid });
+      const next = getAnkiConfig(pid);
+      setConfig(next);
+      setTagsText(next.tags.join(", "));
+      setConnected(false);
+      setDecks([]);
+      setModels([]);
+      setMarkerPickerField(null);
+    },
+    [profileId, updateSettings],
   );
 
   const connect = useCallback(async () => {
@@ -186,6 +218,26 @@ export default function AnkiSettingsPage() {
         className='p-4 flex flex-col'
         style={{ paddingTop: Platform.OS === "android" ? 10 : 0, gap: 22 }}
       >
+        {/* Profile */}
+        <View style={{ gap: 8 }}>
+          <Text style={styles.title}>Profile</Text>
+          <Text style={styles.subtitle}>
+            Deck, note type, field templates and word-audio sources below belong
+            to this profile. The player auto-switches profile from the playing
+            track's language.
+          </Text>
+          <View style={styles.chipWrap}>
+            {PROFILE_IDS.map((pid) => (
+              <Chip
+                key={pid}
+                label={PROFILE_LABELS[pid]}
+                active={pid === profileId}
+                onPress={() => switchProfile(pid)}
+              />
+            ))}
+          </View>
+        </View>
+
         {/* Connection */}
         <View style={{ gap: 8 }}>
           <Text style={styles.title}>AnkiConnect</Text>

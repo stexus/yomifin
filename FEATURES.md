@@ -38,19 +38,24 @@ per backlog item to start work without re-exploration.
 | HTML glossary markers | `structuredContent.ts` (`scToHtml`/`glossaryContentHtml`/`glossaryDefinitionsToHtml`), `selection.ts`, `anki.ts`, `ankiConfig.ts` `htmlGlossary`, Settings → Anki toggle | Yomitan default-template parity (device-verified): `{glossary}` = ONE numbered `<ol>` across definitions inside `<div class="yomitan-glossary">`, each `<li data-dictionary>` prefixed `<i>(tags, dict)</i>`; single definition = bare span, no ol; `{single-glossary:…}` = brief mode (no `<i>` prefix, defs from that dict aggregated — fixed an overwrite bug); SC data attrs emit Yomitan's `data-sc-*` prefix; extracted `<li>` selections get a `<ul>` context; global toggle, default off; gaiji images still skipped (see Small) |
 | 🔊 word audio in popup | `DefinitionPopup.tsx`, `wordAudio.ts` (`fetchWordAudioCached`) | speaker button beside headword; expo-audio playback; fetch cached per term+reading so `{audio}` on card-add reuses the clip; filename content-derived `yomifin_word_<fnv>.<ext>`; 2026-07-02 fix: `Crypto.digest` needs a TypedArray (raw ArrayBuffer threw on-device and broke the jpod101 sentinel check) |
 | AnkiConnect timeouts | `anki.ts` `ankiInvoke` | AbortController: 4s control actions, 15s media uploads — unreachable Anki used to hang ~60s ("frozen" settings pane / card add) |
+**⚠️ Pending device verification (committed, JS-only → `just dev`):** the four
+rows below (maxResults, profiles, Chinese parity, pane cycler) are code+test complete
+but NOT yet demonstrated on the iPad. Gates: zh auto-select + st/ts folding with the
+CC-CEDICT TERM zip (`assets/dictionaries/CC-CEDICT.zip`; the `…Hanzi….zip` variant is
+kanji-bank-only and imports 0 terms), JA path unregressed, popup swipe vs
+ScrollView/selection taps, zh card → zh profile's Anki config. Remove this note once
+verified.
+
+| Feature | Where | Notes |
+| --- | --- | --- |
+| Lookup knob: max results | `lookup.ts` `maxResults` (default 32 = Yomitan), Settings → Reader, threaded via `loadInstalledDictionary` opts | trims the entry TAIL after sorting (headline/order untouched); pinned in `lookup.test.ts`; remaining parity knobs (maxScanLength, preprocessor toggles) parked under Small |
+| Profiles (JA/ZH bundles) | `utils/yomifin/profiles.ts` (+test), settings keys `yomifinActiveProfile`/`yomifinProfiles`, Settings → Dictionaries/Anki profile switcher, `direct-player.tsx` `yomifinLanguageHint` | { language, dictionary set, Anki config } per profile; NO-MIGRATION design: legacy `yomifinDictionaryConfig`/`yomifinAnkiConfig` keys ARE the JA profile's fallback storage until first profile-aware edit shadows them; player auto-selects profile from subtitle-track language (then audio), manual choice is the fallback; effective profile threads popup → `getAnkiConfig(profileId)` → `addAnkiCard` |
+| Chinese parity (st↔ts folding) | `yomitan/chinese-text-preprocessors.js` (OURS, `chinese-simple2traditional` dep — MIT, char-level, no `\p{}`), registered in `language-descriptors.js`; zh cases in `lookup.test.ts` | closes LOOKUP_FIDELITY §4 divergence: 汉语 finds 漢語-stored entries and vice versa; zh = exact + longest-match, no deinflection; `language` threads from the active profile. NOTE: `assets/dictionaries/CC-CEDICT.zip` is the TERM dictionary to import — the `…Hanzi….zip` variant is kanji-bank-only (importer reads `term_bank_*` → would import 0 terms) |
+| Pane cycler polish | `DefinitionPopup.tsx` | prominent n/m index beside the headword, horizontal swipe (RNGH pan, `.runOnJS(true)`, activeOffsetX ±32 / failOffsetY ±24 so scroll+taps unaffected), left/right edge-tap strips over the card gutters; footer ◀ ▶ kept |
 
 ## Backlog (roughly priority-ordered)
 
-### 1. Yomitan settings parity (lookup knobs)
-Lift hardcoded lookup constants into the Reader settings group with Yomitan
-defaults. Audit the honored options at the `findTerms` call site in `lookup.ts`
-first — only expose what the vendored engine actually uses: `maxScanLength`
-(currently 16 — the one real match-length cap, see LOOKUP_FIDELITY §4), max
-results/pane cap, text-preprocessor toggles, `removeNonJapaneseCharacters`.
-Thread settings → options object (keep `utils/yomifin/` pure). Pin a couple of
-knobs in `lookup.test.ts`.
-
-### 2. Stremio addon sources (separate tab, mining-capable)
+### 1. Stremio addon sources (separate tab, mining-capable)
 Play content resolved via Stremio addons alongside Jellyfin, with the full mining
 pipeline (tappable subs → lookup → Anki card with audio+image). **Prerequisites
 are already met:** the user has debrid services (Real-Debrid-style) set up and
@@ -88,33 +93,15 @@ Exit criteria (on device): browse an addon catalog, play a debrid-resolved strea
 subtitles tappable (embedded AND an external SRT), mine a card whose audio+image
 capture from the stream URL; the Jellyfin player path is demonstrably unregressed.
 
-### 3. Pane cycler polish
-Cycler exists (footer ◀ n/m ▶). Wanted: prominent index at the TOP beside the
-headword, horizontal swipe across the popup, and left/right edge-tap zones.
-Pure popup UI change.
-
-### 4. Profiles (JA/ZH bundles)
-{ language, dictionary set, deck, model, field templates, word-audio sources } as
-a switchable bundle; auto-select by audio/subtitle track language, default JA.
-Natural composition of existing runtime configs — design the settings shape so
-current single-profile config becomes "the JA profile" without migration pain.
-
-### 5. Chinese parity
-`language-descriptors.js` already registers ZH (longest-match, no deinflection).
-Expect verification, not new code — plus: ZH has **no text preprocessors**, so no
-simplified↔traditional folding (documented divergence, LOOKUP_FIDELITY §4). Adding
-an st/ts folding preprocessor is the real work. Needs a real ZH dictionary import
-to validate.
-
-### 6. Subtitle rendering QoL
+### 2. Subtitle rendering QoL
 ASS support (parse, strip override tags, render dialogue as tappable plain text);
 overlay styling (outline, font size, vertical offset — runtime settings).
 
-### 7. Online subtitle sources
+### 3. Online subtitle sources
 Pull subs from APIs (e.g. jimaku.cc) into an internal track; feasibility of
 on-device sync (alass/ffsubsync-style) TBD.
 
-### 8. Drag-anywhere-to-seek, done right (first attempt reverted 2026-07-02)
+### 4. Drag-anywhere-to-seek, done right (first attempt reverted 2026-07-02)
 Infuse-style: horizontal drag anywhere on the video acts like a seek-bar drag.
 Attempt 1 (reverted; flick-to-skip ±s restored on `enableHorizontalSwipeSkip`)
 drove the vestigial remote-scrub shared values from the RNGH pan via
@@ -127,10 +114,10 @@ scrub-bubble component (thumbnail + timestamp) positioned via reanimated from
 that SharedValue, independent of awesome-slider; (c) commit seek only on release
 (+ throttled trickplay-tile prefetch on the JS side); (d) same lifecycle contract
 as attempt 1 (pause during, seek + resume on release, exactly-once end,
-cancel-safe). Pairs naturally with item 9 (all-native gesture surface) if that
+cancel-safe). Pairs naturally with item 5 (all-native gesture surface) if that
 lands first.
 
-### 9. All-native gesture surface (end-state refactor — trigger, don't schedule)
+### 5. All-native gesture surface (end-state refactor — trigger, don't schedule)
 Today's player gestures are TWO recognizer trees deduplicated through
 `tapSuppression.ts` + 80ms grace delays: RNGH (single/double tap, pan) and the
 native window two-finger tap (seam v2). It works and the coupling is ~30 lines,
@@ -145,13 +132,19 @@ spare native-iteration budget — not before: it re-pays every hit-testing subtl
 (button pass-through, dim layer, exclusion zones, window-wide two-finger) in
 Swift, and gesture tuning needs many on-device rebuild loops.
 
-### 10. Subtitle sidebar (transcript) — do last
+### 6. Subtitle sidebar (transcript) — do last
 Collapsible flex-row panel over the existing cue store (`yomifinCuesAtom` already
 holds the full parsed track): timestamp + line rows, active line highlighted +
 auto-scrolled, tap row → `seek(cue.start*1000)`. Bitmap tracks: unavailable,
 degrade gracefully.
 
 ### Small / opportunistic
+- Remaining Yomitan lookup knobs (maxScanLength, JA preprocessor toggles,
+  `removeNonJapaneseCharacters`) — maxResults shipped; expose the rest only if a
+  real miss/annoyance shows up.
+- ZH word-audio default sources: the JA defaults (jpod101/jisho) just miss for
+  hanzi terms (best-effort, no crash); wire a real ZH source via the custom-URL
+  slot in the ZH profile when one is chosen.
 - `canAddNotes` pre-check for nicer duplicate UX (today: `allowDuplicate:false` +
   surfaced error toast).
 - HTML glossary gap: dictionary-internal images (gaiji) are skipped by `scToHtml`

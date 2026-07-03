@@ -7,8 +7,12 @@
  *   - Import a prebuilt .db (from scripts/build-dictionary-db.ts): a fast file copy —
  *     ideal for the debug loop / restoring after an app uninstall.
  *
- * Phase 7 — per-dictionary configuration (persisted in the app settings atom under
- * `yomifinDictionaryConfig`, keyed by title):
+ * Profiles: preferences are PER-PROFILE (JA/ZH — utils/yomifin/profiles.ts). The
+ * segmented control at the top switches the active profile; the inventory (installed
+ * dictionaries) is shared, but enable/order/tint apply to the profile being edited.
+ * JA reads through to the legacy `yomifinDictionaryConfig` key until first edited.
+ *
+ * Phase 7 — per-dictionary configuration (persisted per profile, keyed by title):
  *   - enable/disable  → disabled dicts are excluded from lookups
  *   - priority order  → drag to reorder; definition blocks in the popup follow this
  *   - tint            → per-dict accent color (tap the swatch to cycle the palette)
@@ -49,6 +53,13 @@ import {
   removeDictionary,
 } from "@/utils/yomifin/dictionaryStore";
 import { resetInstalledDictionaryCache } from "@/utils/yomifin/loadInstalledDictionary";
+import {
+  activeProfileId,
+  PROFILE_IDS,
+  PROFILE_LABELS,
+  resolveProfile,
+  withProfileData,
+} from "@/utils/yomifin/profiles";
 
 interface DictRow extends ResolvedDictionary {
   termCount: number;
@@ -67,7 +78,8 @@ export default function DictionariesPage() {
     totalFiles?: number;
   } | null>(null);
 
-  const config = settings.yomifinDictionaryConfig ?? {};
+  const profileId = activeProfileId(settings);
+  const config = resolveProfile(settings, profileId).dictionaryConfig;
 
   const rows = useMemo<DictRow[]>(() => {
     const resolved = resolveDictionaryConfig(
@@ -95,10 +107,14 @@ export default function DictionariesPage() {
 
   const commit = useCallback(
     (next: ResolvedDictionary[]) => {
-      updateSettings({ yomifinDictionaryConfig: materializeConfig(next) });
+      updateSettings({
+        yomifinProfiles: withProfileData(settings.yomifinProfiles, profileId, {
+          dictionaryConfig: materializeConfig(next),
+        }),
+      });
       resetInstalledDictionaryCache();
     },
-    [updateSettings],
+    [updateSettings, settings.yomifinProfiles, profileId],
   );
 
   const onReorder = useCallback(
@@ -386,6 +402,46 @@ export default function DictionariesPage() {
           ) : null}
         </View>
       ) : null}
+
+      {/* Profile switcher — selects the ACTIVE profile app-wide; the list below edits
+          that profile's enable/order/tint. */}
+      <View style={{ gap: 6 }}>
+        <Text style={{ color: "#fff", fontSize: 16, fontWeight: "700" }}>
+          Profile
+        </Text>
+        <Text style={{ color: "#888", fontSize: 12 }}>
+          Enable/priority/tint below apply to this profile. The player
+          auto-switches profile from the playing track's language.
+        </Text>
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          {PROFILE_IDS.map((pid) => (
+            <Pressable
+              key={pid}
+              onPress={() => {
+                updateSettings({ yomifinActiveProfile: pid });
+                resetInstalledDictionaryCache();
+              }}
+              style={{
+                backgroundColor:
+                  pid === profileId ? "#6cb6ff" : "rgba(255,255,255,0.08)",
+                borderRadius: 16,
+                paddingHorizontal: 14,
+                paddingVertical: 7,
+              }}
+            >
+              <Text
+                style={{
+                  color: pid === profileId ? "#001" : "#ddd",
+                  fontWeight: pid === profileId ? "700" : "400",
+                  fontSize: 13,
+                }}
+              >
+                {PROFILE_LABELS[pid]}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
 
       <View style={{ gap: 4 }}>
         <Text style={{ color: "#fff", fontSize: 16, fontWeight: "700" }}>

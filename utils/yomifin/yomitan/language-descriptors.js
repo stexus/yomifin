@@ -13,13 +13,15 @@
  * cheap diff. This gives full matching fidelity: emphatic collapsing (あっさり → あさり →
  * 漁る), half/full-width, hiragana↔katakana, romaji→kana, CJK-compat, and kanji-variant
  * folding (萬 → 万, via the tiny `kanji-processor` npm dep). All are Hermes-safe (no \p{}).
- * ZH preprocessors stay empty until Chinese parity is picked up (see roadmap).
+ * ZH gets OUR simplified↔traditional folding preprocessor (chinese-text-preprocessors.js,
+ * also ours) so either script matches entries stored in the other.
  *
  * Re-vendor note: this file is OURS, not copied — when bumping the upstream pin,
  * re-check that the descriptor shape (fields consumed by languages.js) still matches.
  */
 
 import {normalizePinyin, isStringPartiallyChinese} from './chinese.js';
+import {foldScriptVariants} from './chinese-text-preprocessors.js';
 import {japaneseTransforms} from './japanese-transforms.js';
 import {isStringPartiallyJapanese} from './japanese.js';
 import {
@@ -60,7 +62,9 @@ const languageDescriptors = [
         exampleText: '读',
         isTextLookupWorthy: isStringPartiallyChinese,
         readingNormalizer: normalizePinyin,
-        textPreprocessors: {},
+        textPreprocessors: {
+            foldScriptVariants,
+        },
     },
 ];
 

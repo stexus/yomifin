@@ -242,6 +242,99 @@ function checkP7(name: string, cond: boolean, got: string) {
   );
 }
 
-const total = cases.length + paneCases.length + 1 + 3;
+// --- Yomitan settings parity: maxResults caps the pane count -------------------
+// 計画通り surfaces 3 panes uncapped (計画通り → 計画 → 計); maxResults:2 must trim the
+// TAIL only — the headline pane and its order are unaffected.
+{
+  const capped = new YomifinDictionary(db, {
+    dictionaryNames: [DICT],
+    maxResults: 2,
+  });
+  const res = await capped.lookup("計画通り");
+  const lemmas = res.entries.map((e) => e.term);
+  const ok = lemmas.length === 2 && lemmas[0] === "計画通り";
+  if (ok) {
+    pass++;
+    console.log(`  PASS  maxResults=2 計画通り  →  [${lemmas.join(", ")}]`);
+  } else {
+    fail++;
+    console.log(`  FAIL  maxResults=2 計画通り  →  [${lemmas.join(", ")}]`);
+  }
+}
+
+// --- Chinese parity: language threading, longest-match, script folding ---------
+// zh has NO deinflection; matching is exact + forward-greedy. The foldScriptVariants
+// preprocessor (ours) must let a query in one script hit an entry stored in the
+// other (simplified↔traditional), closing the LOOKUP_FIDELITY §4 divergence.
+const ZH_DICT = "SynthZH";
+const zhBank: V3[] = [
+  // trad-only entry — must be found from a simplified query
+  ["漢語", "hànyǔ", "", "", 0, ["Chinese language"], 1, ""],
+  // simp-only entry — must be found from a traditional query
+  ["词典", "cídiǎn", "", "", 0, ["dictionary"], 2, ""],
+  // longest-match ladder
+  ["电视机", "diànshìjī", "", "", 0, ["TV set"], 3, ""],
+  ["电视", "diànshì", "", "", 0, ["television"], 4, ""],
+];
+const zhDb = new InMemoryDictionaryDatabase();
+loadDictionaryFromZip(
+  zipSync({
+    "index.json": strToU8(
+      JSON.stringify({
+        title: ZH_DICT,
+        format: 3,
+        revision: "synth-1",
+        sequenced: true,
+      }),
+    ),
+    "term_bank_1.json": strToU8(JSON.stringify(zhBank)),
+  }),
+  zhDb,
+);
+const zhDict = new YomifinDictionary(zhDb, {
+  language: "zh",
+  dictionaryNames: [ZH_DICT],
+});
+
+// [input, expected lemma, expected matched surface]
+const zhCases: [string, string, string][] = [
+  // simplified query → traditional-stored entry (script folding), boundary before 词典
+  ["汉语词典", "漢語", "汉语"],
+  // traditional query → simplified-stored entry
+  ["詞典很好", "词典", "詞典"],
+  // exact same-script still works, longest match wins
+  ["电视机很大", "电视机", "电视机"],
+];
+for (const [input, expectedLemma, expectedSurface] of zhCases) {
+  const res = await zhDict.lookup(input);
+  const top = res.entries[0];
+  const ok = top?.term === expectedLemma && res.matchedText === expectedSurface;
+  if (ok) {
+    pass++;
+    console.log(
+      `  PASS  zh ${input}  →  ${top.term} (${top.reading}) matched「${res.matchedText}」`,
+    );
+  } else {
+    fail++;
+    console.log(
+      `  FAIL  zh ${input}  →  term=${top?.term} matched「${res.matchedText}」 (expected ${expectedLemma}/「${expectedSurface}」)`,
+    );
+  }
+}
+// zh longest-match must ALSO surface the shorter prefix as a demoted pane.
+{
+  const res = await zhDict.lookup("电视机很大");
+  const lemmas = res.entries.map((e) => e.term);
+  const ok = lemmas[0] === "电视机" && lemmas.includes("电视");
+  if (ok) {
+    pass++;
+    console.log(`  PASS  zh panes 电视机  →  [${lemmas.join(", ")}]`);
+  } else {
+    fail++;
+    console.log(`  FAIL  zh panes 电视机  →  [${lemmas.join(", ")}]`);
+  }
+}
+
+const total = pass + fail;
 console.log(`\n${pass}/${total} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

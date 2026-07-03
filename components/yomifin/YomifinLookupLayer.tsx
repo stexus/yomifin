@@ -37,6 +37,11 @@ import {
 import { listInstalledDictionaries } from "@/utils/yomifin/dictionaryStore";
 import { loadInstalledDictionary } from "@/utils/yomifin/loadInstalledDictionary";
 import type { LookupResult, YomifinDictionary } from "@/utils/yomifin/lookup";
+import {
+  activeProfileId,
+  type ProfileId,
+  resolveProfile,
+} from "@/utils/yomifin/profiles";
 import DefinitionPopup from "./DefinitionPopup";
 import { getPopupTheme } from "./popupTheme";
 import TappableSubtitleOverlay from "./TappableSubtitleOverlay";
@@ -68,6 +73,12 @@ interface Props {
   ) => Promise<CapturedMedia>;
   /** Playing media item's title, for the {document-title} marker. */
   documentTitle?: string;
+  /**
+   * Profile auto-select: the playing track's language mapped to a profile
+   * (profileIdForLanguageTag in direct-player). Overrides the manually-active
+   * profile; null/undefined = fall back to Settings.
+   */
+  languageHint?: ProfileId | null;
 }
 
 type DictStatus = "loading" | "ready" | "none" | "error";
@@ -80,9 +91,15 @@ export default function YomifinLookupLayer({
   onSnapshotCard,
   onCaptureMedia,
   documentTitle,
+  languageHint,
 }: Props) {
   const { settings } = useSettings();
-  const dictConfig = settings.yomifinDictionaryConfig ?? {};
+  // Profiles (JA/ZH bundles): the track-language hint wins, else the manual choice.
+  // The resolved profile supplies the dictionary set AND the Translator language;
+  // the same id is threaded to the popup so cards target that profile's Anki config.
+  const profileId: ProfileId = languageHint ?? activeProfileId(settings);
+  const dictConfig = resolveProfile(settings, profileId).dictionaryConfig;
+  const maxResults = settings.yomifinMaxResults ?? 32;
   const theme = useMemo(
     () => getPopupTheme(settings.yomifinPopupTheme),
     [settings.yomifinPopupTheme],
@@ -127,7 +144,10 @@ export default function YomifinLookupLayer({
       const installed = listInstalledDictionaries().map((d) => d.title);
       const resolved = resolveDictionaryConfig(installed, dictConfig);
       setTints(tintMap(resolved));
-      const loaded = loadInstalledDictionary(enabledTitlesInOrder(resolved));
+      const loaded = loadInstalledDictionary(enabledTitlesInOrder(resolved), {
+        language: profileId,
+        maxResults,
+      });
       if (loaded) {
         dictRef.current = loaded.dict;
         setStatus("ready");
@@ -138,7 +158,7 @@ export default function YomifinLookupLayer({
       console.error("[YOMIFIN DICT] open failed:", err);
       setStatus("error");
     }
-  }, [JSON.stringify(dictConfig)]);
+  }, [JSON.stringify(dictConfig), profileId, maxResults]);
 
   // Close + resume (used by both the ✕ button and the tap-outside backdrop).
   const closeLookup = () => {
@@ -232,6 +252,7 @@ export default function YomifinLookupLayer({
             anchorIndex={cueAnchorRef.current}
             cloze={clozeRef.current}
             documentTitle={documentTitle}
+            profileId={profileId}
             onCueRangeChange={setCueRange}
             onCueRangeReset={() => {
               const anchor = cueAnchorRef.current;
