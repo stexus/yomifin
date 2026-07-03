@@ -1113,7 +1113,21 @@ final class MPVLayerRenderer {
                                shouldInterpolate: false, intent: .defaultIntent) else {
             throw ScreenshotError.cgImageFailed
         }
-        guard let jpeg = UIImage(cgImage: cg).jpegData(compressionQuality: 0.85) else {
+        // Downscale to ≤720px wide before encoding — Anki card images don't need the
+        // full frame, and this shrinks uploads/collection.media by ~4-8x.
+        // (UIGraphicsImageRenderer is thread-safe; this runs on the capture queue.)
+        var image = UIImage(cgImage: cg)
+        let maxWidth: CGFloat = 720
+        if CGFloat(w) > maxWidth {
+            let scale = maxWidth / CGFloat(w)
+            let newSize = CGSize(width: maxWidth, height: (CGFloat(h) * scale).rounded())
+            let fmt = UIGraphicsImageRendererFormat()
+            fmt.scale = 1
+            image = UIGraphicsImageRenderer(size: newSize, format: fmt).image { _ in
+                image.draw(in: CGRect(origin: .zero, size: newSize))
+            }
+        }
+        guard let jpeg = image.jpegData(compressionQuality: 0.8) else {
             throw ScreenshotError.encodeFailed
         }
         do {
@@ -1121,7 +1135,7 @@ final class MPVLayerRenderer {
         } catch {
             throw ScreenshotError.writeFailed(error.localizedDescription)
         }
-        Logger.shared.log("captureScreenshot: wrote \(jpeg.count)B (\(w)x\(h)) @\(String(format: "%.2f", capturePos))s", type: "Info")
+        Logger.shared.log("captureScreenshot: wrote \(jpeg.count)B (src \(w)x\(h) → \(Int(image.size.width))x\(Int(image.size.height))) @\(String(format: "%.2f", capturePos))s", type: "Info")
         return FileManager.default.fileExists(atPath: path)
     }
 

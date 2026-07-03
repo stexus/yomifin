@@ -26,6 +26,13 @@
  *
  * Definitions-only scope: no pitch/frequency display.
  */
+import { Ionicons } from "@expo/vector-icons";
+import {
+  type AudioPlayer,
+  createAudioPlayer,
+  setAudioModeAsync,
+} from "expo-audio";
+import { File, Paths } from "expo-file-system";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -63,7 +70,8 @@ import {
   serializePath,
 } from "@/utils/yomifin/senses";
 import type { SubtitleCue } from "@/utils/yomifin/srt";
-import { fetchWordAudio } from "@/utils/yomifin/wordAudio";
+import { fetchWordAudioCached } from "@/utils/yomifin/wordAudio";
+import { base64ToBytes } from "@/utils/yomifin/wordAudioSources";
 import { getPopupTheme, type PopupTheme } from "./popupTheme";
 import { StructuredContent } from "./StructuredContent";
 
@@ -140,6 +148,50 @@ export default function DefinitionPopup({
   const [customText, setCustomText] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  // 🔊 word-audio playback (Feature: popup audio icon). Fetch is cached
+  // (fetchWordAudioCached) so a later "+ Anki card" reuses the same clip/file.
+  const [audioBusy, setAudioBusy] = useState(false);
+  const audioPlayerRef = useRef<AudioPlayer | null>(null);
+  useEffect(
+    () => () => {
+      audioPlayerRef.current?.remove();
+      audioPlayerRef.current = null;
+    },
+    [],
+  );
+
+  const playWordAudio = async () => {
+    if (!entry || audioBusy) return;
+    setAudioBusy(true);
+    try {
+      const config = getAnkiConfig();
+      const clip = await fetchWordAudioCached(
+        config.wordAudioSources,
+        entry.term,
+        entry.reading,
+      );
+      if (!clip) {
+        toast.error(`No word audio found for 「${entry.term}」`);
+        return;
+      }
+      // Write the fetched clip to cache and play it (expo-audio needs a URI).
+      const f = new File(Paths.cache, clip.filename);
+      if (!f.exists) f.write(base64ToBytes(clip.base64));
+      try {
+        await setAudioModeAsync({ playsInSilentMode: true });
+      } catch {
+        // best-effort; keep playing with the current audio mode
+      }
+      audioPlayerRef.current?.remove();
+      const player = createAudioPlayer(f.uri);
+      audioPlayerRef.current = player;
+      player.play();
+    } catch (e) {
+      toast.error((e as Error)?.message || "Word audio failed");
+    } finally {
+      setAudioBusy(false);
+    }
+  };
 
   // A new lookup (new result object) resets the cycler + selection + add-state.
   useEffect(() => {
@@ -272,11 +324,10 @@ export default function DefinitionPopup({
           ? getMedia(want, rangeSec)
           : Promise.resolve(undefined),
         markers.has("audio") && entry
-          ? fetchWordAudio(
+          ? fetchWordAudioCached(
               config.wordAudioSources,
               entry.term,
               entry.reading,
-              `card_${Date.now()}`,
             )
           : Promise.resolve(null),
       ]);
@@ -378,6 +429,22 @@ export default function DefinitionPopup({
                       {entry.wordClasses.join(" · ")}
                     </Text>
                   ) : null}
+                  <Pressable
+                    style={styles.audioBtn}
+                    onPress={playWordAudio}
+                    disabled={audioBusy}
+                    hitSlop={8}
+                  >
+                    {audioBusy ? (
+                      <ActivityIndicator size='small' color={t.reading} />
+                    ) : (
+                      <Ionicons
+                        name='volume-medium'
+                        size={20}
+                        color={t.reading}
+                      />
+                    )}
+                  </Pressable>
                 </View>
                 {entry.inflectionChain.length > 0 ? (
                   <Text style={styles.inflection}>
@@ -834,6 +901,14 @@ function makeStyles(t: PopupTheme) {
       fontSize: 13,
       marginLeft: 10,
       fontStyle: "italic",
+    },
+    audioBtn: {
+      marginLeft: 10,
+      width: 28,
+      height: 24,
+      alignItems: "center",
+      justifyContent: "center",
+      alignSelf: "center",
     },
     inflection: {
       color: t.inflection,

@@ -30,6 +30,12 @@ export interface AnkiConfig {
   fieldTemplates: Record<string, string>;
   tags: string[];
   allowDuplicate: boolean;
+  /**
+   * Ship Yomitan-style rendered HTML for {glossary} / {single-glossary:…} /
+   * {popup-selection-text} (structured content → <div class="yomitan-glossary">…)
+   * instead of flattened plain text.
+   */
+  htmlGlossary: boolean;
   /** Ordered sources for the {audio} (word audio) marker. */
   wordAudioSources: WordAudioSourceConfig[];
 }
@@ -53,6 +59,7 @@ export const DEFAULT_ANKI_CONFIG: AnkiConfig = {
   },
   tags: ["yomifin"],
   allowDuplicate: false,
+  htmlGlossary: false,
   wordAudioSources: DEFAULT_WORD_AUDIO_SOURCES,
 };
 

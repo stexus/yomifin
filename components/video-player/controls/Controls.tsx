@@ -46,6 +46,8 @@ import { type AspectRatio } from "./VideoScalingModeSelector";
 interface Props {
   item: BaseItemDto;
   isPlaying: boolean;
+  /** Bumped by direct-player on every native two-finger tap (gesture feedback UI). */
+  twoFingerNonce?: number;
   isSeeking: SharedValue<boolean>;
   cacheProgress: SharedValue<number>;
   progress: SharedValue<number>;
@@ -87,6 +89,7 @@ export const Controls: FC<Props> = ({
   pause,
   togglePlay,
   isPlaying,
+  twoFingerNonce,
   isSeeking,
   progress,
   isBuffering,
@@ -211,6 +214,15 @@ export const Controls: FC<Props> = ({
     seek,
     play,
   });
+
+  // Double-tap seek (gesture layer): signed relative seek in seconds.
+  const handleSeekRelative = useCallback(
+    (seconds: number) => {
+      if (seconds >= 0) handleSeekForward(seconds);
+      else handleSeekBackward(-seconds);
+    },
+    [handleSeekForward, handleSeekBackward],
+  );
 
   // Time management hook
   const { currentTime, remainingTime } = useVideoTime({
@@ -505,7 +517,10 @@ export const Controls: FC<Props> = ({
             screenWidth={screenWidth}
             screenHeight={screenHeight}
             showControls={showControls}
+            isPlaying={isPlaying}
             onToggleControls={toggleControls}
+            twoFingerNonce={twoFingerNonce}
+            onSeekRelative={handleSeekRelative}
             onSkipForward={handleSkipForward}
             onSkipBackward={handleSkipBackward}
           />

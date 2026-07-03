@@ -165,3 +165,20 @@ export function bytesToBase64(bytes: Uint8Array): string {
   }
   return out;
 }
+
+/** Inverse of bytesToBase64 (write fetched clips to disk for popup playback). */
+export function base64ToBytes(b64: string): Uint8Array {
+  const clean = b64.replace(/[^A-Za-z0-9+/]/g, "");
+  const out = new Uint8Array(Math.floor((clean.length * 3) / 4));
+  let o = 0;
+  for (let i = 0; i + 1 < clean.length; i += 4) {
+    const n0 = B64_ALPHABET.indexOf(clean[i]);
+    const n1 = B64_ALPHABET.indexOf(clean[i + 1]);
+    const n2 = i + 2 < clean.length ? B64_ALPHABET.indexOf(clean[i + 2]) : -1;
+    const n3 = i + 3 < clean.length ? B64_ALPHABET.indexOf(clean[i + 3]) : -1;
+    out[o++] = (n0 << 2) | (n1 >> 4);
+    if (n2 >= 0) out[o++] = ((n1 & 15) << 4) | (n2 >> 2);
+    if (n3 >= 0) out[o++] = ((n2 & 3) << 6) | n3;
+  }
+  return out.subarray(0, o);
+}

@@ -17,8 +17,18 @@ import type { CapturedMedia } from "./ankiMedia";
 import { furiganaHtml, furiganaPlain } from "./furigana";
 import type { LookupResult } from "./lookup";
 import { collectMarkers, type MarkerContext, renderTemplate } from "./markers";
-import { flattenSelectionText, type PopupSelection } from "./selection";
-import { normalizeGlossary, scToText } from "./structuredContent";
+import {
+  flattenSelectionHtml,
+  flattenSelectionText,
+  type PopupSelection,
+} from "./selection";
+import {
+  type GlossaryDefinition,
+  glossaryDefinitionsToHtml,
+  normalizeGlossary,
+  type SCContent,
+  scToText,
+} from "./structuredContent";
 import type { WordAudioResult } from "./wordAudio";
 
 /** Raw AnkiConnect response envelope. */
@@ -28,24 +38,39 @@ interface AnkiResponse {
 }
 
 /** Low-level AnkiConnect invoke. Throws on transport error or AnkiConnect `error`. */
+// Without an explicit timeout RN's fetch can hang ~60s on an unreachable host, which
+// reads as a frozen UI in the settings pane / card add. Control actions get a short
+// budget; media uploads (base64 jpg/m4a bodies) get a longer one.
+const ANKI_TIMEOUT_MS = 4_000;
+const ANKI_UPLOAD_TIMEOUT_MS = 15_000;
+
 export async function ankiInvoke<T = unknown>(
   url: string,
   action: string,
   params: unknown = {},
+  timeoutMs: number = ANKI_TIMEOUT_MS,
 ): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   let res: Response;
   try {
     res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action, version: 6, params }),
+      signal: controller.signal,
     });
   } catch (e) {
+    const aborted = (e as Error).name === "AbortError";
     throw new Error(
-      `Can't reach Anki at ${url}. Is the server up and webBindAddress set? (${
-        (e as Error).message
-      })`,
+      aborted
+        ? `Anki at ${url} didn't answer within ${timeoutMs / 1000}s. Is the server up and webBindAddress set?`
+        : `Can't reach Anki at ${url}. Is the server up and webBindAddress set? (${
+            (e as Error).message
+          })`,
     );
+  } finally {
+    clearTimeout(timer);
   }
   if (!res.ok) throw new Error(`AnkiConnect HTTP ${res.status}`);
   const json = (await res.json()) as AnkiResponse;
@@ -89,19 +114,64 @@ export function flattenGloss(
   return lines.join("\n").trim();
 }
 
+/** One definition group → the shape the HTML renderer wants. */
+function toGlossaryDefinition(
+  group: LookupResult["entries"][number]["definitions"][number],
+): GlossaryDefinition {
+  return {
+    dictionary: group.dictionary,
+    tags: group.tags,
+    items: group.glossary.map((item) => normalizeGlossary(item) as SCContent),
+  };
+}
+
+/**
+ * Yomitan-style rendered HTML for one headword's glossary ({glossary}, HTML mode):
+ * ONE numbered <ol> across ALL definitions, each <li> prefixed <i>(tags, dict)</i> —
+ * exact default-template shape (see glossaryDefinitionsToHtml).
+ */
+export function glossHtml(
+  entry: LookupResult["entries"][number] | undefined,
+): string {
+  if (!entry) return "";
+  return glossaryDefinitionsToHtml(entry.definitions.map(toGlossaryDefinition));
+}
+
 /** Per-dictionary flattened glossaries for the active pane ({single-glossary:…}). */
 function glossaryByDictionary(
   entry: LookupResult["entries"][number] | undefined,
+  html: boolean,
 ): Record<string, string> {
   const out: Record<string, string> = {};
   if (!entry) return out;
+  // One dictionary can contribute SEVERAL definitions — aggregate, never overwrite.
+  const byDict = new Map<
+    string,
+    LookupResult["entries"][number]["definitions"]
+  >();
   for (const group of entry.definitions) {
-    const lines: string[] = [];
-    for (const item of group.glossary) {
-      const text = scToText(normalizeGlossary(item)).trim();
-      if (text) lines.push(text);
+    const arr = byDict.get(group.dictionary) ?? [];
+    arr.push(group);
+    byDict.set(group.dictionary, arr);
+  }
+  for (const [dictionary, groups] of byDict) {
+    if (html) {
+      // dictionaryTag:false = Yomitan's brief mode — the dictionary is implied by the
+      // marker itself; multiple definitions still get the numbered <ol>.
+      out[dictionary] = glossaryDefinitionsToHtml(
+        groups.map(toGlossaryDefinition),
+        { dictionaryTag: false },
+      );
+      continue;
     }
-    out[group.dictionary] = lines.join("\n").trim();
+    const lines: string[] = [];
+    for (const group of groups) {
+      for (const item of group.glossary) {
+        const text = scToText(normalizeGlossary(item)).trim();
+        if (text) lines.push(text);
+      }
+    }
+    out[dictionary] = lines.join("\n").trim();
   }
   return out;
 }
@@ -132,8 +202,16 @@ export interface CardData {
   wordAudio?: WordAudioResult | null;
 }
 
-/** Assemble the MarkerContext for one card (pure aside from the data passed in). */
-export function buildMarkerContext(data: CardData): MarkerContext {
+/**
+ * Assemble the MarkerContext for one card (pure aside from the data passed in).
+ * `html` switches {glossary}/{single-glossary:…}/{popup-selection-text} to Yomitan-
+ * parity rendered HTML (AnkiConfig.htmlGlossary). The ✎ custom text is always plain
+ * (the user typed it as plain text).
+ */
+export function buildMarkerContext(
+  data: CardData,
+  html = false,
+): MarkerContext {
   const entry = data.result.entries[data.activeIndex ?? 0];
   const m = data.media;
   const expression = entry?.term || data.result.matchedText || "";
@@ -165,11 +243,15 @@ export function buildMarkerContext(data: CardData): MarkerContext {
     clozePrefix: cloze.prefix,
     clozeBody: cloze.body,
     clozeSuffix: cloze.suffix,
-    glossary: flattenGloss(entry),
-    glossaryByDictionary: glossaryByDictionary(entry),
+    glossary: html ? glossHtml(entry) : flattenGloss(entry),
+    glossaryByDictionary: glossaryByDictionary(entry, html),
     selectionText:
       data.customSelectionText ??
-      (data.selection ? flattenSelectionText(data.result, data.selection) : ""),
+      (data.selection
+        ? html
+          ? flattenSelectionHtml(data.result, data.selection)
+          : flattenSelectionText(data.result, data.selection)
+        : ""),
     conjugation: entry?.inflectionChain.join(" « ") ?? "",
     dictionary: entry?.definitions[0]?.dictionary ?? "",
     tags,
@@ -185,7 +267,7 @@ export function buildFields(
   config: AnkiConfig,
   data: CardData,
 ): Record<string, string> {
-  const ctx = buildMarkerContext(data);
+  const ctx = buildMarkerContext(data, config.htmlGlossary);
   const fields: Record<string, string> = {};
   for (const [field, template] of Object.entries(config.fieldTemplates)) {
     if (!template?.trim()) continue; // "" = leave field blank
@@ -194,13 +276,32 @@ export function buildFields(
   return fields;
 }
 
-/** Store a base64 media file in Anki's collection (idempotent by filename). */
+/**
+ * Store a base64 media file in Anki's collection (idempotent by filename). Media
+ * filenames are content-derived (mediaKey.ts), so a batch of cards mined from the
+ * same line reuses files — the session Set skips re-uploading identical payloads.
+ */
+const uploadedMedia = new Set<string>();
+
 async function storeMedia(
   url: string,
   filename: string,
   base64: string,
 ): Promise<void> {
-  await ankiInvoke(url, "storeMediaFile", { filename, data: base64 });
+  const key = `${url}|${filename}`;
+  if (uploadedMedia.has(key)) {
+    console.log(
+      `[YOMIFIN ANKI] media already uploaded this session: ${filename}`,
+    );
+    return;
+  }
+  await ankiInvoke(
+    url,
+    "storeMediaFile",
+    { filename, data: base64 },
+    ANKI_UPLOAD_TIMEOUT_MS,
+  );
+  uploadedMedia.add(key);
 }
 
 /**

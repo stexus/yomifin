@@ -33,37 +33,15 @@ per backlog item to start work without re-exploration.
 | Word audio `{audio}` (jpod101 / jisho / custom URL) | `utils/yomifin/{wordAudio,wordAudioSources}.ts` | ordered fallthrough, invalid-clip sentinel, configurable in Settings → Anki |
 | Multi-sentence cards (cue store + range extend) | `utils/yomifin/cues.ts`, `utils/atoms/yomifinCueStore.ts`, popup sentence strip | ‹＋ ＋› extend, ↺ reset; `{sentence}` + audio clip span the range; `{cloze-*}` extend too |
 | Player polish | `direct-player.tsx`, Settings → Reader | pause-on-lookup/resume, popup side anchor, controls-dim setting, native `subSeek(±1)` prev/next-cue buttons |
+| Media dedup + batch mining | `utils/yomifin/{mediaKey,ankiMedia}.ts`, `anki.ts` (upload skip), `direct-player.tsx` | content-derived filenames `yomifin_<fnv>.{jpg,m4a}` keyed on itemId + quantized times (audio key = SELECTED cue range); in-session capture cache collapses repeat captures (RAM, bounded: 12 media / 32 word clips, FIFO); disk hygiene: capture temps deleted in `finally`, plus a 24h `yomifin_*` sweep (`cacheSweep.ts`) on player mount; native `captureScreenshot` downscales to ≤720px |
+| Video gestures (taps) | `GestureOverlay.tsx` (RNGH, 1-finger only), `MpvPlayerView.swift` `onTwoFingerTap` seam v2 + `tapSuppression.ts` (80ms grace), `Controls.tsx`, Settings → Reader | two-finger tap = play/pause (NATIVE UIKit window recognizer — RNGH can't do multi-touch taps, see gotcha; feedback bubble via `twoFingerNonce`, hidden while controls up), double-tap L/R seek, single tap = controls; seam-version probe logs stale binaries |
+| HTML glossary markers | `structuredContent.ts` (`scToHtml`/`glossaryContentHtml`/`glossaryDefinitionsToHtml`), `selection.ts`, `anki.ts`, `ankiConfig.ts` `htmlGlossary`, Settings → Anki toggle | Yomitan default-template parity (device-verified): `{glossary}` = ONE numbered `<ol>` across definitions inside `<div class="yomitan-glossary">`, each `<li data-dictionary>` prefixed `<i>(tags, dict)</i>`; single definition = bare span, no ol; `{single-glossary:…}` = brief mode (no `<i>` prefix, defs from that dict aggregated — fixed an overwrite bug); SC data attrs emit Yomitan's `data-sc-*` prefix; extracted `<li>` selections get a `<ul>` context; global toggle, default off; gaiji images still skipped (see Small) |
+| 🔊 word audio in popup | `DefinitionPopup.tsx`, `wordAudio.ts` (`fetchWordAudioCached`) | speaker button beside headword; expo-audio playback; fetch cached per term+reading so `{audio}` on card-add reuses the clip; filename content-derived `yomifin_word_<fnv>.<ext>`; 2026-07-02 fix: `Crypto.digest` needs a TypedArray (raw ArrayBuffer threw on-device and broke the jpod101 sentinel check) |
+| AnkiConnect timeouts | `anki.ts` `ankiInvoke` | AbortController: 4s control actions, 15s media uploads — unreachable Anki used to hang ~60s ("frozen" settings pane / card add) |
 
 ## Backlog (roughly priority-ordered)
 
-### 1. Media dedup + batch mining
-Mining several words from one sentence must share one `.m4a` + one `.jpg` (no dup
-files, no repeated capture). Mostly free because `storeMediaFile` is idempotent by
-filename and capture is already deferred: the only reason for duplicates today is
-`baseName = card_${Date.now()}`. Build: (a) content-derived media key — cheap hash
-(FNV over `itemId + audioStart/End + framePos` quantized to ~250ms/cue start) →
-`yomifin_<hash>.{m4a,jpg}`; the audio key must use the **selected cue range** so
-1-line and 2-line selections differ; (b) in-session `Map<key, Promise<CapturedMedia>>`
-cache in the capture layer + a `Set<storedFilename>` to skip re-upload; (c) image
-downscale setting (max width ~720px / JPEG quality) applied at the native
-`captureScreenshot` seam or in `ankiMedia.ts`. Exit: two words from the same line →
-two notes referencing the SAME files, `[YOMIFIN MEDIA]` fires once; extended
-multi-cue selection gets its own key.
-
-### 2. HTML-formatted glossary markers (Yomitan-parity output)
-`{glossary}` / `{single-glossary:…}` / `{popup-selection-text}` currently ship
-plain text (`scToText`). Yomitan ships rendered HTML
-(`<div class="yomitan-glossary"><ol><li data-dictionary=…>…`, inline styles, ruby).
-Build a pure `scToHtml` serializer (structured-content JSON ≈ mini-HTML; same
-recursion as `scToText`/`StructuredContent`, no DOM needed) + Yomitan's wrapper
-markup, behind a per-field or global toggle. Known gap to phase separately:
-dictionary-internal images (gaiji) need importer media support + Anki upload.
-
-### 3. Word-audio playback in the popup
-🔊 button next to the headword that plays the word audio (reuse
-`fetchWordAudio`); cache the clip so `{audio}` on card-add reuses the fetched file.
-
-### 4. Yomitan settings parity (lookup knobs)
+### 1. Yomitan settings parity (lookup knobs)
 Lift hardcoded lookup constants into the Reader settings group with Yomitan
 defaults. Audit the honored options at the `findTerms` call site in `lookup.ts`
 first — only expose what the vendored engine actually uses: `maxScanLength`
@@ -72,18 +50,7 @@ results/pane cap, text-preprocessor toggles, `removeNonJapaneseCharacters`.
 Thread settings → options object (keep `utils/yomifin/` pure). Pin a couple of
 knobs in `lookup.test.ts`.
 
-### 5. Video gestures rebuild (deferred; two failed attempts — read this first)
-Two-finger-tap pause + double-tap L/R seek never worked on device. Attempt 1
-(extending `useGestureDetection`/`onTouch*` with multi-touch counting) →
-`trackedTouchCount` warnings, laggy taps. Attempt 2 (RNGH `GestureDetector`
-wrapping the overlay) → recognizer fought the dim `Pressable`'s `onPress`. Both
-fully reverted. Correct path: rebuild the WHOLE video gesture layer (single tap,
-double-tap seek, two-finger tap, drags) as ONE RNGH `Gesture.Race`/`Exclusive`
-composition — never mix RN responders with RNGH. Validate two-finger + double-tap
-on the iPad before building the rest. Add settings keys
-(`yomifinDoubleTapSeconds`, etc.) only with this rebuild.
-
-### 6. Stremio addon sources (separate tab, mining-capable)
+### 2. Stremio addon sources (separate tab, mining-capable)
 Play content resolved via Stremio addons alongside Jellyfin, with the full mining
 pipeline (tappable subs → lookup → Anki card with audio+image). **Prerequisites
 are already met:** the user has debrid services (Real-Debrid-style) set up and
@@ -121,33 +88,64 @@ Exit criteria (on device): browse an addon catalog, play a debrid-resolved strea
 subtitles tappable (embedded AND an external SRT), mine a card whose audio+image
 capture from the stream URL; the Jellyfin player path is demonstrably unregressed.
 
-### 7. Pane cycler polish
+### 3. Pane cycler polish
 Cycler exists (footer ◀ n/m ▶). Wanted: prominent index at the TOP beside the
 headword, horizontal swipe across the popup, and left/right edge-tap zones.
 Pure popup UI change.
 
-### 8. Profiles (JA/ZH bundles)
+### 4. Profiles (JA/ZH bundles)
 { language, dictionary set, deck, model, field templates, word-audio sources } as
 a switchable bundle; auto-select by audio/subtitle track language, default JA.
 Natural composition of existing runtime configs — design the settings shape so
 current single-profile config becomes "the JA profile" without migration pain.
 
-### 9. Chinese parity
+### 5. Chinese parity
 `language-descriptors.js` already registers ZH (longest-match, no deinflection).
 Expect verification, not new code — plus: ZH has **no text preprocessors**, so no
 simplified↔traditional folding (documented divergence, LOOKUP_FIDELITY §4). Adding
 an st/ts folding preprocessor is the real work. Needs a real ZH dictionary import
 to validate.
 
-### 10. Subtitle rendering QoL
+### 6. Subtitle rendering QoL
 ASS support (parse, strip override tags, render dialogue as tappable plain text);
 overlay styling (outline, font size, vertical offset — runtime settings).
 
-### 11. Online subtitle sources
+### 7. Online subtitle sources
 Pull subs from APIs (e.g. jimaku.cc) into an internal track; feasibility of
 on-device sync (alass/ffsubsync-style) TBD.
 
-### 12. Subtitle sidebar (transcript) — do last
+### 8. Drag-anywhere-to-seek, done right (first attempt reverted 2026-07-02)
+Infuse-style: horizontal drag anywhere on the video acts like a seek-bar drag.
+Attempt 1 (reverted; flick-to-skip ±s restored on `enableHorizontalSwipeSkip`)
+drove the vestigial remote-scrub shared values from the RNGH pan via
+`runOnJS(true)` per-frame callbacks + a debounced `handleSliderChange` — device
+verdict: **very laggy, and no trickplay thumbnails** (react-native-awesome-slider
+only renders its bubble during ITS OWN internal gesture; an external scrub can't
+summon it). Requirements for attempt 2: (a) pan `onUpdate` as a WORKLET writing a
+SharedValue directly (UI thread, zero bridge traffic per frame); (b) a dedicated
+scrub-bubble component (thumbnail + timestamp) positioned via reanimated from
+that SharedValue, independent of awesome-slider; (c) commit seek only on release
+(+ throttled trickplay-tile prefetch on the JS side); (d) same lifecycle contract
+as attempt 1 (pause during, seek + resume on release, exactly-once end,
+cancel-safe). Pairs naturally with item 9 (all-native gesture surface) if that
+lands first.
+
+### 9. All-native gesture surface (end-state refactor — trigger, don't schedule)
+Today's player gestures are TWO recognizer trees deduplicated through
+`tapSuppression.ts` + 80ms grace delays: RNGH (single/double tap, pan) and the
+native window two-finger tap (seam v2). It works and the coupling is ~30 lines,
+but the correct end state is ONE UIKit tree: a native "gesture surface" expo view
+sitting exactly where `GestureOverlay`'s View sits (below buttons, above video)
+owning UITapGestureRecognizers (single/double/two-finger, arbitrated via
+`require(toFail:)`) + UIPanGestureRecognizer, emitting semantic events
+(`onSingleTap`, `onDoubleTap(x)`, `onTwoFingerTap`, pan stream). Deletes
+tapSuppression, grace delays, and the `twoFingerNonce` plumbing. Do it WHEN a
+trigger arrives — a new gesture (pinch-to-zoom), another arbitration bug, or
+spare native-iteration budget — not before: it re-pays every hit-testing subtlety
+(button pass-through, dim layer, exclusion zones, window-wide two-finger) in
+Swift, and gesture tuning needs many on-device rebuild loops.
+
+### 10. Subtitle sidebar (transcript) — do last
 Collapsible flex-row panel over the existing cue store (`yomifinCuesAtom` already
 holds the full parsed track): timestamp + line rows, active line highlighted +
 auto-scrolled, tap row → `seek(cue.start*1000)`. Bitmap tracks: unavailable,
@@ -156,6 +154,10 @@ degrade gracefully.
 ### Small / opportunistic
 - `canAddNotes` pre-check for nicer duplicate UX (today: `allowDuplicate:false` +
   surfaced error toast).
+- HTML glossary gap: dictionary-internal images (gaiji) are skipped by `scToHtml`
+  (same as plain text) — needs importer media support + Anki media upload.
+- Screenshot downscale is hardcoded (max width 720px, JPEG q0.8) at the native
+  `captureScreenshot` seam; lift into a setting only if it ever matters.
 - AAC bitrate tuning for the audio clip.
 - Zero-cost frame capture: tap the `vo=avfoundation` VO's enqueued `CVPixelBuffer`
   — needs a forked/patched MPVKit; current per-card cost (one range request + one

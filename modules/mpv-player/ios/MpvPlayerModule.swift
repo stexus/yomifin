@@ -214,6 +214,21 @@ public class MpvPlayerModule: Module {
       // the main thread — view-taking AsyncFunctions run on main by default, which froze
       // the whole UI (spinner + playback) for the duration of a capture. The throwaway
       // handles never touch the view/layer, so a background queue is safe.
+      // YOMIFIN: binary marker for the native two-finger-tap seam. Lets JS detect an
+      // OLD binary (method missing → throws → false) and log "rebuild needed" instead
+      // of the gesture silently not working.
+      AsyncFunction("hasTwoFingerTapSeam") { (_: MpvPlayerView) -> Bool in
+        return true
+      }
+
+      // Seam version history: 1 = plain window recognizer (could be killed by UIKit
+      // recognizer-prevention when RNGH's double-tap activated); 2 = delegate allows
+      // simultaneous recognition. Bump on every behavior change so the Metro probe
+      // can prove which binary is on-device.
+      AsyncFunction("twoFingerTapSeamVersion") { (_: MpvPlayerView) -> Int in
+        return 2
+      }
+
       // captureScreenshot(view, path, sourceUrl, pos) -> Bool : frame at `pos` (no subs/
       // OSD) to a JPG path. sourceUrl="" => use the playing URL (local/offline).
       AsyncFunction("captureScreenshot") { (view: MpvPlayerView, path: String, sourceUrl: String, pos: Double, promise: Promise) in
@@ -250,7 +265,7 @@ public class MpvPlayerModule: Module {
       }
 
       // Defines events that the view can send to JavaScript
-      Events("onLoad", "onPlaybackStateChange", "onProgress", "onError", "onTracksReady", "onPictureInPictureChange", "onSubtitleText")
+      Events("onLoad", "onPlaybackStateChange", "onProgress", "onError", "onTracksReady", "onPictureInPictureChange", "onSubtitleText", "onTwoFingerTap")
     }
   }
 }

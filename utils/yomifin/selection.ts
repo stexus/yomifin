@@ -23,7 +23,12 @@ import {
   serializePath,
   subtreeAtPath,
 } from "./senses";
-import { normalizeGlossary, scToText } from "./structuredContent";
+import {
+  glossaryDefinitionsToHtml,
+  normalizeGlossary,
+  type SCContent,
+  scToText,
+} from "./structuredContent";
 
 export type PopupSelection =
   | { kind: "dictionary"; paneIndex: number; dictionary: string }
@@ -117,4 +122,24 @@ export function flattenSelectionText(
     if (text) lines.push(text);
   }
   return lines.join("\n").trim();
+}
+
+/**
+ * HTML flavor of flattenSelectionText for the HTML-glossary mode ({popup-selection-
+ * text} then ships Yomitan-style markup instead of plain text). "" when nothing is
+ * selected / resolvable.
+ */
+export function flattenSelectionHtml(
+  result: LookupResult,
+  selection: PopupSelection,
+): string {
+  if (!selection) return "";
+  const items = selectionGlossary(result, selection).map(
+    (item) => normalizeGlossary(item) as SCContent,
+  );
+  // Selection is already dictionary-scoped → brief mode (no <i>(dict)</i> prefix).
+  return glossaryDefinitionsToHtml(
+    [{ dictionary: selection.dictionary, items }],
+    { dictionaryTag: false },
+  );
 }

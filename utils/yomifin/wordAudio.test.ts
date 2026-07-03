@@ -7,6 +7,7 @@
 import { seedFieldTemplates } from "./ankiFieldSeeds";
 import {
   audioExtensionForMime,
+  base64ToBytes,
   bytesToBase64,
   customAudioUrl,
   extractJishoAudioUrl,
@@ -120,6 +121,26 @@ check(
 );
 check("base64 padding 1", bytesToBase64(new Uint8Array([77, 97])) === "TWE=");
 check("base64 padding 2", bytesToBase64(new Uint8Array([77])) === "TQ==");
+
+// base64ToBytes round-trips (popup 🔊 playback writes fetched clips to disk)
+{
+  const cases = [
+    new Uint8Array([]),
+    new Uint8Array([77]),
+    new Uint8Array([77, 97]),
+    new Uint8Array([77, 97, 110]),
+    new Uint8Array(Array.from({ length: 300 }, (_, i) => (i * 7 + 3) % 256)),
+  ];
+  let ok = true;
+  for (const bytes of cases) {
+    const round = base64ToBytes(bytesToBase64(bytes));
+    if (round.length !== bytes.length) ok = false;
+    else
+      for (let i = 0; i < bytes.length; i++)
+        if (round[i] !== bytes[i]) ok = false;
+  }
+  check("base64ToBytes round-trips", ok);
+}
 
 // --- field template seeding (ankiConfig heuristics, RN-free shim) ---------------------------
 

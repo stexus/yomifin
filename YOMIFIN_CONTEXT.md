@@ -159,8 +159,45 @@ Facts that cost real time to learn (all reproducible via `app.json`/plugins —
   is tap-to-select targets plus the ✎ plain-`TextInput` manual-trim fallback,
   not free text selection.
 - **RNGH + RN touch responders don't compose** over the player: mixing a
-  `GestureDetector` with the controls-dim `Pressable` broke both (two-finger tap
-  and double-tap seek never shipped — see FEATURES backlog for the rebuild plan).
+  `GestureDetector` with the controls-dim `Pressable` broke both (two failed
+  attempts). The gesture layer is now ONE RNGH composition
+  (`GestureOverlay.tsx`: `Race(pan, Exclusive(twoFingerTap, doubleTap,
+  singleTap))`) whose child View doubles as the controls-dim layer — never add an
+  RN `Pressable`/`onTouch*` back into that surface. Two more traps hit on device:
+  (1) dim that view via `backgroundColor: rgba(…)`, NEVER via `opacity` — UIKit
+  hit-testing ignores views with alpha ≤ 0.01, so `opacity: 0` kills every gesture
+  the moment controls hide; (2) **RNGH cannot recognize multi-touch taps on iOS,
+  period** — its `RNTapHandler` counts taps per `touchesBegan` event, and on
+  device a two-finger tap registered as a single tap, a double tap, or nothing
+  across THREE different RNGH designs (`minPointers`, `Manual` touch observer,
+  paired taps-2/minPointers-2 recognizers — all failed). Two-finger tap is now a
+  NATIVE seam: `MpvPlayerView.swift` attaches a plain
+  `UITapGestureRecognizer(numberOfTouchesRequired: 2)` to the WINDOW (the RN
+  overlay sits above the mpv view, so window is the only place that sees the
+  touches) as a pure observer (no cancels/delays) → `onTwoFingerTap` event →
+  direct-player toggles play and calls `suppressTaps()`
+  (`components/video-player/controls/tapSuppression.ts`) so the RNGH single/
+  double-tap recognizers — which the same tap also satisfies — swallow it. The
+  RNGH recognizers recognize in the SAME instant as the native one, so the
+  suppression check races the bridge: GestureOverlay grace-delays tap execution
+  ~150ms (doubleTap always; singleTap only when double-tap seek is off, since
+  Exclusive already delays it ~280ms otherwise) and re-checks `tapsSuppressed()`
+  at fire time. UIKit recognizer-prevention history: on seam v1, RNGH's doubleTap
+  ACTIVATING failed the still-Possible native window tap (observed on device
+  2026-07-02 as two-finger → seek); seam v2 sets a UIGestureRecognizerDelegate
+  returning true from shouldRecognizeSimultaneouslyWith, making the native
+  recognizer un-preventable — which is what allowed deleting GestureOverlay's
+  RNGH two-finger recognizers for good (v2 verified working on device). NEVER
+  run a v1/seam-less binary with this JS: the Metro probe logs the seam VERSION
+  (`twoFingerTapSeamVersion`; v2 = current) — bump it on ANY native seam change
+  so stale installs are provable. Feedback bubble: direct-player bumps
+  `twoFingerNonce` → Controls → GestureOverlay effect shows pause/play. Also: a "full rebuild" that doesn't land on the iPad looks
+  exactly like a broken native feature — the `hasTwoFingerTapSeam` probe logs
+  PRESENT/MISSING in Metro on video load; trust it over assumptions.
+  JS-side `onTouchesDown` events are also unreliable here (missed events,
+  `trackedTouchCount` warnings): don't build gesture logic on them, and don't
+  call `mgr.fail()` from `runOnJS(true)` callbacks (`setGestureState` is
+  worklet-only).
 - **Anki duplicate detection** is collection-wide by default and first-field-only:
   we send `duplicateScope:"deck"`; a new reading on an existing Expression still
   rejects (Anki semantics, not a bug).

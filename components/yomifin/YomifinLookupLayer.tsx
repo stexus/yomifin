@@ -27,6 +27,7 @@ import type {
   CapturedMedia,
   MediaWant,
 } from "@/utils/yomifin/ankiMedia";
+import { sweepYomifinCacheFiles } from "@/utils/yomifin/cacheSweep";
 import { findCueIndexByTime } from "@/utils/yomifin/cues";
 import {
   enabledTitlesInOrder,
@@ -58,11 +59,11 @@ interface Props {
   /**
    * Phase 4 — expensive, called only on "+ Anki card" PRESS: grab the frame + audio
    * clip for the frozen snapshot. Kept off the tap path so ordinary lookups cost
-   * nothing (no per-tap seek/decode).
+   * nothing (no per-tap seek/decode). Filenames are content-derived inside the
+   * capture layer (media dedup), so no per-card base name is threaded through.
    */
   onCaptureMedia?: (
     ctx: CaptureContext,
-    baseName: string,
     want: MediaWant,
   ) => Promise<CapturedMedia>;
   /** Playing media item's title, for the {document-title} marker. */
@@ -110,6 +111,12 @@ export default function YomifinLookupLayer({
   // Frozen at tap (cheap); the actual capture runs only if "+ Anki card" is pressed.
   const cardCtxRef = useRef<CaptureContext | null>(null);
   const cardBaseRef = useRef<string>("");
+
+  // Disk-cache hygiene: once per player screen, delete stale yomifin_* cache files
+  // (🔊 word-audio clips kept for replay + any capture temp leaked by a crash).
+  useEffect(() => {
+    sweepYomifinCacheFiles();
+  }, []);
 
   // Open the installed dictionary db once for the player screen's lifetime. Opening is
   // instant (no parse); if none is installed yet, the overlay still shows text but taps
@@ -238,7 +245,7 @@ export default function YomifinLookupLayer({
               const merged = rangeSec
                 ? { ...ctx, cueStart: rangeSec.start, cueEnd: rangeSec.end }
                 : ctx;
-              return onCaptureMedia(merged, cardBaseRef.current, want);
+              return onCaptureMedia(merged, want);
             }}
             position={popupPosition}
             onClose={closeLookup}

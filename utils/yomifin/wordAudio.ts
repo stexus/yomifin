@@ -9,6 +9,7 @@
  * uses {audio} (gated via collectMarkers) — ordinary lookups never hit the network.
  */
 import * as Crypto from "expo-crypto";
+import { wordAudioKey } from "./mediaKey";
 import {
   audioExtensionForMime,
   bytesToBase64,
@@ -22,7 +23,8 @@ import {
 } from "./wordAudioSources";
 
 export interface WordAudioResult {
-  /** Anki media filename (unique per card). */
+  /** Anki media filename — content-derived (term+reading), so the same word always
+   * maps to the same file and `storeMediaFile` stays idempotent across cards. */
   filename: string;
   base64: string;
 }
@@ -60,9 +62,11 @@ async function fetchAudioBytes(
   if (buf.byteLength < MIN_AUDIO_BYTES) return null;
   if ((mime ?? "").toLowerCase().includes("text/html")) return null;
   if (checkJpodSentinel) {
+    // expo-crypto's native digest requires a TypedArray — a raw ArrayBuffer throws
+    // ArgumentCastException (NotTypedArrayException) on-device.
     const digest = await Crypto.digest(
       Crypto.CryptoDigestAlgorithm.SHA256,
-      buf,
+      new Uint8Array(buf),
     );
     if (toHex(digest) === JPOD101_INVALID_AUDIO_SHA256) return null;
   }
@@ -104,13 +108,13 @@ async function candidateUrls(
 
 /**
  * Try the enabled sources in order; return the first valid clip, or null.
- * `baseName` should be unique per card (same convention as ankiMedia).
+ * The filename is content-derived (term+reading hash) so repeated fetches of the
+ * same word reference the SAME Anki media file.
  */
 export async function fetchWordAudio(
   sources: WordAudioSourceConfig[],
   term: string,
   reading: string,
-  baseName: string,
 ): Promise<WordAudioResult | null> {
   if (!term) return null;
   for (const source of sources) {
@@ -122,7 +126,7 @@ export async function fetchWordAudio(
         if (!audio) continue;
         const ext = audioExtensionForMime(audio.mime);
         const result: WordAudioResult = {
-          filename: `yomifin_${baseName}_word.${ext}`,
+          filename: `yomifin_word_${wordAudioKey(term, reading)}.${ext}`,
           base64: bytesToBase64(audio.bytes),
         };
         console.log(
@@ -138,4 +142,40 @@ export async function fetchWordAudio(
     }
   }
   return null;
+}
+
+// --- Session cache -------------------------------------------------------------------
+// The popup's 🔊 button and "+ Anki card" both need the clip; fetch once, reuse. Only
+// SUCCESSFUL fetches are cached (a transient network failure shouldn't stick), and the
+// key includes the source config so toggling sources invalidates naturally.
+
+const wordAudioCache = new Map<string, Promise<WordAudioResult | null>>();
+const WORD_AUDIO_CACHE_MAX = 32;
+
+export function fetchWordAudioCached(
+  sources: WordAudioSourceConfig[],
+  term: string,
+  reading: string,
+): Promise<WordAudioResult | null> {
+  const key = `${wordAudioKey(term, reading)}|${JSON.stringify(
+    sources.map((s) => (s.enabled ? `${s.type}:${s.url ?? ""}` : "")),
+  )}`;
+  const hit = wordAudioCache.get(key);
+  if (hit) return hit;
+  const task = fetchWordAudio(sources, term, reading).then(
+    (result) => {
+      if (result === null) wordAudioCache.delete(key); // allow retry
+      return result;
+    },
+    (e) => {
+      wordAudioCache.delete(key);
+      throw e;
+    },
+  );
+  if (wordAudioCache.size >= WORD_AUDIO_CACHE_MAX) {
+    const oldest = wordAudioCache.keys().next().value;
+    if (oldest !== undefined) wordAudioCache.delete(oldest);
+  }
+  wordAudioCache.set(key, task);
+  return task;
 }

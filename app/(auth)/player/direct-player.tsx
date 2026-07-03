@@ -25,6 +25,7 @@ import { Controls } from "@/components/video-player/controls/Controls";
 import { Controls as TVControls } from "@/components/video-player/controls/Controls.tv";
 import { PlayerProvider } from "@/components/video-player/controls/contexts/PlayerContext";
 import { VideoProvider } from "@/components/video-player/controls/contexts/VideoContext";
+import { suppressTaps } from "@/components/video-player/controls/tapSuppression";
 import {
   PlaybackSpeedScope,
   updatePlaybackSpeedSettings,
@@ -599,6 +600,33 @@ export default function DirectPlayerPage() {
     }
   }, []);
 
+  // YOMIFIN: verify the running BINARY has the native two-finger-tap seam and say so
+  // loudly in Metro — a stale binary makes the gesture silently dead, which has
+  // already burned a debugging round.
+  const [isVideoLoadedForProbe, setIsVideoLoadedForProbe] = useState(false);
+  // Bumped per native two-finger tap; Controls→GestureOverlay watches it to show the
+  // pause/play feedback bubble (the toggle itself happens right here).
+  const [twoFingerNonce, setTwoFingerNonce] = useState(0);
+  useEffect(() => {
+    if (!isVideoLoadedForProbe) return;
+    videoRef.current
+      ?.twoFingerTapSeamVersion?.()
+      .then((v) => {
+        console.log(
+          v >= 2
+            ? `[GESTURE] native two-finger seam: v${v} (binary is current)`
+            : v === 1
+              ? "[GESTURE] native two-finger seam: v1 — STALE binary (v2 adds the anti-prevention delegate). Run `just local` and verify the install actually replaced the app."
+              : "[GESTURE] native two-finger seam: MISSING — this binary predates it. Run `just local` (or `just remote`) and reinstall.",
+        );
+      })
+      .catch(() =>
+        console.log(
+          "[GESTURE] native two-finger seam: MISSING — this binary predates it. Run `just local` (or `just remote`) and reinstall.",
+        ),
+      );
+  }, [isVideoLoadedForProbe]);
+
   // Phase 5: jump to the previous/next subtitle cue (native mpv sub-seek).
   const yomifinPrevSubtitle = useCallback(() => {
     videoRef.current?.subSeek?.(-1);
@@ -619,13 +647,21 @@ export default function DirectPlayerPage() {
 
   // Expensive: runs ONLY on "+ Anki card" press. Best-effort (partial/empty on failure).
   // `want` gates each capture on whether a field template references it (Phase 8).
+  // Filenames are content-derived from itemId + times (media dedup: batch-mining one
+  // line shares one .jpg/.m4a; the capture layer collapses repeat captures).
   const yomifinCaptureMedia = useCallback(
-    async (ctx: CaptureContext, baseName: string, want: MediaWant) => {
+    async (ctx: CaptureContext, want: MediaWant) => {
       const v = videoRef.current;
       if (!v) return {};
-      return captureCardMedia(v, ctx, baseName, yomifinCaptureSourceUrl, want);
+      return captureCardMedia(
+        v,
+        ctx,
+        item?.Id ?? itemId ?? "item",
+        yomifinCaptureSourceUrl,
+        want,
+      );
     },
-    [yomifinCaptureSourceUrl],
+    [yomifinCaptureSourceUrl, item?.Id, itemId],
   );
 
   const togglePlay = async () => {
@@ -1465,9 +1501,22 @@ export default function DirectPlayerPage() {
                 nowPlayingMetadata={nowPlayingMetadata}
                 onProgress={onProgress}
                 onSubtitleText={onSubtitleText}
+                // YOMIFIN: native window-level two-finger tap (UIKit recognizer; RNGH
+                // can't recognize multi-touch taps). Suppress the JS tap recognizers
+                // so the same tap can't also toggle controls / seek.
+                onTwoFingerTap={() => {
+                  if (!(settings.yomifinTwoFingerTapPause ?? true)) return;
+                  console.log("[GESTURE] native two-finger tap → toggle play");
+                  suppressTaps();
+                  togglePlay();
+                  setTwoFingerNonce((n) => n + 1);
+                }}
                 onPlaybackStateChange={onPlaybackStateChanged}
                 onPictureInPictureChange={_onPictureInPictureChange}
-                onLoad={() => setIsVideoLoaded(true)}
+                onLoad={() => {
+                  setIsVideoLoaded(true);
+                  setIsVideoLoadedForProbe(true);
+                }}
                 onError={(e: { nativeEvent: MpvOnErrorEventPayload }) => {
                   console.error("Video Error:", e.nativeEvent);
                   Alert.alert(
@@ -1538,6 +1587,7 @@ export default function DirectPlayerPage() {
                   item={item}
                   togglePlay={togglePlay}
                   isPlaying={isPlaying}
+                  twoFingerNonce={twoFingerNonce}
                   isSeeking={isSeeking}
                   progress={progress}
                   cacheProgress={cacheProgress}

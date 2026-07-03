@@ -8,11 +8,16 @@
 import { existsSync, readFileSync } from "node:fs";
 import {
   classify,
+  escapeHtml,
   getListBullet,
+  glossaryContentHtml,
+  glossaryDefinitionsToHtml,
   groupChildren,
   mapStyleToRN,
   normalizeGlossary,
   type SCContent,
+  scToHtml,
+  styleToCss,
   toChildArray,
 } from "./structuredContent";
 
@@ -116,6 +121,129 @@ check(
     const n = { tag: "span", content: "x" };
     return normalizeGlossary(n) === n;
   })(),
+);
+
+// --- scToHtml (Yomitan-parity HTML markers) ------------------------------------------
+check(
+  "html escapes text",
+  scToHtml(`a<b & "c"`) === "a&lt;b &amp; &quot;c&quot;",
+);
+check("html array joins", scToHtml(["a", "b"]) === "ab");
+check("html br is void", scToHtml({ tag: "br" }) === "<br>");
+check(
+  "html nested list",
+  scToHtml({
+    tag: "ol",
+    content: [
+      { tag: "li", content: "one" },
+      { tag: "li", content: "two" },
+    ],
+  }) === "<ol><li>one</li><li>two</li></ol>",
+  scToHtml({
+    tag: "ol",
+    content: [
+      { tag: "li", content: "one" },
+      { tag: "li", content: "two" },
+    ],
+  }),
+);
+check(
+  "html ruby passthrough",
+  scToHtml({
+    tag: "ruby",
+    content: ["\u8aad", { tag: "rt", content: "\u3088" }],
+  }) === "<ruby>\u8aad<rt>\u3088</rt></ruby>",
+);
+check(
+  "html style + data attrs (Yomitan data-sc- prefix)",
+  scToHtml({
+    tag: "span",
+    style: { fontStyle: "italic", fontSize: "80%" },
+    data: { code: "n" },
+    content: "noun",
+  }) ===
+    '<span style="font-style:italic;font-size:80%" data-sc-code="n">noun</span>',
+  scToHtml({
+    tag: "span",
+    style: { fontStyle: "italic", fontSize: "80%" },
+    data: { code: "n" },
+    content: "noun",
+  }),
+);
+check(
+  "html unknown tag \u2192 span",
+  scToHtml({ tag: "blink", content: "x" }) === "<span>x</span>",
+);
+check(
+  "html img (gaiji) skipped",
+  scToHtml({ tag: "img", path: "x.png" }) === "",
+);
+check(
+  "html link keeps href",
+  scToHtml({
+    tag: "a",
+    href: "?query=\u8aad\u3080",
+    content: "\u8aad\u3080",
+  }) === '<a href="?query=\u8aad\u3080">\u8aad\u3080</a>',
+);
+check(
+  "styleToCss decoration array",
+  styleToCss({ textDecorationLine: ["underline", "line-through"] }) ===
+    "text-decoration:underline line-through",
+);
+check("escapeHtml quotes", escapeHtml('a"b') === "a&quot;b");
+
+check(
+  "html data name attr matches Yomitan (data-sc-name)",
+  scToHtml({ tag: "span", data: { name: "見出部" }, content: "x" }) ===
+    '<span data-sc-name="見出部">x</span>',
+);
+check(
+  "glossary content: single item renders bare",
+  glossaryContentHtml(["only"]) === "only",
+);
+check(
+  "glossary content: multiple render as plain ul/li",
+  glossaryContentHtml(["a", "b"]) === "<ul><li>a</li><li>b</li></ul>",
+);
+check(
+  "glossary defs: single definition \u2192 span in wrapper, NO ol, NO dict tag",
+  glossaryDefinitionsToHtml([{ dictionary: "D", items: ["a"] }]) ===
+    '<div style="text-align: left;" class="yomitan-glossary"><span>a</span></div>',
+  glossaryDefinitionsToHtml([{ dictionary: "D", items: ["a"] }]),
+);
+check(
+  "glossary defs: multiple definitions \u2192 numbered ol with <i>(tags, dict)</i>",
+  glossaryDefinitionsToHtml([
+    { dictionary: "三省堂", items: ["a"] },
+    { dictionary: "Jitendex", tags: ["★"], items: ["b", "c"] },
+  ]) ===
+    '<div style="text-align: left;" class="yomitan-glossary"><ol>' +
+      '<li data-dictionary="三省堂"><i>(三省堂)</i> <span>a</span></li>' +
+      '<li data-dictionary="Jitendex"><i>(★, Jitendex)</i> <span><ul><li>b</li><li>c</li></ul></span></li>' +
+      "</ol></div>",
+  glossaryDefinitionsToHtml([
+    { dictionary: "三省堂", items: ["a"] },
+    { dictionary: "Jitendex", tags: ["★"], items: ["b", "c"] },
+  ]),
+);
+check(
+  "glossary defs: dictionaryTag:false drops the <i> prefix, keeps ol + data attr",
+  glossaryDefinitionsToHtml(
+    [
+      { dictionary: "D", items: ["a"] },
+      { dictionary: "D", items: ["b"] },
+    ],
+    { dictionaryTag: false },
+  ) ===
+    '<div style="text-align: left;" class="yomitan-glossary"><ol>' +
+      '<li data-dictionary="D"><span>a</span></li>' +
+      '<li data-dictionary="D"><span>b</span></li>' +
+      "</ol></div>",
+);
+check(
+  "glossary defs: empty \u2192 empty string",
+  glossaryDefinitionsToHtml([]) === "",
 );
 
 // Real-data walk (optional)

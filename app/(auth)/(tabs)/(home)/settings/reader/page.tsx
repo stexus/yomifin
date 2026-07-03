@@ -6,12 +6,15 @@
  *   - yomifinPopupPosition: which side the fixed popup is anchored to.
  *   - yomifinPopupTheme:    definition popup color theme (light/dark/auto).
  *   - controlsDimOpacity:   how much the video dims when the controls are up.
+ *   - yomifinDoubleTapSeconds: double-tap L/R seek amount (0 = off).
+ *   - yomifinTwoFingerTapPause: two-finger tap toggles play/pause.
  */
 import { Platform, ScrollView, Switch, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSettings } from "@/utils/atoms/settings";
 
 const DIM_STEPS = [0, 0.2, 0.4, 0.6, 0.8];
+const DOUBLE_TAP_STEPS = [0, 3, 5, 10, 15, 30];
 
 export default function ReaderSettingsPage() {
   const insets = useSafeAreaInsets();
@@ -78,6 +81,43 @@ export default function ReaderSettingsPage() {
               updateSettings({
                 yomifinPopupTheme: v as "light" | "dark" | "auto",
               })
+            }
+          />
+        </View>
+
+        {/* Two-finger tap */}
+        <Row
+          title='Two-finger tap: play/pause'
+          subtitle='Tap the video with two fingers to toggle playback — works whether or not the controls are showing.'
+        >
+          <Switch
+            value={settings.yomifinTwoFingerTapPause ?? true}
+            onValueChange={(v) =>
+              updateSettings({ yomifinTwoFingerTapPause: v })
+            }
+          />
+        </Row>
+
+        {/* Double-tap seek */}
+        <View style={{ gap: 8 }}>
+          <Text style={styles.title}>Double-tap seek</Text>
+          <Text style={styles.subtitle}>
+            Double-tap the left/right half of the video to jump backward/forward
+            by this many seconds. Off makes single taps toggle the controls with
+            no delay.
+          </Text>
+          <Segmented
+            options={DOUBLE_TAP_STEPS.map((s) => ({
+              label: s === 0 ? "Off" : `${s}s`,
+              value: String(s),
+            }))}
+            value={String(
+              DOUBLE_TAP_STEPS.includes(settings.yomifinDoubleTapSeconds ?? 10)
+                ? (settings.yomifinDoubleTapSeconds ?? 10)
+                : 10,
+            )}
+            onChange={(v) =>
+              updateSettings({ yomifinDoubleTapSeconds: Number(v) })
             }
           />
         </View>

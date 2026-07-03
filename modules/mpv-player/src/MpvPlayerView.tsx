@@ -155,6 +155,29 @@ export default React.forwardRef<MpvPlayerViewRef, MpvPlayerViewProps>(
       getTechnicalInfo: async () => {
         return await nativeRef.current?.getTechnicalInfo();
       },
+      // YOMIFIN: true iff the running binary has the native two-finger-tap seam
+      // (window-level UITapGestureRecognizer → onTwoFingerTap). Old binary → the
+      // native method doesn't exist → throws → false.
+      hasTwoFingerTapSeam: async () => {
+        try {
+          return (await nativeRef.current?.hasTwoFingerTapSeam()) === true;
+        } catch {
+          return false;
+        }
+      },
+      // 0 = seam absent (old binary), 1 = v1 binary (predates the version fn),
+      // 2+ = see MpvPlayerModule.swift.
+      twoFingerTapSeamVersion: async () => {
+        try {
+          const v = await nativeRef.current?.twoFingerTapSeamVersion();
+          if (typeof v === "number") return v;
+        } catch {}
+        try {
+          if ((await nativeRef.current?.hasTwoFingerTapSeam()) === true)
+            return 1;
+        } catch {}
+        return 0;
+      },
     }));
 
     return <NativeView ref={nativeRef} {...props} />;

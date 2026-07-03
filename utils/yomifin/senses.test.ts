@@ -5,7 +5,11 @@
  * Run: bun utils/yomifin/senses.test.ts
  */
 import type { LookupResult } from "./lookup";
-import { flattenSelectionText, selectionGlossary } from "./selection";
+import {
+  flattenSelectionHtml,
+  flattenSelectionText,
+  selectionGlossary,
+} from "./selection";
 import {
   senseSegments,
   senseTargets,
@@ -166,6 +170,21 @@ const sampleResult = {
       dictionary: "JMdict",
       glossIndex: 0,
     }).includes("to read"),
+  );
+  // HTML flavor (htmlGlossary mode): same targeting, Yomitan-style markup out.
+  const senseHtml = flattenSelectionHtml(sampleResult, sel);
+  check(
+    "flattenSelectionHtml sense: yomitan wrapper, li kept inside a ul",
+    senseHtml.startsWith(
+      '<div style="text-align: left;" class="yomitan-glossary">',
+    ) &&
+      senseHtml.includes("<ul><li>") &&
+      senseHtml.includes("to recite"),
+    senseHtml,
+  );
+  check(
+    "flattenSelectionHtml null selection = ''",
+    flattenSelectionHtml(sampleResult, null) === "",
   );
 }
 

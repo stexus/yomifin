@@ -318,6 +318,14 @@ export type Settings = {
    * Settings → Anki; consumed imperatively by getAnkiConfig().
    */
   yomifinAnkiConfig: import("@/utils/yomifin/ankiConfig").AnkiConfig | null;
+  /**
+   * Video gesture layer (RNGH rebuild): double-tap left/right of the screen seeks
+   * backward/forward by this many seconds. 0 disables double-tap seeking (single
+   * taps then toggle controls with no recognition delay).
+   */
+  yomifinDoubleTapSeconds: number;
+  /** Two-finger tap anywhere on the video toggles play/pause. */
+  yomifinTwoFingerTapPause: boolean;
 };
 
 export interface Lockable<T> {
@@ -426,6 +434,8 @@ export const defaultValues: Settings = {
   yomifinPopupTheme: "dark",
   yomifinDictionaryConfig: {},
   yomifinAnkiConfig: null,
+  yomifinDoubleTapSeconds: 10,
+  yomifinTwoFingerTapPause: true,
 };
 
 const loadSettings = (): Partial<Settings> => {

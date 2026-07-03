@@ -377,6 +377,15 @@ export default function AnkiSettingsPage() {
             onValueChange={(v) => persist({ ...config, allowDuplicate: v })}
           />
         </Row>
+        <Row
+          title='HTML glossary'
+          subtitle='Ship Yomitan-style rendered HTML for {glossary}, {single-glossary:…} and {popup-selection-text} (lists, ruby, styling) instead of plain text.'
+        >
+          <Switch
+            value={config.htmlGlossary}
+            onValueChange={(v) => persist({ ...config, htmlGlossary: v })}
+          />
+        </Row>
 
         {/* Word audio sources */}
         <View style={{ gap: 8 }}>

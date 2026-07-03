@@ -96,6 +96,11 @@ export type MpvPlayerViewProps = {
     nativeEvent: OnPictureInPictureChangePayload;
   }) => void;
   onSubtitleText?: (event: { nativeEvent: OnSubtitleTextEventPayload }) => void;
+  /**
+   * YOMIFIN (iOS): native window-level two-finger tap (UIKit recognizer — RNGH's tap
+   * handler can't do multi-touch taps reliably). Fires anywhere on the player screen.
+   */
+  onTwoFingerTap?: (event: { nativeEvent: Record<string, never> }) => void;
 };
 
 export interface MpvPlayerViewRef {
@@ -160,6 +165,10 @@ export interface MpvPlayerViewRef {
   isZoomedToFill: () => Promise<boolean>;
   // Technical info
   getTechnicalInfo: () => Promise<TechnicalInfo>;
+  /** YOMIFIN: whether the running binary has the native two-finger-tap seam. */
+  hasTwoFingerTapSeam: () => Promise<boolean>;
+  /** YOMIFIN: seam version on the running binary (0 = absent, 1 = v1, 2 = current). */
+  twoFingerTapSeamVersion: () => Promise<number>;
 }
 
 export type SubtitleTrack = {

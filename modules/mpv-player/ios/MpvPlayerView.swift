@@ -63,6 +63,16 @@ class MpvPlayerView: ExpoView {
 	let onTracksReady = EventDispatcher()
 	let onPictureInPictureChange = EventDispatcher()
 	let onSubtitleText = EventDispatcher()
+	let onTwoFingerTap = EventDispatcher()
+
+	// YOMIFIN: native two-finger-tap seam. RNGH's iOS tap handler counts taps per
+	// touchesBegan EVENT, which makes multi-touch taps unrecognizable/ambiguous (three
+	// JS-side attempts failed on device). UIKit's own UITapGestureRecognizer with
+	// numberOfTouchesRequired=2 is authoritative. It must live on the WINDOW: the RN
+	// gesture overlay sits ABOVE this view, so touches never hit-test down to it.
+	// Pure observer (no cancels/delays) — RN/RNGH touch streams are untouched; the JS
+	// side suppresses its own single/double-tap when this event arrives.
+	private var twoFingerRecognizer: UITapGestureRecognizer?
 
 	private var currentURL: URL?
 	private var cachedPosition: Double = 0
@@ -456,7 +466,43 @@ class MpvPlayerView: ExpoView {
 		return renderer?.getTechnicalInfo() ?? [:]
 	}
 
+#if !os(tvOS)
+	override func didMoveToWindow() {
+		super.didMoveToWindow()
+		// Detach from the previous window (also runs with window == nil on unmount).
+		if let recognizer = twoFingerRecognizer {
+			recognizer.view?.removeGestureRecognizer(recognizer)
+			twoFingerRecognizer = nil
+		}
+		guard let window = self.window else { return }
+		let recognizer = UITapGestureRecognizer(target: self, action: #selector(handleTwoFingerTap(_:)))
+		recognizer.numberOfTouchesRequired = 2
+		recognizer.numberOfTapsRequired = 1
+		recognizer.cancelsTouchesInView = false
+		recognizer.delaysTouchesBegan = false
+		recognizer.delaysTouchesEnded = false
+		// Seam v2: without a delegate allowing simultaneous recognition, RNGH's
+		// double-tap ACTIVATING (deeper in the hierarchy, processed first) makes UIKit
+		// recognizer-prevention fail this still-Possible window recognizer — observed
+		// on device as "two-finger tap seeks instead of toggling play". Dedup with the
+		// RNGH taps happens in JS (tapSuppression.ts), so simultaneous is safe.
+		recognizer.delegate = self
+		window.addGestureRecognizer(recognizer)
+		twoFingerRecognizer = recognizer
+		Logger.shared.log("[twoFingerTap] recognizer attached to window", type: "Info")
+	}
+
+	@objc private func handleTwoFingerTap(_ recognizer: UITapGestureRecognizer) {
+		guard recognizer.state == .ended else { return }
+		Logger.shared.log("[twoFingerTap] fired", type: "Info")
+		onTwoFingerTap([:])
+	}
+#endif
+
 	deinit {
+		if let recognizer = twoFingerRecognizer {
+			recognizer.view?.removeGestureRecognizer(recognizer)
+		}
 		if let observer = appStateObserver {
 			NotificationCenter.default.removeObserver(observer)
 		}
@@ -471,6 +517,20 @@ class MpvPlayerView: ExpoView {
 		NotificationCenter.default.removeObserver(self)
 	}
 }
+
+// MARK: - UIGestureRecognizerDelegate (two-finger tap seam — see didMoveToWindow)
+#if !os(tvOS)
+extension MpvPlayerView: UIGestureRecognizerDelegate {
+	public func gestureRecognizer(
+		_ gestureRecognizer: UIGestureRecognizer,
+		shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+	) -> Bool {
+		// Only ever set as delegate of our own two-finger recognizer; let it recognize
+		// alongside anything (RNGH taps, RN's surface touch handler, …).
+		return true
+	}
+}
+#endif
 
 // MARK: - MPVLayerRendererDelegate
 
