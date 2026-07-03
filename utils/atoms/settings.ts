@@ -334,6 +334,24 @@ export type Settings = {
   /** Max lookup entries (≈ popup panes) per tap. Yomitan's default is 32. */
   yomifinMaxResults: number;
   /**
+   * Per-title manual profile overrides (in-player pill), keyed by the player's
+   * stable key (Jellyfin SeriesId/ItemId, Stremio series name). Wins over the
+   * track-language auto-selection; long-press the pill clears back to auto.
+   */
+  yomifinProfileOverrides: Record<
+    string,
+    import("@/utils/yomifin/profiles").ProfileId
+  >;
+  /**
+   * Which profile each installed dictionary belongs to, keyed by title.
+   * Unmapped = "ja" (pre-profiles installs need no migration). Assigned to the
+   * active profile at import time; editable per-row in Settings → Dictionaries.
+   */
+  yomifinDictionaryLanguages: Record<
+    string,
+    import("@/utils/yomifin/profiles").ProfileId
+  >;
+  /**
    * Video gesture layer (RNGH rebuild): double-tap left/right of the screen seeks
    * backward/forward by this many seconds. 0 disables double-tap seeking (single
    * taps then toggle controls with no recognition delay).
@@ -468,6 +486,8 @@ export const defaultValues: Settings = {
   yomifinActiveProfile: "ja",
   yomifinProfiles: {},
   yomifinMaxResults: 32,
+  yomifinProfileOverrides: {},
+  yomifinDictionaryLanguages: {},
   yomifinDoubleTapSeconds: 10,
   yomifinTwoFingerTapPause: true,
   yomifinSubtitleFontSize: 32,

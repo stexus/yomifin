@@ -35,6 +35,12 @@ export interface YomifinProfileData {
 export interface ProfileSettingsSource {
   yomifinActiveProfile?: ProfileId | null;
   yomifinProfiles?: Partial<Record<ProfileId, YomifinProfileData>> | null;
+  /**
+   * Per-title manual profile overrides (keyed by a stable per-series/item key the
+   * players supply). Set by the in-player profile pill when the automatic
+   * track-language selection is wrong; wins over the hint AND the manual default.
+   */
+  yomifinProfileOverrides?: Record<string, ProfileId> | null;
   /** LEGACY single-profile keys — the JA profile's fallback storage. */
   yomifinDictionaryConfig?: DictionaryConfig | null;
   yomifinAnkiConfig?: AnkiConfig | null;
@@ -74,6 +80,45 @@ export function resolveProfile(
     dictionaryConfig: data?.dictionaryConfig ?? legacyDict ?? {},
     ankiConfig: data?.ankiConfig ?? legacyAnki ?? null,
   };
+}
+
+/**
+ * The profile a lookup session actually uses. Precedence:
+ *   1. per-title manual override (`yomifinProfileOverrides[overrideKey]`) — the
+ *      user said the auto-selection was wrong for THIS series; remember it
+ *   2. track-language hint (auto-select)
+ *   3. the manually-active profile (Settings), default JA
+ */
+export function resolveEffectiveProfileId(
+  s: ProfileSettingsSource,
+  hint?: ProfileId | null,
+  overrideKey?: string | null,
+): ProfileId {
+  const override = overrideKey
+    ? s.yomifinProfileOverrides?.[overrideKey]
+    : undefined;
+  return override ?? hint ?? activeProfileId(s);
+}
+
+/**
+ * Which profile a dictionary belongs to (Settings.yomifinDictionaryLanguages,
+ * keyed by title). Unmapped = JA — so every pre-profiles install stays a JA
+ * dictionary with zero migration.
+ */
+export function dictionaryProfile(
+  map: Record<string, ProfileId> | null | undefined,
+  title: string,
+): ProfileId {
+  return map?.[title] === "zh" ? "zh" : "ja";
+}
+
+/** Installed titles restricted to one profile's dictionaries (order preserved). */
+export function titlesForProfile(
+  titles: string[],
+  map: Record<string, ProfileId> | null | undefined,
+  id: ProfileId,
+): string[] {
+  return titles.filter((t) => dictionaryProfile(map, t) === id);
 }
 
 /**

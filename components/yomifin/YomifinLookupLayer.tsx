@@ -38,9 +38,11 @@ import { listInstalledDictionaries } from "@/utils/yomifin/dictionaryStore";
 import { loadInstalledDictionary } from "@/utils/yomifin/loadInstalledDictionary";
 import type { LookupResult, YomifinDictionary } from "@/utils/yomifin/lookup";
 import {
-  activeProfileId,
+  PROFILE_LABELS,
   type ProfileId,
+  resolveEffectiveProfileId,
   resolveProfile,
+  titlesForProfile,
 } from "@/utils/yomifin/profiles";
 import DefinitionPopup from "./DefinitionPopup";
 import { getPopupTheme } from "./popupTheme";
@@ -79,6 +81,12 @@ interface Props {
    * profile; null/undefined = fall back to Settings.
    */
   languageHint?: ProfileId | null;
+  /**
+   * Stable per-title key (Jellyfin SeriesId/ItemId, Stremio series name) under
+   * which a manual profile switch (the pill) is remembered. Without it the pill
+   * still works but only flips the app-wide active profile.
+   */
+  profileKey?: string;
 }
 
 type DictStatus = "loading" | "ready" | "none" | "error";
@@ -92,14 +100,46 @@ export default function YomifinLookupLayer({
   onCaptureMedia,
   documentTitle,
   languageHint,
+  profileKey,
 }: Props) {
-  const { settings } = useSettings();
-  // Profiles (JA/ZH bundles): the track-language hint wins, else the manual choice.
-  // The resolved profile supplies the dictionary set AND the Translator language;
-  // the same id is threaded to the popup so cards target that profile's Anki config.
-  const profileId: ProfileId = languageHint ?? activeProfileId(settings);
+  const { settings, updateSettings } = useSettings();
+  // Profiles (JA/ZH bundles): per-title manual override (pill) > track-language hint
+  // > manual default. The resolved profile supplies the dictionary set AND the
+  // Translator language; the same id threads to the popup so cards target that
+  // profile's Anki config.
+  const profileId: ProfileId = resolveEffectiveProfileId(
+    settings,
+    languageHint,
+    profileKey,
+  );
+  const overridden = Boolean(
+    profileKey && settings.yomifinProfileOverrides?.[profileKey],
+  );
   const dictConfig = resolveProfile(settings, profileId).dictionaryConfig;
+  const dictLanguages = settings.yomifinDictionaryLanguages ?? {};
   const maxResults = settings.yomifinMaxResults ?? 32;
+
+  // Pill: tap switches to the other profile (remembered per-title when we have a
+  // key); long-press clears the override back to automatic selection.
+  const switchProfile = () => {
+    const next: ProfileId = profileId === "ja" ? "zh" : "ja";
+    if (profileKey) {
+      updateSettings({
+        yomifinProfileOverrides: {
+          ...(settings.yomifinProfileOverrides ?? {}),
+          [profileKey]: next,
+        },
+      });
+    } else {
+      updateSettings({ yomifinActiveProfile: next });
+    }
+  };
+  const clearProfileOverride = () => {
+    if (!profileKey || !overridden) return;
+    const map = { ...(settings.yomifinProfileOverrides ?? {}) };
+    delete map[profileKey];
+    updateSettings({ yomifinProfileOverrides: map });
+  };
   const theme = useMemo(
     () => getPopupTheme(settings.yomifinPopupTheme),
     [settings.yomifinPopupTheme],
@@ -141,7 +181,13 @@ export default function YomifinLookupLayer({
   // biome-ignore lint/correctness/useExhaustiveDependencies: reload when the config changes
   useEffect(() => {
     try {
-      const installed = listInstalledDictionaries().map((d) => d.title);
+      // Only the ACTIVE profile's dictionaries participate — a zh dictionary must
+      // never show up (or match) in a ja lookup and vice versa.
+      const installed = titlesForProfile(
+        listInstalledDictionaries().map((d) => d.title),
+        dictLanguages,
+        profileId,
+      );
       const resolved = resolveDictionaryConfig(installed, dictConfig);
       setTints(tintMap(resolved));
       const loaded = loadInstalledDictionary(enabledTitlesInOrder(resolved), {
@@ -158,7 +204,12 @@ export default function YomifinLookupLayer({
       console.error("[YOMIFIN DICT] open failed:", err);
       setStatus("error");
     }
-  }, [JSON.stringify(dictConfig), profileId, maxResults]);
+  }, [
+    JSON.stringify(dictConfig),
+    JSON.stringify(dictLanguages),
+    profileId,
+    maxResults,
+  ]);
 
   // Close + resume (used by both the ✕ button and the tap-outside backdrop).
   const closeLookup = () => {
@@ -224,6 +275,21 @@ export default function YomifinLookupLayer({
         outline={settings.yomifinSubtitleOutline ?? "normal"}
         bottomOffset={settings.yomifinSubtitleBottomOffset ?? 64}
       />
+      {/* Profile pill — always-visible indicator of the ACTIVE lookup profile.
+          Tap = switch (remembered for this title); long-press = back to auto. */}
+      <Pressable
+        style={styles.profilePill}
+        onPress={switchProfile}
+        onLongPress={clearProfileOverride}
+        hitSlop={8}
+      >
+        <Text style={styles.profilePillText}>
+          {profileId.toUpperCase()}
+          <Text style={styles.profilePillMode}>
+            {overridden ? "" : " · auto"}
+          </Text>
+        </Text>
+      </Pressable>
       {status === "loading" ? (
         <View style={styles.badge} pointerEvents='none'>
           <ActivityIndicator size='small' color='#fff' />
@@ -233,7 +299,8 @@ export default function YomifinLookupLayer({
       {status === "none" ? (
         <View style={styles.badge} pointerEvents='none'>
           <Text style={styles.badgeText}>
-            No dictionary installed — add one in Settings
+            No {PROFILE_LABELS[profileId]} dictionary — add/assign one in
+            Settings
           </Text>
         </View>
       ) : null}
@@ -303,4 +370,19 @@ const styles = StyleSheet.create({
     zIndex: 10000,
   },
   badgeText: { color: "#fff", fontSize: 13 },
+  // Bottom-left corner: clear of the subtitle overlay (bottom-center), the popup
+  // (side-anchored, higher z) and the controls' top bar. zIndex above the backdrop
+  // (9990) so it stays tappable while a popup is open.
+  profilePill: {
+    position: "absolute",
+    bottom: 16,
+    left: 16,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    zIndex: 9995,
+  },
+  profilePillText: { color: "#fff", fontSize: 12, fontWeight: "700" },
+  profilePillMode: { color: "#aaa", fontWeight: "400" },
 });

@@ -58,6 +58,7 @@ import {
   PROFILE_IDS,
   PROFILE_LABELS,
   resolveProfile,
+  titlesForProfile,
   withProfileData,
 } from "@/utils/yomifin/profiles";
 
@@ -79,18 +80,46 @@ export default function DictionariesPage() {
   } | null>(null);
 
   const profileId = activeProfileId(settings);
+  const otherProfile = profileId === "ja" ? "zh" : "ja";
   const config = resolveProfile(settings, profileId).dictionaryConfig;
+  // Dictionary → profile membership (unmapped = ja). Only the active profile's
+  // dictionaries are listed — the rest live under the other profile's tab.
+  const dictLanguages = settings.yomifinDictionaryLanguages ?? {};
 
   const rows = useMemo<DictRow[]>(() => {
-    const resolved = resolveDictionaryConfig(
+    const mine = titlesForProfile(
       installed.map((d) => d.title),
-      config,
+      dictLanguages,
+      profileId,
     );
+    const resolved = resolveDictionaryConfig(mine, config);
     return resolved.map((r) => ({
       ...r,
       termCount: installed.find((d) => d.title === r.title)?.termCount ?? 0,
     }));
-  }, [installed, JSON.stringify(config)]);
+  }, [
+    installed,
+    JSON.stringify(config),
+    JSON.stringify(dictLanguages),
+    profileId,
+  ]);
+
+  const hiddenCount = installed.length - rows.length;
+
+  // Move a dictionary to the other profile (it disappears from this list and shows
+  // up under the other profile's tab).
+  const moveToOtherProfile = useCallback(
+    (title: string) => {
+      updateSettings({
+        yomifinDictionaryLanguages: {
+          ...(settings.yomifinDictionaryLanguages ?? {}),
+          [title]: otherProfile,
+        },
+      });
+      resetInstalledDictionaryCache();
+    },
+    [updateSettings, settings.yomifinDictionaryLanguages, otherProfile],
+  );
 
   const refresh = useCallback(() => {
     try {
@@ -161,6 +190,8 @@ export default function DictionariesPage() {
       const assets = res.assets;
       const imported: string[] = [];
       const failed: string[] = [];
+      // New imports belong to the profile you imported them under.
+      const assignedTitles: string[] = [];
       // Keep the screen awake so a long multi-dictionary import isn't interrupted.
       await activateKeepAwakeAsync("yomifin-import");
       for (let i = 0; i < assets.length; i++) {
@@ -188,11 +219,20 @@ export default function DictionariesPage() {
           imported.push(
             `${result.title} (${result.termCount.toLocaleString()} terms)`,
           );
+          assignedTitles.push(result.title);
         } catch (e) {
           console.error("[YOMIFIN] zip import failed:", asset.name, e);
           failed.push(asset.name ?? "(unnamed)");
         }
         refresh();
+      }
+      if (assignedTitles.length > 0) {
+        updateSettings({
+          yomifinDictionaryLanguages: {
+            ...(settings.yomifinDictionaryLanguages ?? {}),
+            ...Object.fromEntries(assignedTitles.map((t) => [t, profileId])),
+          },
+        });
       }
       Alert.alert(
         failed.length === 0 ? "Dictionaries imported" : "Import finished",
@@ -211,7 +251,7 @@ export default function DictionariesPage() {
       setBusy(null);
       setProgress(null);
     }
-  }, [refresh]);
+  }, [refresh, updateSettings, settings.yomifinDictionaryLanguages, profileId]);
 
   const importDb = useCallback(async () => {
     try {
@@ -335,6 +375,23 @@ export default function DictionariesPage() {
             </Text>
           </View>
 
+          {/* Move to the other profile (JA↔ZH) — the row leaves this list. */}
+          <Pressable
+            onPress={() => moveToOtherProfile(item.title)}
+            disabled={!!busy}
+            hitSlop={6}
+            style={{
+              backgroundColor: "rgba(255,255,255,0.08)",
+              borderRadius: 8,
+              paddingHorizontal: 8,
+              paddingVertical: 5,
+            }}
+          >
+            <Text style={{ color: "#aaa", fontSize: 11, fontWeight: "700" }}>
+              → {otherProfile.toUpperCase()}
+            </Text>
+          </Pressable>
+
           <Switch
             value={item.enabled}
             onValueChange={() => toggleEnabled(item.title)}
@@ -351,7 +408,14 @@ export default function DictionariesPage() {
         </View>
       </ScaleDecorator>
     ),
-    [busy, cycleTint, toggleEnabled, confirmRemove],
+    [
+      busy,
+      cycleTint,
+      toggleEnabled,
+      confirmRemove,
+      moveToOtherProfile,
+      otherProfile,
+    ],
   );
 
   const header = (
@@ -449,11 +513,18 @@ export default function DictionariesPage() {
         </Text>
         {rows.length === 0 ? (
           <Text style={{ color: "#888" }}>
-            None yet. Import a Yomitan .zip or a prebuilt .db below.
+            None in this profile yet. Import a Yomitan .zip below (it joins the{" "}
+            {PROFILE_LABELS[profileId]} profile)
+            {hiddenCount > 0
+              ? ` — ${hiddenCount} dictionar${hiddenCount === 1 ? "y is" : "ies are"} in the other profile`
+              : ""}
+            .
           </Text>
         ) : (
           <Text style={{ color: "#888", fontSize: 12 }}>
-            Drag to set priority · toggle to enable · tap the swatch to recolor.
+            Drag to set priority · toggle to enable · tap the swatch to recolor
+            · → moves to the other profile
+            {hiddenCount > 0 ? ` · ${hiddenCount} in the other profile` : ""}.
           </Text>
         )}
       </View>

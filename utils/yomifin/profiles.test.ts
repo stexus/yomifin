@@ -9,8 +9,11 @@
 import type { AnkiConfig } from "./ankiConfig";
 import {
   activeProfileId,
+  dictionaryProfile,
   profileIdForLanguageTag,
+  resolveEffectiveProfileId,
   resolveProfile,
+  titlesForProfile,
   withProfileData,
 } from "./profiles";
 
@@ -121,6 +124,50 @@ for (const [tag, expected] of tagCases) {
     "withProfileData handles empty map",
     fresh.ja?.ankiConfig === legacyAnki,
     fresh,
+  );
+}
+
+// --- effective profile precedence: override > hint > active ----------------------
+{
+  const s = {
+    yomifinActiveProfile: "ja" as const,
+    yomifinProfileOverrides: { "series:1": "zh" as const },
+  };
+  check(
+    "override wins over hint",
+    resolveEffectiveProfileId(s, "ja", "series:1") === "zh",
+  );
+  check(
+    "hint wins when no override for key",
+    resolveEffectiveProfileId(s, "zh", "series:2") === "zh",
+  );
+  check(
+    "active profile when neither",
+    resolveEffectiveProfileId(s, null, "series:2") === "ja",
+  );
+  check(
+    "no key → hint/active path",
+    resolveEffectiveProfileId(s, null, null) === "ja" &&
+      resolveEffectiveProfileId(s, "zh", undefined) === "zh",
+  );
+}
+
+// --- dictionary → profile assignment (unmapped = ja, zero migration) -------------
+{
+  const map = { "CC-CEDICT": "zh" as const };
+  check("unmapped dictionary is ja", dictionaryProfile(map, "JMdict") === "ja");
+  check("mapped zh dictionary", dictionaryProfile(map, "CC-CEDICT") === "zh");
+  check("null map defaults ja", dictionaryProfile(null, "JMdict") === "ja");
+  const titles = ["JMdict", "CC-CEDICT", "大辞泉"];
+  check(
+    "titlesForProfile ja excludes zh dicts",
+    titlesForProfile(titles, map, "ja").join(",") === "JMdict,大辞泉",
+    titlesForProfile(titles, map, "ja"),
+  );
+  check(
+    "titlesForProfile zh only zh dicts",
+    titlesForProfile(titles, map, "zh").join(",") === "CC-CEDICT",
+    titlesForProfile(titles, map, "zh"),
   );
 }
 

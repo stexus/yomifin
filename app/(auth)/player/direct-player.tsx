@@ -1784,6 +1784,7 @@ export default function DirectPlayerPage() {
                 onSnapshotCard={yomifinSnapshotCard}
                 onCaptureMedia={yomifinCaptureMedia}
                 languageHint={yomifinLanguageHint}
+                profileKey={item?.SeriesId ?? item?.Id ?? undefined}
                 documentTitle={
                   item?.SeriesName
                     ? `${item.SeriesName} - ${item?.Name ?? ""}`

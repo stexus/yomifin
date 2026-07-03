@@ -45,6 +45,7 @@ import {
   View,
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, { FadeInLeft, FadeInRight } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
 import { addAnkiCard, flattenGloss } from "@/utils/yomifin/anki";
@@ -218,8 +219,15 @@ export default function DefinitionPopup({
 
   const safeIndex = Math.min(paneIndex, Math.max(0, paneCount - 1));
   const entry = result.entries[safeIndex];
-  const goPrev = () => setPaneIndex((i) => (i - 1 + paneCount) % paneCount);
-  const goNext = () => setPaneIndex((i) => (i + 1) % paneCount);
+  // Direction of the last pane change (ref, not state — read at the NEXT render to
+  // pick the slide-in side; setPaneIndex already triggers that render).
+  const paneDirRef = useRef<1 | -1>(1);
+  const cyclePane = (dir: 1 | -1) => {
+    paneDirRef.current = dir;
+    setPaneIndex((i) => (i + dir + paneCount) % paneCount);
+  };
+  const goPrev = () => cyclePane(-1);
+  const goNext = () => cyclePane(1);
 
   // Pane cycling by horizontal swipe anywhere on the popup. `.runOnJS(true)` (no
   // worklets — same pattern as GestureOverlay); the activation offsets keep vertical
@@ -233,10 +241,10 @@ export default function DefinitionPopup({
         .activeOffsetX([-32, 32])
         .failOffsetY([-24, 24])
         .onEnd((e) => {
-          if (e.translationX <= -40) {
-            setPaneIndex((i) => (i + 1) % paneCount);
-          } else if (e.translationX >= 40) {
-            setPaneIndex((i) => (i - 1 + paneCount) % paneCount);
+          const dir = e.translationX <= -40 ? 1 : e.translationX >= 40 ? -1 : 0;
+          if (dir !== 0) {
+            paneDirRef.current = dir;
+            setPaneIndex((i) => (i + dir + paneCount) % paneCount);
           }
         }),
     [paneCount, editing],
@@ -446,7 +454,17 @@ export default function DefinitionPopup({
                 style={styles.scroll}
                 contentContainerStyle={styles.scrollContent}
               >
-                <View style={styles.entry}>
+                {/* Keyed on the pane index: cycling remounts the pane content with a
+                    direction-aware slide+fade (subtle — ~25px offset), so swipes,
+                    ◀ ▶ and edge taps all read as motion toward the next pane. */}
+                <Animated.View
+                  key={safeIndex}
+                  style={styles.entry}
+                  entering={(paneDirRef.current > 0
+                    ? FadeInRight
+                    : FadeInLeft
+                  ).duration(180)}
+                >
                   <View style={styles.headwordRow}>
                     <Text style={styles.term}>{entry.term}</Text>
                     {entry.reading && entry.reading !== entry.term ? (
@@ -651,7 +669,7 @@ export default function DefinitionPopup({
                       </Pressable>
                     );
                   })}
-                </View>
+                </Animated.View>
               </ScrollView>
             )}
             {hasEntries && !editing && customText ? (
@@ -769,18 +787,26 @@ export default function DefinitionPopup({
                 </View>
               </View>
             ) : null}
-            {/* Edge-tap zones: thin strips along the popup's own left/right edges cycle
-              panes (they sit over the card's padding gutters, above the ScrollView). */}
+            {/* Edge-tap zones: strips along the popup's own left/right edges cycle
+                panes (they sit over the card's padding gutters, above the
+                ScrollView), with faint chevrons as the affordance. hitSlop widens
+                the touch target beyond the visible strip. */}
             {hasEntries && !editing && paneCount > 1 ? (
               <>
                 <Pressable
                   style={[styles.edgeZone, styles.edgeZoneLeft]}
                   onPress={goPrev}
-                />
+                  hitSlop={{ left: 8, right: 10 }}
+                >
+                  <Text style={styles.edgeChevron}>‹</Text>
+                </Pressable>
                 <Pressable
                   style={[styles.edgeZone, styles.edgeZoneRight]}
                   onPress={goNext}
-                />
+                  hitSlop={{ left: 10, right: 8 }}
+                >
+                  <Text style={styles.edgeChevron}>›</Text>
+                </Pressable>
               </>
             ) : null}
             <Pressable style={styles.closeBtn} onPress={onClose} hitSlop={8}>
@@ -1018,10 +1044,18 @@ function makeStyles(t: PopupTheme) {
       position: "absolute",
       top: 56,
       bottom: 132,
-      width: 24,
+      width: 34,
+      alignItems: "center",
+      justifyContent: "center",
     },
     edgeZoneLeft: { left: 0 },
     edgeZoneRight: { right: 0 },
+    edgeChevron: {
+      color: t.subtle,
+      fontSize: 24,
+      fontWeight: "600",
+      opacity: 0.35,
+    },
     closeBtn: {
       position: "absolute",
       top: 6,

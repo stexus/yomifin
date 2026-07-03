@@ -41,6 +41,7 @@ import {
   activeProfileId,
   PROFILE_IDS,
   PROFILE_LABELS,
+  titlesForProfile,
   withProfileData,
 } from "@/utils/yomifin/profiles";
 import type { WordAudioSourceConfig } from "@/utils/yomifin/wordAudioSources";
@@ -90,21 +91,23 @@ export default function AnkiSettingsPage() {
   );
 
   // All insertable markers: the static set + a {single-glossary:…} per installed
-  // dictionary (so the user never types a dictionary title by hand).
+  // dictionary OF THIS PROFILE (so the user never types a dictionary title by hand).
   const insertableMarkers = useMemo(() => {
     const base = MARKER_HELP.map(([m]) => m).filter(
       (m) => m !== "{single-glossary:DICT}",
     );
     let dicts: string[] = [];
     try {
-      dicts = listInstalledDictionaries().map(
-        (d) => `{single-glossary:${d.title}}`,
-      );
+      dicts = titlesForProfile(
+        listInstalledDictionaries().map((d) => d.title),
+        settings.yomifinDictionaryLanguages ?? {},
+        profileId,
+      ).map((t) => `{single-glossary:${t}}`);
     } catch {
       // no dictionary db yet — fine, just omit
     }
     return [...base, ...dicts];
-  }, []);
+  }, [profileId, settings.yomifinDictionaryLanguages]);
 
   const persist = useCallback(
     (next: AnkiConfig) => {
