@@ -13,7 +13,7 @@ import {
 import { File } from "expo-file-system";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { useLocalSearchParams, useNavigation } from "expo-router";
-import { useAtomValue, useSetAtom } from "jotai";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Platform, useWindowDimensions, View } from "react-native";
@@ -30,6 +30,9 @@ import {
   PlaybackSpeedScope,
   updatePlaybackSpeedSettings,
 } from "@/components/video-player/controls/utils/playback-speed-settings";
+import OnlineSubtitlesModal, {
+  type LoadedOnlineSubtitle,
+} from "@/components/yomifin/OnlineSubtitlesModal";
 import YomifinErrorBoundary from "@/components/yomifin/YomifinErrorBoundary";
 import YomifinLookupLayer from "@/components/yomifin/YomifinLookupLayer";
 import useRouter from "@/hooks/useAppRouter";
@@ -58,6 +61,7 @@ import {
   yomifinCueRangeAtom,
   yomifinCuesAtom,
 } from "@/utils/atoms/yomifinCueStore";
+import { yomifinOnlineSubsVisibleAtom } from "@/utils/atoms/yomifinOnlineSubs";
 import { getDefaultPlaySettings } from "@/utils/jellyfin/getDefaultPlaySettings";
 import { getPrimaryImageUrl } from "@/utils/jellyfin/image/getPrimaryImageUrl";
 import { getStreamUrl } from "@/utils/jellyfin/media/getStreamUrl";
@@ -77,7 +81,12 @@ import {
   fetchSubtitleSrt,
 } from "@/utils/yomifin/fetchSubtitleSrt";
 import { profileIdForLanguageTag } from "@/utils/yomifin/profiles";
-import { parseSrt } from "@/utils/yomifin/srt";
+import { parseSrt, type SubtitleCue } from "@/utils/yomifin/srt";
+import { estimateSubtitleOffset } from "@/utils/yomifin/subSync";
+import {
+  cleanSubtitleOverlayText,
+  shiftCues,
+} from "@/utils/yomifin/subtitleParse";
 
 import { generateDeviceProfile } from "../../../utils/profiles/native";
 
@@ -188,6 +197,43 @@ export default function DirectPlayerPage() {
   // (multi-sentence cards + Phase 12 sidebar read this).
   const setYomifinCues = useSetAtom(yomifinCuesAtom);
   const setYomifinCueRange = useSetAtom(yomifinCueRangeAtom);
+
+  // YOMIFIN online subs (jimaku): an external track loaded into mpv via sub-add. When
+  // active it owns the cue store (its parsed cues, shifted by the sync delay) and the
+  // Jellyfin track's cues become the SYNC REFERENCE (jellyfinCuesRef). subDelayMs
+  // mirrors mpv `sub-delay` (ms; positive = subs later). Refs shadow the state for
+  // event-handler reads without re-renders.
+  const [onlineSubsVisible, setOnlineSubsVisible] = useAtom(
+    yomifinOnlineSubsVisibleAtom,
+  );
+  const [externalSub, setExternalSub] = useState<LoadedOnlineSubtitle | null>(
+    null,
+  );
+  const [subDelayMs, setSubDelayMs] = useState(0);
+  const externalSubRef = useRef<LoadedOnlineSubtitle | null>(null);
+  const subDelayMsRef = useRef(0);
+  const jellyfinCuesRef = useRef<SubtitleCue[]>([]);
+
+  // A stale `true` in the atom (set by the dropdown on a previous screen) must not
+  // auto-open the panel; and a new item starts with no external sub / zero delay.
+  useEffect(() => {
+    setOnlineSubsVisible(false);
+  }, [setOnlineSubsVisible]);
+  useEffect(() => {
+    setExternalSub(null);
+    setSubDelayMs(0);
+    videoRef.current?.setSubtitleDelay?.(0).catch(() => {});
+  }, [itemId]);
+
+  // Publish the external track's cues (shifted into the VIDEO timeline by the sync
+  // delay, so cue anchoring and audio-clip spans line up with playback time).
+  useEffect(() => {
+    externalSubRef.current = externalSub;
+    subDelayMsRef.current = subDelayMs;
+    if (externalSub) {
+      setYomifinCues(shiftCues(externalSub.cues, subDelayMs));
+    }
+  }, [externalSub, subDelayMs, setYomifinCues]);
 
   const initialPlaybackTicksRef = useRef<number>(
     playbackPositionFromUrl
@@ -453,6 +499,9 @@ export default function DirectPlayerPage() {
   // VobSub) we keep native rendering on and our overlay stays empty (sub-text is empty).
   useEffect(() => {
     if (!tracksReady || !videoRef.current) return;
+    // An online (mpv-external) sub is active — don't re-assert the Jellyfin track
+    // over it; visibility is already forced off (we overlay its text ourselves).
+    if (externalSubRef.current) return;
     const mediaSource = stream?.mediaSource;
     const sub = mediaSource?.MediaStreams?.find(
       (s) => s.Type === "Subtitle" && s.Index === currentSubtitleIndex,
@@ -501,8 +550,13 @@ export default function DirectPlayerPage() {
   // leaves the store empty and everything degrades to the single live cue.
   useEffect(() => {
     let cancelled = false;
-    setYomifinCues([]);
-    setYomifinCueRange(null);
+    jellyfinCuesRef.current = [];
+    // When an online sub owns the cue store, this effect only refreshes the sync
+    // REFERENCE (jellyfinCuesRef) — it must not clobber the external track's cues.
+    if (!externalSubRef.current) {
+      setYomifinCues([]);
+      setYomifinCueRange(null);
+    }
     if (!tracksReady || currentSubtitleIndex === -1) return;
     if (offline || !api?.basePath || !api.accessToken || !item?.Id) return;
     const sub = stream?.mediaSource?.MediaStreams?.find(
@@ -523,7 +577,8 @@ export default function DirectPlayerPage() {
         console.log(
           `[YOMIFIN CUES] loaded ${cues.length} cues for track ${currentSubtitleIndex}`,
         );
-        setYomifinCues(cues);
+        jellyfinCuesRef.current = cues;
+        if (!externalSubRef.current) setYomifinCues(cues);
       })
       .catch((e) => {
         console.warn(
@@ -553,10 +608,18 @@ export default function DirectPlayerPage() {
   // sync with playback — no SRT re-fetch, no clock interpolation, no flicker.
   const onSubtitleText = useCallback(
     (e: { nativeEvent: { text: string; start?: number; end?: number } }) => {
-      setYomifinSubtitleText(e.nativeEvent?.text ?? "");
+      setYomifinSubtitleText(
+        cleanSubtitleOverlayText(e.nativeEvent?.text ?? ""),
+      );
+      // mpv's sub-start/sub-end are the cue's FILE-timeline times (sub-delay is a
+      // render-time shift, not baked in). For a delayed online sub, capture wants
+      // VIDEO time = file time + delay. Jellyfin tracks always run at delay 0.
+      const delaySec = externalSubRef.current
+        ? subDelayMsRef.current / 1000
+        : 0;
       yomifinCueRef.current = {
-        start: e.nativeEvent?.start ?? 0,
-        end: e.nativeEvent?.end ?? 0,
+        start: (e.nativeEvent?.start ?? 0) + delaySec,
+        end: (e.nativeEvent?.end ?? 0) + delaySec,
       };
     },
     [],
@@ -645,6 +708,65 @@ export default function DirectPlayerPage() {
         ),
       );
   }, [isVideoLoadedForProbe]);
+
+  // YOMIFIN online subs (jimaku): load a downloaded external file into mpv, hide its
+  // native rendering (our overlay draws the text), and hand the parsed cues to the
+  // cue store. Delay starts at 0 for every new file.
+  const handleOnlineSubtitleLoaded = useCallback(
+    async (sub: LoadedOnlineSubtitle) => {
+      try {
+        await videoRef.current?.addSubtitleFile?.(sub.path, true);
+        await videoRef.current?.setSubtitleVisibility?.(false);
+        await videoRef.current?.setSubtitleDelay?.(0);
+      } catch (e) {
+        console.warn(
+          `[YOMIFIN SUBS] failed to load external sub into mpv: ${(e as Error).message}`,
+        );
+      }
+      setSubDelayMs(0);
+      setExternalSub(sub);
+      setYomifinCueRange(null);
+      console.log(
+        `[YOMIFIN SUBS] external subtitle active: "${sub.name}" (${sub.cues.length} cues)`,
+      );
+    },
+    [setYomifinCueRange],
+  );
+
+  // Sync delay: state (re-publishes shifted cues) + mpv sub-delay (render timing).
+  const handleSubDelayChange = useCallback((ms: number) => {
+    setSubDelayMs(ms);
+    videoRef.current?.setSubtitleDelay?.(ms / 1000).catch(() => {});
+  }, []);
+
+  // Auto sync: estimate the constant offset aligning the online track to the item's
+  // own text track (subSync.ts), apply it, and return it for the panel to display.
+  const handleAutoSync = useCallback(() => {
+    const ext = externalSubRef.current;
+    if (!ext) return null;
+    const t0 = Date.now();
+    const est = estimateSubtitleOffset(jellyfinCuesRef.current, ext.cues);
+    console.log(
+      `[YOMIFIN SUBS] auto-sync: ${
+        est
+          ? `offset ${est.offsetMs}ms (score ${est.score.toFixed(2)})`
+          : "no confident match"
+      } in ${Date.now() - t0}ms (ref=${jellyfinCuesRef.current.length} ext=${ext.cues.length} cues)`,
+    );
+    if (est) handleSubDelayChange(Math.round(est.offsetMs));
+    return est;
+  }, [handleSubDelayChange]);
+
+  // AniList id from the item's provider ids (Jellyfin plugins vary the key casing) —
+  // gives jimaku an exact entry match when present.
+  const anilistId = useMemo(() => {
+    const ids = item?.ProviderIds ?? {};
+    const raw = Object.entries(ids).find(
+      ([k]) => k.toLowerCase() === "anilist",
+    )?.[1];
+    const n = raw ? Number.parseInt(String(raw), 10) : Number.NaN;
+    return Number.isFinite(n) ? n : undefined;
+  }, [item?.ProviderIds]);
 
   // Phase 5: jump to the previous/next subtitle cue (native mpv sub-seek).
   const yomifinPrevSubtitle = useCallback(() => {
@@ -1167,6 +1289,13 @@ export default function DirectPlayerPage() {
       // YOMIFIN: mpv owns selection; map Jellyfin index → mpv sid and select it. The
       // visibility effect (keyed on currentSubtitleIndex) then hides native rendering
       // for text subs so only our tappable overlay shows.
+      // Picking a Jellyfin track dismisses any active online sub (it stays loaded in
+      // mpv's track list but deselected) and zeroes the sync delay.
+      if (externalSubRef.current) {
+        setExternalSub(null);
+        setSubDelayMs(0);
+        videoRef.current?.setSubtitleDelay?.(0).catch(() => {});
+      }
       setCurrentSubtitleIndex(index);
       const mediaSource = stream?.mediaSource;
       const isTranscoding = Boolean(mediaSource?.TranscodingUrl);
@@ -1176,6 +1305,14 @@ export default function DirectPlayerPage() {
       } else if (mpvId !== undefined && mpvId >= 0) {
         await videoRef.current?.setSubtitleTrack?.(mpvId);
       }
+      // Re-assert visibility here too: if the user re-picks the SAME index that was
+      // active before an online sub, the visibility effect won't re-run (no dep
+      // change) and a bitmap track would stay hidden.
+      const sub = mediaSource?.MediaStreams?.find(
+        (s) => s.Type === "Subtitle" && s.Index === index,
+      );
+      const isTextSub = index !== -1 && sub?.IsTextSubtitleStream === true;
+      await videoRef.current?.setSubtitleVisibility?.(!isTextSub);
     },
     [stream?.mediaSource],
   );
@@ -1654,6 +1791,25 @@ export default function DirectPlayerPage() {
                 }
               />
             </YomifinErrorBoundary>
+            {/* YOMIFIN: online subtitle search (jimaku) + sync panel. Opened from the
+                player dropdown via the yomifinOnlineSubsVisibleAtom. */}
+            {!Platform.isTV && (
+              <YomifinErrorBoundary label='online-subs'>
+                <OnlineSubtitlesModal
+                  visible={onlineSubsVisible}
+                  onClose={() => setOnlineSubsVisible(false)}
+                  defaultQuery={item?.SeriesName ?? item?.Name ?? ""}
+                  defaultEpisode={item?.IndexNumber ?? undefined}
+                  anilistId={anilistId}
+                  activeSubName={externalSub?.name ?? null}
+                  activeCueCount={externalSub?.cues.length ?? 0}
+                  delayMs={subDelayMs}
+                  onDelayChange={handleSubDelayChange}
+                  onAutoSync={handleAutoSync}
+                  onSubtitleLoaded={handleOnlineSubtitleLoaded}
+                />
+              </YomifinErrorBoundary>
+            )}
           </View>
         </VideoProvider>
       </PlayerProvider>

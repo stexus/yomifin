@@ -127,6 +127,9 @@ export interface MpvPlayerViewRef {
   addSubtitleFile: (url: string, select?: boolean) => Promise<void>;
   /** Phase 5: jump to the previous (-1) / next (+1) subtitle cue (mpv sub-seek). */
   subSeek: (delta: number) => Promise<void>;
+  /** YOMIFIN: subtitle timing offset in SECONDS (mpv sub-delay; positive = later).
+   *  Used by the online-subtitle sync UI. iOS only. */
+  setSubtitleDelay: (seconds: number) => Promise<void>;
   // Subtitle positioning
   setSubtitlePosition: (position: number) => Promise<void>;
   setSubtitleScale: (scale: number) => Promise<void>;

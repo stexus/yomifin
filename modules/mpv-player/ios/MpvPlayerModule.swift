@@ -158,6 +158,11 @@ public class MpvPlayerModule: Module {
       AsyncFunction("subSeek") { (view: MpvPlayerView, delta: Int) in
         view.subSeek(delta)
       }
+
+      // YOMIFIN: subtitle timing offset in seconds (mpv sub-delay; online-sub sync).
+      AsyncFunction("setSubtitleDelay") { (view: MpvPlayerView, seconds: Double) in
+        view.setSubtitleDelay(seconds)
+      }
       
       // Subtitle positioning functions
       AsyncFunction("setSubtitlePosition") { (view: MpvPlayerView, position: Int) in

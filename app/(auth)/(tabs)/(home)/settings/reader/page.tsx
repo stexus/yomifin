@@ -9,14 +9,26 @@
  *   - yomifinDoubleTapSeconds: double-tap L/R seek amount (0 = off).
  *   - yomifinTwoFingerTapPause: two-finger tap toggles play/pause.
  *   - yomifinMaxResults:     lookup entry (≈ popup pane) cap, Yomitan default 32.
+ *   - yomifinSubtitleFontSize / yomifinSubtitleOutline / yomifinSubtitleBottomOffset:
+ *     tappable subtitle overlay styling (runtime, no rebuild).
+ *   - yomifinJimakuApiKey:   jimaku.cc API key for online subtitle search.
  */
-import { Platform, ScrollView, Switch, Text, View } from "react-native";
+import {
+  Platform,
+  ScrollView,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSettings } from "@/utils/atoms/settings";
 
 const DIM_STEPS = [0, 0.2, 0.4, 0.6, 0.8];
 const DOUBLE_TAP_STEPS = [0, 3, 5, 10, 15, 30];
 const MAX_RESULTS_STEPS = [4, 8, 16, 32];
+const SUB_FONT_STEPS = [24, 28, 32, 38, 44];
+const SUB_OFFSET_STEPS = [24, 48, 64, 96, 128];
 
 export default function ReaderSettingsPage() {
   const insets = useSafeAreaInsets();
@@ -106,6 +118,102 @@ export default function ReaderSettingsPage() {
                 : 32,
             )}
             onChange={(v) => updateSettings({ yomifinMaxResults: Number(v) })}
+          />
+        </View>
+
+        {/* Subtitle text size */}
+        <View style={{ gap: 8 }}>
+          <Text style={styles.title}>Subtitle text size</Text>
+          <Text style={styles.subtitle}>
+            Font size of the tappable subtitle overlay.
+          </Text>
+          <Segmented
+            options={SUB_FONT_STEPS.map((s) => ({
+              label: `${s}`,
+              value: String(s),
+            }))}
+            value={String(
+              SUB_FONT_STEPS.includes(settings.yomifinSubtitleFontSize ?? 32)
+                ? (settings.yomifinSubtitleFontSize ?? 32)
+                : 32,
+            )}
+            onChange={(v) =>
+              updateSettings({ yomifinSubtitleFontSize: Number(v) })
+            }
+          />
+        </View>
+
+        {/* Subtitle outline */}
+        <View style={{ gap: 8 }}>
+          <Text style={styles.title}>Subtitle outline</Text>
+          <Text style={styles.subtitle}>
+            Dark edge around the subtitle text — stronger reads better over
+            bright scenes.
+          </Text>
+          <Segmented
+            options={[
+              { label: "None", value: "none" },
+              { label: "Normal", value: "normal" },
+              { label: "Strong", value: "strong" },
+            ]}
+            value={settings.yomifinSubtitleOutline ?? "normal"}
+            onChange={(v) =>
+              updateSettings({
+                yomifinSubtitleOutline: v as "none" | "normal" | "strong",
+              })
+            }
+          />
+        </View>
+
+        {/* Subtitle vertical offset */}
+        <View style={{ gap: 8 }}>
+          <Text style={styles.title}>Subtitle position</Text>
+          <Text style={styles.subtitle}>
+            Distance of the subtitle overlay from the bottom edge of the screen.
+          </Text>
+          <Segmented
+            options={SUB_OFFSET_STEPS.map((s) => ({
+              label: `${s}`,
+              value: String(s),
+            }))}
+            value={String(
+              SUB_OFFSET_STEPS.includes(
+                settings.yomifinSubtitleBottomOffset ?? 64,
+              )
+                ? (settings.yomifinSubtitleBottomOffset ?? 64)
+                : 64,
+            )}
+            onChange={(v) =>
+              updateSettings({ yomifinSubtitleBottomOffset: Number(v) })
+            }
+          />
+        </View>
+
+        {/* jimaku.cc API key */}
+        <View style={{ gap: 8 }}>
+          <Text style={styles.title}>jimaku.cc API key</Text>
+          <Text style={styles.subtitle}>
+            Enables “Online subtitles (jimaku)” in the player menu — search and
+            load Japanese subtitle files, then auto-sync them against the item’s
+            own track. Create a key at jimaku.cc → Account.
+          </Text>
+          <TextInput
+            value={settings.yomifinJimakuApiKey ?? ""}
+            onChangeText={(v) =>
+              updateSettings({ yomifinJimakuApiKey: v.trim() })
+            }
+            placeholder='API key…'
+            placeholderTextColor='#666'
+            autoCapitalize='none'
+            autoCorrect={false}
+            style={{
+              backgroundColor: "rgba(255,255,255,0.08)",
+              color: "#fff",
+              borderRadius: 10,
+              paddingHorizontal: 12,
+              paddingVertical: 10,
+              fontSize: 14,
+            }}
           />
         </View>
 

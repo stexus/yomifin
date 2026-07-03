@@ -11,52 +11,68 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-echo "── [1/12] deinflector smoke ────────────────────────────────────────"
+echo "── [1/15] deinflector smoke ────────────────────────────────────────"
 ./scripts/yomifin-deinflect-smoke.sh
 
 echo
-echo "── [2/12] lookup integration (loader + DB + Translator + API) ──────"
+echo "── [2/15] lookup integration (loader + DB + Translator + API) ──────"
 bun utils/yomifin/lookup.test.ts
 
 echo
-echo "── [3/12] structured-content renderer + HTML serializer ──────────────────────"
+echo "── [3/15] structured-content renderer + HTML serializer ──────────────────────"
 bun utils/yomifin/structuredContent.test.ts
 
 echo
-echo "── [4/12] sqlite backend (parity with in-memory + optional real db) "
+echo "── [4/15] sqlite backend (parity with in-memory + optional real db) "
 bun utils/yomifin/SqliteDictionaryDatabase.test.ts
 
 echo
-echo "── [5/12] dictionary importer (idempotent + parity) ────────────────"
+echo "── [5/15] dictionary importer (idempotent + parity) ────────────────"
 bun utils/yomifin/importDictionary.test.ts
 
 echo
-echo "── [6/12] dictionary config reconciler + popup selection model ─────"
+echo "── [6/15] dictionary config reconciler + popup selection model ─────"
 bun utils/yomifin/dictionaryConfig.test.ts
 
 echo
-echo "── [7/12] marker engine (Phase 8 field templates) ──────────────────"
+echo "── [7/15] marker engine (Phase 8 field templates) ──────────────────"
 bun utils/yomifin/markers.test.ts
 
 echo
-echo "── [8/12] sense-level selection (paths + flatten) ──────────────────"
+echo "── [8/15] sense-level selection (paths + flatten) ──────────────────"
 bun utils/yomifin/senses.test.ts
 
 echo
-echo "── [9/12] cue store range logic (multi-sentence cards) ─────────────"
+echo "── [9/15] cue store range logic (multi-sentence cards) ─────────────"
 bun utils/yomifin/cues.test.ts
 
 echo
-echo "── [10/12] word-audio sources + field seeding ──────────────────────"
+echo "── [10/15] word-audio sources + field seeding ──────────────────────"
 bun utils/yomifin/wordAudio.test.ts
 
 echo
-echo "── [11/12] content-derived media keys (dedup / batch mining) ────────"
+echo "── [11/15] content-derived media keys (dedup / batch mining) ────────"
 bun utils/yomifin/mediaKey.test.ts
 
 echo
-echo "── [12/12] profiles (JA/ZH bundles) ────────────────────────────────"
+echo "── [12/15] profiles (JA/ZH bundles) ────────────────────────────────"
 bun utils/yomifin/profiles.test.ts
+
+echo
+echo "── [13/15] subtitle formats (ASS/VTT/SRT dispatch) ──────────────────"
+bun utils/yomifin/subtitleParse.test.ts
+
+echo
+echo "── [14/15] subtitle sync estimation (offset correlation) ───────────"
+bun utils/yomifin/subSync.test.ts
+
+echo
+echo "── [15/15] jimaku.cc client (request shape / errors) ───────────────"
+bun utils/yomifin/jimaku.test.ts
+
+echo
+echo "── [optional] subSync ↔ real alass cross-check (skips if not installed) ─"
+bun scripts/yomifin-sync-crosscheck.ts
 
 echo
 echo "✅ all yomifin regression guards passed"

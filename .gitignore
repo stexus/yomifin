@@ -94,3 +94,6 @@ assets/dictionaries/
 *.db
 *.db-wal
 *.db-shm
+
+# yomifin: real-world subtitle pairs for the alass sync cross-check (personal content)
+scripts/sync-fixtures/

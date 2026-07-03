@@ -341,6 +341,14 @@ export type Settings = {
   yomifinDoubleTapSeconds: number;
   /** Two-finger tap anywhere on the video toggles play/pause. */
   yomifinTwoFingerTapPause: boolean;
+  /** Tappable subtitle overlay: text size (pt). */
+  yomifinSubtitleFontSize: number;
+  /** Tappable subtitle overlay: text outline/shadow strength. */
+  yomifinSubtitleOutline: "none" | "normal" | "strong";
+  /** Tappable subtitle overlay: distance from the bottom edge (pt). */
+  yomifinSubtitleBottomOffset: number;
+  /** jimaku.cc API key for online subtitle search (empty = feature hidden). */
+  yomifinJimakuApiKey: string;
 };
 
 export interface Lockable<T> {
@@ -454,6 +462,10 @@ export const defaultValues: Settings = {
   yomifinMaxResults: 32,
   yomifinDoubleTapSeconds: 10,
   yomifinTwoFingerTapPause: true,
+  yomifinSubtitleFontSize: 32,
+  yomifinSubtitleOutline: "normal",
+  yomifinSubtitleBottomOffset: 64,
+  yomifinJimakuApiKey: "",
 };
 
 const loadSettings = (): Partial<Settings> => {

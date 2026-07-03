@@ -51,16 +51,16 @@ export function parseSrt(raw: string): SubtitleCue[] {
     const lines = block.split("\n").filter((l) => l.length > 0);
     if (lines.length === 0) continue;
 
-    // A block may or may not start with a numeric index line.
-    let cursor = 0;
+    // A block may start with an index line (numeric in SRT, arbitrary cue id in
+    // WebVTT) — locate the timing line instead of assuming a fixed position.
+    const cursor = lines.findIndex((l) => l.includes("-->"));
+    if (cursor === -1) continue;
     let index = cues.length + 1;
-    if (/^\d+$/.test(lines[0].trim())) {
+    if (cursor > 0 && /^\d+$/.test(lines[0].trim())) {
       index = Number(lines[0].trim());
-      cursor = 1;
     }
 
     const timingLine = lines[cursor];
-    if (!timingLine?.includes("-->")) continue;
     const [startRaw, endRaw] = timingLine.split("-->");
     const startMs = parseTimestamp(startRaw);
     const endMs = parseTimestamp(endRaw);

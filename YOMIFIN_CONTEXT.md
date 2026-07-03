@@ -111,6 +111,11 @@ Key principles (violating these has bitten us before):
   `getMpvSubtitleId` (`utils/jellyfin/subtitleUtils.ts`) maps Jellyfin→mpv track ids
   (this mapping was once wrong and picked the wrong initial track — fixed, beware).
 - `subSeek(±1)` — prev/next cue via mpv `sub-seek`.
+- `setSubtitleDelay(seconds)` — mpv `sub-delay` (positive = subs later); drives the
+  online-subtitle sync UI. NB: `sub-text`'s start/end stay in the FILE timeline —
+  the JS side adds the delay for capture/anchoring.
+- `addSubtitleFile(pathOrUrl, select)` — mpv `sub-add`; online (jimaku) subs are
+  downloaded to cache (`yomifin_sub_*`) and loaded through this.
 - `captureScreenshot(path, sourceUrl, pos)` / `extractAudio(start, end, aid, path, sourceUrl)`
   — background-queue Promises (see Settled decision 4).
 - `getCurrentAudioTrack()`, `getSubtitleTracks()`, `getTechnicalInfo()`.

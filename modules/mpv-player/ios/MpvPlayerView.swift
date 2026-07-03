@@ -385,6 +385,11 @@ class MpvPlayerView: ExpoView {
 	func subSeek(_ delta: Int) {
 		renderer?.subSeek(delta)
 	}
+
+	// YOMIFIN: subtitle timing offset (online-subtitle sync).
+	func setSubtitleDelay(_ seconds: Double) {
+		renderer?.setSubtitleDelay(seconds)
+	}
 	
 	// MARK: - Audio Track Controls
 	

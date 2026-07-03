@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams } from "expo-router";
+import { useSetAtom } from "jotai";
 import { useCallback, useMemo, useRef } from "react";
 import { Platform, View } from "react-native";
 import { BITRATES } from "@/components/BitrateSelector";
@@ -11,6 +12,7 @@ import { PLAYBACK_SPEEDS } from "@/components/PlaybackSpeedSelector";
 import useRouter from "@/hooks/useAppRouter";
 import { useOfflineMode } from "@/providers/OfflineModeProvider";
 import { useSettings } from "@/utils/atoms/settings";
+import { yomifinOnlineSubsVisibleAtom } from "@/utils/atoms/yomifinOnlineSubs";
 import { usePlayerContext } from "../contexts/PlayerContext";
 import { useVideoContext } from "../contexts/VideoContext";
 import { PlaybackSpeedScope } from "../utils/playback-speed-settings";
@@ -47,6 +49,8 @@ const DropdownView = ({
   const { settings, updateSettings } = useSettings();
   const router = useRouter();
   const isOffline = useOfflineMode();
+  // YOMIFIN: opens the online-subtitles (jimaku) modal mounted by direct-player.
+  const setOnlineSubsVisible = useSetAtom(yomifinOnlineSubsVisibleAtom);
 
   const { subtitleIndex, audioIndex, bitrateValue, playbackPosition } =
     useLocalSearchParams<{
@@ -139,6 +143,19 @@ const DropdownView = ({
       });
     }
 
+    // YOMIFIN: online subtitle search (jimaku.cc) — needs network + an API key.
+    if (!isOffline && settings.yomifinJimakuApiKey) {
+      groups.push({
+        options: [
+          {
+            type: "action" as const,
+            label: "Online subtitles (jimaku)…",
+            onPress: () => setOnlineSubsVisible(true),
+          },
+        ],
+      });
+    }
+
     // Audio Section
     if (audioTracks && audioTracks.length > 0) {
       groups.push({
@@ -193,6 +210,8 @@ const DropdownView = ({
     subtitleIndex,
     audioIndex,
     settings.mpvSubtitleScale,
+    settings.yomifinJimakuApiKey,
+    setOnlineSubsVisible,
     updateSettings,
     playbackSpeed,
     setPlaybackSpeed,

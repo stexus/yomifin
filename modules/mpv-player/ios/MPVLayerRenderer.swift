@@ -850,6 +850,13 @@ final class MPVLayerRenderer {
         guard let handle = mpv else { return }
         commandSync(handle, ["sub-seek", String(delta)])
     }
+
+    // YOMIFIN: global subtitle timing offset (mpv `sub-delay`, seconds; positive =
+    // subs display later). Drives the online-subtitle sync UI (auto-estimate +
+    // manual nudge) for external tracks.
+    func setSubtitleDelay(_ seconds: Double) {
+        setProperty(name: "sub-delay", value: String(seconds))
+    }
     
     // MARK: - Subtitle Positioning
     

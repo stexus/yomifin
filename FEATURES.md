@@ -38,13 +38,19 @@ per backlog item to start work without re-exploration.
 | HTML glossary markers | `structuredContent.ts` (`scToHtml`/`glossaryContentHtml`/`glossaryDefinitionsToHtml`), `selection.ts`, `anki.ts`, `ankiConfig.ts` `htmlGlossary`, Settings → Anki toggle | Yomitan default-template parity (device-verified): `{glossary}` = ONE numbered `<ol>` across definitions inside `<div class="yomitan-glossary">`, each `<li data-dictionary>` prefixed `<i>(tags, dict)</i>`; single definition = bare span, no ol; `{single-glossary:…}` = brief mode (no `<i>` prefix, defs from that dict aggregated — fixed an overwrite bug); SC data attrs emit Yomitan's `data-sc-*` prefix; extracted `<li>` selections get a `<ul>` context; global toggle, default off; gaiji images still skipped (see Small) |
 | 🔊 word audio in popup | `DefinitionPopup.tsx`, `wordAudio.ts` (`fetchWordAudioCached`) | speaker button beside headword; expo-audio playback; fetch cached per term+reading so `{audio}` on card-add reuses the clip; filename content-derived `yomifin_word_<fnv>.<ext>`; 2026-07-02 fix: `Crypto.digest` needs a TypedArray (raw ArrayBuffer threw on-device and broke the jpod101 sentinel check) |
 | AnkiConnect timeouts | `anki.ts` `ankiInvoke` | AbortController: 4s control actions, 15s media uploads — unreachable Anki used to hang ~60s ("frozen" settings pane / card add) |
-**⚠️ Pending device verification (committed, JS-only → `just dev`):** the four
-rows below (maxResults, profiles, Chinese parity, pane cycler) are code+test complete
-but NOT yet demonstrated on the iPad. Gates: zh auto-select + st/ts folding with the
-CC-CEDICT TERM zip (`assets/dictionaries/CC-CEDICT.zip`; the `…Hanzi….zip` variant is
+**⚠️ Pending device verification:** the rows below are code+test complete but NOT
+yet demonstrated on the iPad. The first four (maxResults, profiles, Chinese parity,
+pane cycler) and "Subtitle rendering QoL" are JS-only → `just dev`. "Online
+subtitles + sync" adds a NATIVE seam (`setSubtitleDelay`) → needs `just local` /
+`just remote` (nudge/auto-sync silently no-op on a stale binary; everything else in
+the panel still works). Gates: zh auto-select + st/ts folding with the CC-CEDICT
+TERM zip (`assets/dictionaries/CC-CEDICT.zip`; the `…Hanzi….zip` variant is
 kanji-bank-only and imports 0 terms), JA path unregressed, popup swipe vs
-ScrollView/selection taps, zh card → zh profile's Anki config. Remove this note once
-verified.
+ScrollView/selection taps, zh card → zh profile's Anki config; overlay styling knobs
+visibly apply mid-playback; jimaku search→file→load with a real key, tappable
+external ASS + a mined card with correct audio span after a nonzero delay, auto-sync
+lands within a nudge on a known-offset sub, and switching back to a Jellyfin track
+restores native/overlay rendering. Remove rows from this note as verified.
 
 | Feature | Where | Notes |
 | --- | --- | --- |
@@ -52,6 +58,8 @@ verified.
 | Profiles (JA/ZH bundles) | `utils/yomifin/profiles.ts` (+test), settings keys `yomifinActiveProfile`/`yomifinProfiles`, Settings → Dictionaries/Anki profile switcher, `direct-player.tsx` `yomifinLanguageHint` | { language, dictionary set, Anki config } per profile; NO-MIGRATION design: legacy `yomifinDictionaryConfig`/`yomifinAnkiConfig` keys ARE the JA profile's fallback storage until first profile-aware edit shadows them; player auto-selects profile from subtitle-track language (then audio), manual choice is the fallback; effective profile threads popup → `getAnkiConfig(profileId)` → `addAnkiCard` |
 | Chinese parity (st↔ts folding) | `yomitan/chinese-text-preprocessors.js` (OURS, `chinese-simple2traditional` dep — MIT, char-level, no `\p{}`), registered in `language-descriptors.js`; zh cases in `lookup.test.ts` | closes LOOKUP_FIDELITY §4 divergence: 汉语 finds 漢語-stored entries and vice versa; zh = exact + longest-match, no deinflection; `language` threads from the active profile. NOTE: `assets/dictionaries/CC-CEDICT.zip` is the TERM dictionary to import — the `…Hanzi….zip` variant is kanji-bank-only (importer reads `term_bank_*` → would import 0 terms) |
 | Pane cycler polish | `DefinitionPopup.tsx` | prominent n/m index beside the headword, horizontal swipe (RNGH pan, `.runOnJS(true)`, activeOffsetX ±32 / failOffsetY ±24 so scroll+taps unaffected), left/right edge-tap strips over the card gutters; footer ◀ ▶ kept |
+| Subtitle rendering QoL | `utils/yomifin/subtitleParse.ts` (+test), `srt.ts` (VTT cue-id tolerance), `TappableSubtitleOverlay.tsx`, `YomifinLookupLayer.tsx`, Settings → Reader | ASS/SSA parse for the CUE STORE (`parseAss`/`parseSubtitleText`: Format field order, override tags stripped, `\N`→newline, `{\p}` drawing cues dropped, layered dupes deduped) + VTT; the LIVE overlay stays mpv-driven — mpv's `sub-text` is already tag-stripped, `cleanSubtitleOverlayText` is defensive insurance in `onSubtitleText`; overlay style knobs (runtime settings): font size, outline none/normal/strong (textShadow tiers), bottom offset |
+| Online subtitles (jimaku.cc) + sync | `utils/yomifin/{jimaku,subSync,subtitleParse}.ts` (+tests), `components/yomifin/OnlineSubtitlesModal.tsx`, `utils/atoms/yomifinOnlineSubs.ts`, `DropdownView.tsx` (menu entry, gated on API key), `direct-player.tsx` wiring, native `setSubtitleDelay` seam (mpv `sub-delay`; iOS) | side panel: search by AniList id (item ProviderIds, any key casing) else title → entry → episode-filtered files → download to cache (`yomifin_sub_*`, sweeper-compatible) → mpv `sub-add` + hidden native rendering (tappable overlay takes over) + parsed cues into the cue store; SYNC: auto = pure offset correlation vs the item's own track (`estimateSubtitleOffset`, coarse→fine sweep, peak-sharpness confidence gate, null → manual) — this is alass's NO-SPLIT objective in TS (shipping the real tools is impossible: ffsubsync = Python+VAD, alass = Rust, Hermes has no wasm) and is CROSS-VALIDATED against real `alass-cli --no-split` by `scripts/yomifin-sync-crosscheck.ts` (brew install alass; runs in yomifin-test.sh, skips if absent; agreement ≤10ms on knowns; drop real pairs in `scripts/sync-fixtures/`, gitignored); manual ±0.1/±0.5s nudges; delay bookkeeping: store cues shifted into VIDEO timeline, live `sub-start/end` shifted by delay in JS (mpv reports FILE timeline — assumption to confirm on device: if audio clips land 2×delay off, drop the JS-side shift); picking a Jellyfin track dismisses the external sub + zeroes delay; API key in Settings → Reader |
 
 ## Backlog (roughly priority-ordered)
 
@@ -70,10 +78,11 @@ Why mining mostly survives the source swap (verified against the code):
 - `captureScreenshot`/`extractAudio` take a `sourceUrl` — any range-seekable HTTPS
   URL works (that's what the debrid links are); `""` falls back to the playing URL.
 - Lookup/popup/Anki are source-agnostic. `{document-title}` comes from addon meta.
-- Cue store: the only Jellyfin-specific seam (`Stream.srt` fetch). External SRT
-  URLs feed `parseSrt` directly; embedded-only subs degrade to single-cue (already
-  handled). Build alongside "Online subtitle sources" (below) — same external-SRT
-  → cue-store path.
+- Cue store: the only Jellyfin-specific seam (`Stream.srt` fetch). External
+  subtitle files feed `parseSubtitleText` (ASS/VTT/SRT) directly — this path
+  SHIPPED with "Online subtitles (jimaku.cc)": reuse `OnlineSubtitlesModal` +
+  direct-player's externalSub wiring; embedded-only subs degrade to single-cue
+  (already handled).
 
 Architecture boundary (design before building):
 1. `utils/stremio/` — pure, bun-testable addon client mirroring the yomifin
@@ -93,15 +102,7 @@ Exit criteria (on device): browse an addon catalog, play a debrid-resolved strea
 subtitles tappable (embedded AND an external SRT), mine a card whose audio+image
 capture from the stream URL; the Jellyfin player path is demonstrably unregressed.
 
-### 2. Subtitle rendering QoL
-ASS support (parse, strip override tags, render dialogue as tappable plain text);
-overlay styling (outline, font size, vertical offset — runtime settings).
-
-### 3. Online subtitle sources
-Pull subs from APIs (e.g. jimaku.cc) into an internal track; feasibility of
-on-device sync (alass/ffsubsync-style) TBD.
-
-### 4. Drag-anywhere-to-seek, done right (first attempt reverted 2026-07-02)
+### 2. Drag-anywhere-to-seek, done right (first attempt reverted 2026-07-02)
 Infuse-style: horizontal drag anywhere on the video acts like a seek-bar drag.
 Attempt 1 (reverted; flick-to-skip ±s restored on `enableHorizontalSwipeSkip`)
 drove the vestigial remote-scrub shared values from the RNGH pan via
@@ -114,10 +115,10 @@ scrub-bubble component (thumbnail + timestamp) positioned via reanimated from
 that SharedValue, independent of awesome-slider; (c) commit seek only on release
 (+ throttled trickplay-tile prefetch on the JS side); (d) same lifecycle contract
 as attempt 1 (pause during, seek + resume on release, exactly-once end,
-cancel-safe). Pairs naturally with item 5 (all-native gesture surface) if that
+cancel-safe). Pairs naturally with item 3 (all-native gesture surface) if that
 lands first.
 
-### 5. All-native gesture surface (end-state refactor — trigger, don't schedule)
+### 3. All-native gesture surface (end-state refactor — trigger, don't schedule)
 Today's player gestures are TWO recognizer trees deduplicated through
 `tapSuppression.ts` + 80ms grace delays: RNGH (single/double tap, pan) and the
 native window two-finger tap (seam v2). It works and the coupling is ~30 lines,
@@ -132,7 +133,7 @@ spare native-iteration budget — not before: it re-pays every hit-testing subtl
 (button pass-through, dim layer, exclusion zones, window-wide two-finger) in
 Swift, and gesture tuning needs many on-device rebuild loops.
 
-### 6. Subtitle sidebar (transcript) — do last
+### 4. Subtitle sidebar (transcript) — do last
 Collapsible flex-row panel over the existing cue store (`yomifinCuesAtom` already
 holds the full parsed track): timestamp + line rows, active line highlighted +
 auto-scrolled, tap row → `seek(cue.start*1000)`. Bitmap tracks: unavailable,
@@ -152,6 +153,14 @@ degrade gracefully.
 - Screenshot downscale is hardcoded (max width 720px, JPEG q0.8) at the native
   `captureScreenshot` seam; lift into a setting only if it ever matters.
 - AAC bitrate tuning for the audio clip.
+- Sync upgrade path — vendor REAL alass on-device: compile `alass-core` (Rust) as an
+  iOS static lib + C FFI into the mpv module. What it buys over `subSync.ts`:
+  SPLITS (TV↔BD cut differences — constant offset can't fix those) and fps-drift
+  correction — note NEITHER is expressible via mpv `sub-delay`; the integration
+  must rewrite the downloaded subtitle file (alass's native mode) and re-`sub-add`
+  it. Cost: Rust cross-compilation toolchain in the Nix flake + Xcode build.
+  Trigger: a real sub pair the constant-offset model can't sync (the cross-check
+  harness flags exactly this: "NON-constant correction" on a fixtures pair).
 - Zero-cost frame capture: tap the `vo=avfoundation` VO's enqueued `CVPixelBuffer`
   — needs a forked/patched MPVKit; current per-card cost (one range request + one
   GOP decode behind the spinner) is acceptable until then.

@@ -220,6 +220,9 @@ export default function YomifinLookupLayer({
       <TappableSubtitleOverlay
         text={text}
         onWordTap={status === "ready" ? handleWordTap : undefined}
+        fontSize={settings.yomifinSubtitleFontSize ?? 32}
+        outline={settings.yomifinSubtitleOutline ?? "normal"}
+        bottomOffset={settings.yomifinSubtitleBottomOffset ?? 64}
       />
       {status === "loading" ? (
         <View style={styles.badge} pointerEvents='none'>

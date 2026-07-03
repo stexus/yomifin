@@ -12,8 +12,17 @@
  * which caused flicker and couldn't handle PGS.
  */
 
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useMemo } from "react";
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  type TextStyle,
+  View,
+} from "react-native";
 import { segmentLine, type Token } from "@/utils/yomifin/segment";
+
+export type SubtitleOutline = "none" | "normal" | "strong";
 
 interface Props {
   /** Current subtitle text from mpv (empty string = nothing showing). */
@@ -24,9 +33,51 @@ interface Props {
    * tap is just logged.
    */
   onWordTap?: (input: string, token: Token) => void;
+  /** Rendering QoL (runtime settings; Settings → Reader). */
+  fontSize?: number;
+  outline?: SubtitleOutline;
+  /** Distance of the line stack from the bottom edge (pt). */
+  bottomOffset?: number;
 }
 
-export default function TappableSubtitleOverlay({ text, onWordTap }: Props) {
+/** Text shadow params per outline strength (RN has no true stroke). */
+function outlineStyle(outline: SubtitleOutline): Partial<TextStyle> {
+  switch (outline) {
+    case "none":
+      return {};
+    case "strong":
+      return {
+        textShadowColor: "rgba(0,0,0,1)",
+        textShadowOffset: { width: 0, height: 0 },
+        textShadowRadius: 7,
+      };
+    default:
+      return {
+        textShadowColor: "rgba(0,0,0,0.95)",
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 4,
+      };
+  }
+}
+
+export default function TappableSubtitleOverlay({
+  text,
+  onWordTap,
+  fontSize = 32,
+  outline = "normal",
+  bottomOffset = 64,
+}: Props) {
+  const textStyle = useMemo<TextStyle>(
+    () => ({
+      color: "white",
+      fontSize,
+      fontWeight: "600",
+      lineHeight: Math.ceil(fontSize * 1.3),
+      ...outlineStyle(outline),
+    }),
+    [fontSize, outline],
+  );
+
   const handleTokenPress = (token: Token, line: string) => {
     const fromHere = line.slice(token.start);
     if (onWordTap) {
@@ -44,7 +95,10 @@ export default function TappableSubtitleOverlay({ text, onWordTap }: Props) {
   const lines = trimmed.split("\n");
 
   return (
-    <View pointerEvents='box-none' style={styles.container}>
+    <View
+      pointerEvents='box-none'
+      style={[styles.container, { bottom: bottomOffset }]}
+    >
       <View pointerEvents='box-none' style={styles.lineStack}>
         {lines.map((line, li) => {
           const tokens = segmentLine(line);
@@ -54,7 +108,7 @@ export default function TappableSubtitleOverlay({ text, onWordTap }: Props) {
               {tokens.map((tok, ti) =>
                 tok.isWhitespace ? (
                   // biome-ignore lint/suspicious/noArrayIndexKey: positional gap
-                  <Text key={ti} style={styles.text}>
+                  <Text key={ti} style={textStyle}>
                     {tok.text}
                   </Text>
                 ) : (
@@ -64,7 +118,7 @@ export default function TappableSubtitleOverlay({ text, onWordTap }: Props) {
                     onPress={() => handleTokenPress(tok, line)}
                     hitSlop={4}
                   >
-                    <Text style={styles.text}>{tok.text}</Text>
+                    <Text style={textStyle}>{tok.text}</Text>
                   </Pressable>
                 ),
               )}
@@ -81,7 +135,6 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 0,
     right: 0,
-    bottom: 64,
     alignItems: "center",
     zIndex: 9999,
   },
@@ -93,14 +146,5 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "center",
-  },
-  text: {
-    color: "white",
-    fontSize: 32,
-    fontWeight: "600",
-    lineHeight: 42,
-    textShadowColor: "rgba(0,0,0,0.95)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
   },
 });
