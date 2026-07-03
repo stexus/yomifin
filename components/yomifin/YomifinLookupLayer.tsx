@@ -17,7 +17,6 @@ import {
   Text,
   View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSettings } from "@/utils/atoms/settings";
 import {
   yomifinCueRangeAtom,
@@ -45,6 +44,8 @@ import {
   resolveProfile,
   titlesForProfile,
 } from "@/utils/yomifin/profiles";
+// NOTE: the profile INDICATOR/SWITCH pill lives in the players' top bars
+// (components/yomifin/ProfilePill.tsx), fed the same profileKey/languageHint.
 import DefinitionPopup from "./DefinitionPopup";
 import { getPopupTheme } from "./popupTheme";
 import TappableSubtitleOverlay from "./TappableSubtitleOverlay";
@@ -88,11 +89,6 @@ interface Props {
    * still works but only flips the app-wide active profile.
    */
   profileKey?: string;
-  /**
-   * Whether the player controls are up — the profile pill only shows alongside
-   * them (it's a control, not reading chrome).
-   */
-  controlsVisible?: boolean;
 }
 
 type DictStatus = "loading" | "ready" | "none" | "error";
@@ -107,47 +103,20 @@ export default function YomifinLookupLayer({
   documentTitle,
   languageHint,
   profileKey,
-  controlsVisible = false,
 }: Props) {
-  const insets = useSafeAreaInsets();
-  const { settings, updateSettings } = useSettings();
-  // Profiles (JA/ZH bundles): per-title manual override (pill) > track-language hint
-  // > manual default. The resolved profile supplies the dictionary set AND the
-  // Translator language; the same id threads to the popup so cards target that
-  // profile's Anki config.
+  const { settings } = useSettings();
+  // Profiles (JA/ZH bundles): per-title manual override (pill in the players' top
+  // bars) > track-language hint > manual default. The resolved profile supplies the
+  // dictionary set AND the Translator language; the same id threads to the popup so
+  // cards target that profile's Anki config.
   const profileId: ProfileId = resolveEffectiveProfileId(
     settings,
     languageHint,
     profileKey,
   );
-  const overridden = Boolean(
-    profileKey && settings.yomifinProfileOverrides?.[profileKey],
-  );
   const dictConfig = resolveProfile(settings, profileId).dictionaryConfig;
   const dictLanguages = settings.yomifinDictionaryLanguages ?? {};
   const maxResults = settings.yomifinMaxResults ?? 32;
-
-  // Pill: tap switches to the other profile (remembered per-title when we have a
-  // key); long-press clears the override back to automatic selection.
-  const switchProfile = () => {
-    const next: ProfileId = profileId === "ja" ? "zh" : "ja";
-    if (profileKey) {
-      updateSettings({
-        yomifinProfileOverrides: {
-          ...(settings.yomifinProfileOverrides ?? {}),
-          [profileKey]: next,
-        },
-      });
-    } else {
-      updateSettings({ yomifinActiveProfile: next });
-    }
-  };
-  const clearProfileOverride = () => {
-    if (!profileKey || !overridden) return;
-    const map = { ...(settings.yomifinProfileOverrides ?? {}) };
-    delete map[profileKey];
-    updateSettings({ yomifinProfileOverrides: map });
-  };
   const theme = useMemo(
     () => getPopupTheme(settings.yomifinPopupTheme),
     [settings.yomifinPopupTheme],
@@ -283,24 +252,6 @@ export default function YomifinLookupLayer({
         outline={settings.yomifinSubtitleOutline ?? "normal"}
         bottomOffset={settings.yomifinSubtitleBottomOffset ?? 64}
       />
-      {/* Profile pill — shows the ACTIVE lookup profile, only while the player
-          controls are up (top-center, just below the top bar). Tap = switch
-          (remembered for this title); long-press = back to auto. */}
-      {controlsVisible ? (
-        <Pressable
-          style={[styles.profilePill, { top: insets.top + 56 }]}
-          onPress={switchProfile}
-          onLongPress={clearProfileOverride}
-          hitSlop={8}
-        >
-          <Text style={styles.profilePillText}>
-            {profileId.toUpperCase()}
-            <Text style={styles.profilePillMode}>
-              {overridden ? "" : " · auto"}
-            </Text>
-          </Text>
-        </Pressable>
-      ) : null}
       {status === "loading" ? (
         <View style={styles.badge} pointerEvents='none'>
           <ActivityIndicator size='small' color='#fff' />
@@ -381,18 +332,4 @@ const styles = StyleSheet.create({
     zIndex: 10000,
   },
   badgeText: { color: "#fff", fontSize: 13 },
-  // Top-center, just below the controls' top bar (back/title/track buttons), only
-  // mounted while controls are visible. zIndex above the popup backdrop (9990) so
-  // it stays tappable while a popup is open.
-  profilePill: {
-    position: "absolute",
-    alignSelf: "center",
-    backgroundColor: "rgba(0,0,0,0.55)",
-    borderRadius: 14,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    zIndex: 9995,
-  },
-  profilePillText: { color: "#fff", fontSize: 12, fontWeight: "700" },
-  profilePillMode: { color: "#aaa", fontWeight: "400" },
 });

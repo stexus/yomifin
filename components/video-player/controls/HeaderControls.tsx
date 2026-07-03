@@ -36,6 +36,8 @@ interface HeaderControlsProps {
   // Technical info props
   showTechnicalInfo?: boolean;
   onToggleTechnicalInfo?: () => void;
+  /** Extra control rendered next to the (leftmost) dropdown — yomifin profile pill. */
+  leftSlot?: React.ReactNode;
 }
 
 export const HeaderControls: FC<HeaderControlsProps> = ({
@@ -56,6 +58,7 @@ export const HeaderControls: FC<HeaderControlsProps> = ({
   setPlaybackSpeed,
   showTechnicalInfo = false,
   onToggleTechnicalInfo,
+  leftSlot,
 }) => {
   const router = useRouter();
   const insets = useControlsSafeAreaInsets();
@@ -106,7 +109,10 @@ export const HeaderControls: FC<HeaderControlsProps> = ({
       pointerEvents={showControls ? "auto" : "none"}
       className='flex flex-row justify-between'
     >
-      <View className='mr-auto' pointerEvents='box-none'>
+      <View
+        className='mr-auto flex flex-row items-center'
+        pointerEvents='box-none'
+      >
         {!Platform.isTV && (!offline || !mediaSource?.TranscodingUrl) && (
           <View pointerEvents='auto'>
             <DropdownView
@@ -117,6 +123,11 @@ export const HeaderControls: FC<HeaderControlsProps> = ({
             />
           </View>
         )}
+        {leftSlot ? (
+          <View pointerEvents='auto' style={{ marginLeft: 8 }}>
+            {leftSlot}
+          </View>
+        ) : null}
       </View>
 
       <View className='flex flex-row items-center space-x-2'>

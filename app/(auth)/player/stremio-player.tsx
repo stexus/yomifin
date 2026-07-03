@@ -34,6 +34,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import OnlineSubtitlesModal, {
   type LoadedOnlineSubtitle,
 } from "@/components/yomifin/OnlineSubtitlesModal";
+import ProfilePill from "@/components/yomifin/ProfilePill";
 import YomifinErrorBoundary from "@/components/yomifin/YomifinErrorBoundary";
 import YomifinLookupLayer from "@/components/yomifin/YomifinLookupLayer";
 import {
@@ -485,6 +486,12 @@ export default function StremioPlayerPage() {
             >
               <Ionicons name='close' size={22} color='white' />
             </Pressable>
+            <ProfilePill
+              profileKey={
+                query || title ? `stremio:${query || title}` : undefined
+              }
+              languageHint={null}
+            />
             <Text style={styles.title} numberOfLines={1}>
               {title || "Stremio stream"}
             </Text>
@@ -677,7 +684,6 @@ export default function StremioPlayerPage() {
           onCaptureMedia={captureMedia}
           languageHint={null}
           profileKey={query || title ? `stremio:${query || title}` : undefined}
-          controlsVisible={showControls}
           documentTitle={title || "Stremio stream"}
         />
       </YomifinErrorBoundary>

@@ -33,6 +33,7 @@ import {
 import OnlineSubtitlesModal, {
   type LoadedOnlineSubtitle,
 } from "@/components/yomifin/OnlineSubtitlesModal";
+import ProfilePill from "@/components/yomifin/ProfilePill";
 import YomifinErrorBoundary from "@/components/yomifin/YomifinErrorBoundary";
 import YomifinLookupLayer from "@/components/yomifin/YomifinLookupLayer";
 import useRouter from "@/hooks/useAppRouter";
@@ -1770,6 +1771,12 @@ export default function DirectPlayerPage() {
                   showSubtitleNav={currentSubtitleIndex !== -1}
                   onPrevSubtitle={yomifinPrevSubtitle}
                   onNextSubtitle={yomifinNextSubtitle}
+                  headerLeftSlot={
+                    <ProfilePill
+                      profileKey={item?.SeriesId ?? item?.Id ?? undefined}
+                      languageHint={yomifinLanguageHint}
+                    />
+                  }
                 />
               ))}
             {/* YOMIFIN Phase 2: tappable subtitles + Yomitan lookup + popup (top),
@@ -1785,7 +1792,6 @@ export default function DirectPlayerPage() {
                 onCaptureMedia={yomifinCaptureMedia}
                 languageHint={yomifinLanguageHint}
                 profileKey={item?.SeriesId ?? item?.Id ?? undefined}
-                controlsVisible={showControls}
                 documentTitle={
                   item?.SeriesName
                     ? `${item.SeriesName} - ${item?.Name ?? ""}`

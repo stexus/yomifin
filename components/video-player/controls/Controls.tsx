@@ -79,6 +79,8 @@ interface Props {
   showSubtitleNav?: boolean;
   onPrevSubtitle?: () => void;
   onNextSubtitle?: () => void;
+  /** Extra header control next to the dropdown (yomifin profile pill). */
+  headerLeftSlot?: React.ReactNode;
 }
 
 export const Controls: FC<Props> = ({
@@ -112,6 +114,7 @@ export const Controls: FC<Props> = ({
   showSubtitleNav = false,
   onPrevSubtitle,
   onNextSubtitle,
+  headerLeftSlot,
 }) => {
   const offline = useOfflineMode();
   const { settings, updateSettings } = useSettings();
@@ -557,6 +560,7 @@ export const Controls: FC<Props> = ({
               setPlaybackSpeed={setPlaybackSpeed}
               showTechnicalInfo={showTechnicalInfo}
               onToggleTechnicalInfo={onToggleTechnicalInfo}
+              leftSlot={headerLeftSlot}
             />
           </Animated.View>
           <Animated.View
