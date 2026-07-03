@@ -355,6 +355,8 @@ export type Settings = {
    * addons only — torrent (infoHash) streams are filtered out.
    */
   stremioAddonUrls: string[];
+  /** Skip the stream picker: auto-play the first playable (debrid) result. */
+  stremioAutoPlayFirstStream: boolean;
 };
 
 export interface Lockable<T> {
@@ -477,6 +479,7 @@ export const defaultValues: Settings = {
     "https://aiometadata.luigivault.com/stremio/7f4fca2a-d930-44c3-a357-29d663fb1bf3/manifest.json",
     "https://aiostream.luigivault.com/stremio/e63962d4-c468-4b49-9bed-80581f53bab5/eyJpIjoic09qaW8yaHg1UjQrRUE3bjVISXlXUT09IiwiZSI6IkdzYStSOVY0ejVKdXB4STF2YTUxOURlWStFWjArRElqazVsTno2WE92QkE9IiwidCI6ImEifQ/manifest.json",
   ],
+  stremioAutoPlayFirstStream: false,
 };
 
 const loadSettings = (): Partial<Settings> => {

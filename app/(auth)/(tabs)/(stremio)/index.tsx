@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Pressable,
   ScrollView,
+  Switch,
   TextInput,
   View,
 } from "react-native";
@@ -99,6 +100,22 @@ export default function StremioHome() {
             >
               <Text className='text-white text-sm'>Add</Text>
             </Pressable>
+          </View>
+          <View className='flex-row items-center justify-between mt-4'>
+            <View className='flex-1 mr-3'>
+              <Text className='text-neutral-200 text-sm'>
+                Auto-play first stream
+              </Text>
+              <Text className='text-neutral-500 text-xs'>
+                Skip the source picker and play the first playable result
+              </Text>
+            </View>
+            <Switch
+              value={settings?.stremioAutoPlayFirstStream ?? false}
+              onValueChange={(v) =>
+                updateSettings({ stremioAutoPlayFirstStream: v })
+              }
+            />
           </View>
         </View>
       ) : null}

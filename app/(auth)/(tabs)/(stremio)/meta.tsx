@@ -17,6 +17,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Text } from "@/components/common/Text";
 import useRouter from "@/hooks/useAppRouter";
+import { useSettings } from "@/utils/atoms/settings";
 import {
   type AddonStream,
   fetchMetaFromAddons,
@@ -30,6 +31,12 @@ import {
 } from "@/utils/stremio/client";
 import { useStremioAddons } from "@/utils/stremio/useStremioAddons";
 
+interface StreamTarget {
+  videoId: string;
+  title: string;
+  episode?: number;
+}
+
 export default function StremioMetaPage() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -39,15 +46,14 @@ export default function StremioMetaPage() {
     name?: string;
   }>();
   const { addons, loading: addonsLoading } = useStremioAddons();
+  const { settings } = useSettings();
+  const autoPlayFirst = settings?.stremioAutoPlayFirstStream ?? false;
 
   const [meta, setMeta] = useState<StremioMetaDetail | null>(null);
   const [metaLoading, setMetaLoading] = useState(true);
 
   // Stream picker state: which video id we're resolving (meta id for movies).
-  const [pickFor, setPickFor] = useState<{
-    videoId: string;
-    title: string;
-  } | null>(null);
+  const [pickFor, setPickFor] = useState<StreamTarget | null>(null);
   const [streams, setStreams] = useState<AddonStream[] | null>(null);
 
   useEffect(() => {
@@ -73,19 +79,15 @@ export default function StremioMetaPage() {
   );
   const isSeries = videos.length > 0;
 
-  const openStreams = (videoId: string, title: string) => {
-    setPickFor({ videoId, title });
-    setStreams(null);
-    fetchStreamsFromAddons(addons, type ?? "movie", videoId)
-      .then((all) => setStreams(playableStreams(all)))
-      .catch((e) => {
-        console.warn(`[STREMIO] streams failed: ${e}`);
-        setStreams([]);
-      });
-  };
+  const displayName = meta?.name ?? name ?? id ?? "";
 
-  const playStream = (s: AddonStream) => {
-    if (!s.stream.url || !pickFor) return;
+  // AniList id when the Stremio id is anilist-prefixed (jimaku exact match).
+  const anilistId = id?.startsWith("anilist:") ? id.split(":")[1] : undefined;
+
+  // Takes the target explicitly (not from pickFor state) so the auto-play path
+  // can call it from inside the resolve callback without a stale closure.
+  const playStream = (s: AddonStream, target: StreamTarget) => {
+    if (!s.stream.url) return;
     const subs = (s.stream.subtitles ?? [])
       .filter((x) => /^https?:\/\//i.test(x.url))
       .map((x) => x.url);
@@ -94,13 +96,36 @@ export default function StremioMetaPage() {
       pathname: "/(auth)/player/stremio-player" as any,
       params: {
         url: s.stream.url,
-        title: pickFor.title,
+        title: target.title,
+        // jimaku prefills: bare series/movie name + episode number.
+        query: displayName,
+        episode: target.episode !== undefined ? String(target.episode) : "",
+        anilistId: anilistId ?? "",
         subtitleUrls: subs.length > 0 ? JSON.stringify(subs) : "",
       },
     });
   };
 
-  const displayName = meta?.name ?? name ?? id ?? "";
+  const openStreams = (videoId: string, title: string, episode?: number) => {
+    const target: StreamTarget = { videoId, title, episode };
+    setPickFor(target);
+    setStreams(null);
+    fetchStreamsFromAddons(addons, type ?? "movie", videoId)
+      .then((all) => {
+        const playable = playableStreams(all);
+        // Auto-play: skip the picker entirely when enabled and something
+        // resolved; fall back to the (empty) picker so failures are visible.
+        if (autoPlayFirst && playable.length > 0) {
+          playStream(playable[0], target);
+          return;
+        }
+        setStreams(playable);
+      })
+      .catch((e) => {
+        console.warn(`[STREMIO] streams failed: ${e}`);
+        setStreams([]);
+      });
+  };
 
   return (
     <View className='flex-1 bg-black'>
@@ -173,7 +198,11 @@ export default function StremioMetaPage() {
                   key={v.id}
                   className='bg-neutral-900 rounded-xl px-4 py-3 mb-2'
                   onPress={() =>
-                    openStreams(v.id, `${displayName} - ${videoLabel(v)}`)
+                    openStreams(
+                      v.id,
+                      `${displayName} - ${videoLabel(v)}`,
+                      v.episode ?? v.number,
+                    )
                   }
                 >
                   <Text className='text-white text-sm'>{videoLabel(v)}</Text>
@@ -197,6 +226,15 @@ export default function StremioMetaPage() {
         visible={pickFor !== null}
         transparent
         animationType='slide'
+        // iOS RN Modal defaults to portrait-only, which force-rotates a
+        // landscape iPad when the picker opens. Allow everything.
+        supportedOrientations={[
+          "portrait",
+          "portrait-upside-down",
+          "landscape",
+          "landscape-left",
+          "landscape-right",
+        ]}
         onRequestClose={() => setPickFor(null)}
       >
         <Pressable
@@ -212,7 +250,9 @@ export default function StremioMetaPage() {
           </Text>
           <Text className='text-neutral-500 text-xs mb-3'>
             {streams === null
-              ? "Resolving streams…"
+              ? autoPlayFirst
+                ? "Resolving streams… auto-playing the first result"
+                : "Resolving streams…"
               : `${streams.length} playable stream${streams.length === 1 ? "" : "s"} (torrent-only results hidden)`}
           </Text>
           {streams === null ? (
@@ -226,7 +266,7 @@ export default function StremioMetaPage() {
                 return (
                   <Pressable
                     className='bg-neutral-800 rounded-xl px-4 py-3 mb-2'
-                    onPress={() => playStream(item)}
+                    onPress={() => pickFor && playStream(item, pickFor)}
                   >
                     <Text className='text-white text-sm' numberOfLines={2}>
                       {l.title}

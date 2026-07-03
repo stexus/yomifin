@@ -6,10 +6,19 @@
  * card with on-device audio+image capture (capture source = the playing URL,
  * which is range-seekable for debrid links).
  *
+ * Online subtitles (jimaku.cc) are wired the same way as direct-player: the CC
+ * menu offers "Online subtitles…" (gated on the API key), the downloaded file is
+ * sub-add'ed to mpv with native rendering hidden, its parsed cues own the cue
+ * store (shifted by the sync delay), and auto-sync estimates against the
+ * stream's own external subtitle cues when the addon provided any (else manual
+ * nudges only).
+ *
  * Deliberately NOT threaded through direct-player.tsx (no Jellyfin item, no
  * session reporting) — this is a separate, self-contained route taking
- * { url, title, subtitleUrls } params. Controls are minimal on purpose.
+ * { url, title, query, episode, subtitleUrls } params. Controls are minimal on
+ * purpose; icons mirror direct-player's (Ionicons), shrunk.
  */
+import { Ionicons } from "@expo/vector-icons";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { useLocalSearchParams, useNavigation } from "expo-router";
 import { useSetAtom } from "jotai";
@@ -22,6 +31,9 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import OnlineSubtitlesModal, {
+  type LoadedOnlineSubtitle,
+} from "@/components/yomifin/OnlineSubtitlesModal";
 import YomifinErrorBoundary from "@/components/yomifin/YomifinErrorBoundary";
 import YomifinLookupLayer from "@/components/yomifin/YomifinLookupLayer";
 import {
@@ -43,9 +55,12 @@ import {
   type MediaWant,
 } from "@/utils/yomifin/ankiMedia";
 import { fnv1a } from "@/utils/yomifin/mediaKey";
+import type { SubtitleCue } from "@/utils/yomifin/srt";
+import { estimateSubtitleOffset } from "@/utils/yomifin/subSync";
 import {
   cleanSubtitleOverlayText,
   parseSubtitleText,
+  shiftCues,
 } from "@/utils/yomifin/subtitleParse";
 
 /** mpv codecs rendered as bitmaps (native rendering stays ON; overlay is empty). */
@@ -81,11 +96,18 @@ export default function StremioPlayerPage() {
   const insets = useSafeAreaInsets();
   const { settings } = useSettings();
 
-  const { url, title, subtitleUrls } = useLocalSearchParams<{
-    url: string;
-    title?: string;
-    subtitleUrls?: string;
-  }>();
+  const { url, title, query, episode, anilistId, subtitleUrls } =
+    useLocalSearchParams<{
+      url: string;
+      title?: string;
+      /** Bare series/movie name (jimaku search prefill; falls back to title). */
+      query?: string;
+      /** Episode number (jimaku file filter prefill). */
+      episode?: string;
+      /** AniList id when the Stremio id was anilist-prefixed. */
+      anilistId?: string;
+      subtitleUrls?: string;
+    }>();
 
   const externalSubUrls = useMemo<string[]>(() => {
     if (!subtitleUrls) return [];
@@ -116,6 +138,19 @@ export default function StremioPlayerPage() {
   const setYomifinCues = useSetAtom(yomifinCuesAtom);
   const setYomifinCueRange = useSetAtom(yomifinCueRangeAtom);
 
+  // Online subs (jimaku): same contract as direct-player. When active, the
+  // external track owns the cue store (cues shifted into the VIDEO timeline by
+  // the sync delay); the stream's own external-sub cues (if the addon provided
+  // any) become the auto-sync REFERENCE.
+  const [onlineSubsVisible, setOnlineSubsVisible] = useState(false);
+  const [externalSub, setExternalSub] = useState<LoadedOnlineSubtitle | null>(
+    null,
+  );
+  const [subDelayMs, setSubDelayMs] = useState(0);
+  const externalSubRef = useRef<LoadedOnlineSubtitle | null>(null);
+  const subDelayMsRef = useRef(0);
+  const referenceCuesRef = useRef<SubtitleCue[]>([]);
+
   const mediaId = useMemo(() => `stremio_${fnv1a(url ?? "")}`, [url]);
 
   useEffect(() => {
@@ -126,11 +161,12 @@ export default function StremioPlayerPage() {
   }, []);
 
   // Reset the cue store for this playback; fill it from the FIRST external
-  // subtitle URL if one was provided (multi-sentence cards). Embedded-only subs
-  // degrade to the single live cue — already handled downstream.
+  // subtitle URL if one was provided (multi-sentence cards + sync reference).
+  // Embedded-only subs degrade to the single live cue — already handled.
   useEffect(() => {
     setYomifinCues([]);
     setYomifinCueRange(null);
+    referenceCuesRef.current = [];
     const first = externalSubUrls[0];
     if (!first) return;
     let cancelled = false;
@@ -140,7 +176,8 @@ export default function StremioPlayerPage() {
         if (cancelled) return;
         const cues = parseSubtitleText(first, text);
         console.log(`[STREMIO] cue store: ${cues.length} cues from ${first}`);
-        setYomifinCues(cues);
+        referenceCuesRef.current = cues;
+        if (!externalSubRef.current) setYomifinCues(cues);
       })
       .catch((e) =>
         console.warn(`[STREMIO] external sub fetch failed: ${e.message}`),
@@ -149,6 +186,15 @@ export default function StremioPlayerPage() {
       cancelled = true;
     };
   }, [externalSubUrls, setYomifinCues, setYomifinCueRange]);
+
+  // Publish the online sub's cues (shifted into the VIDEO timeline) + refs.
+  useEffect(() => {
+    externalSubRef.current = externalSub;
+    subDelayMsRef.current = subDelayMs;
+    if (externalSub) {
+      setYomifinCues(shiftCues(externalSub.cues, subDelayMs));
+    }
+  }, [externalSub, subDelayMs, setYomifinCues]);
 
   const videoSource = useMemo<MpvVideoSource | undefined>(() => {
     if (!url) return undefined;
@@ -204,6 +250,15 @@ export default function StremioPlayerPage() {
       const v = videoRef.current;
       setShowSubMenu(false);
       if (!v) return;
+      // Picking a track dismisses any active online sub (stays loaded in mpv's
+      // list but deselected) and zeroes the sync delay — same as direct-player.
+      if (externalSubRef.current) {
+        setExternalSub(null);
+        setSubDelayMs(0);
+        v.setSubtitleDelay?.(0).catch(() => {});
+        setYomifinCues(referenceCuesRef.current);
+        setYomifinCueRange(null);
+      }
       setSelectedSubId(trackId);
       if (trackId === -1) {
         await v.disableSubtitles?.();
@@ -214,15 +269,59 @@ export default function StremioPlayerPage() {
       const track = subTracks.find((t) => t.id === trackId);
       await v.setSubtitleVisibility?.(!isTextSubCodec(track?.codec));
     },
-    [subTracks],
+    [subTracks, setYomifinCues, setYomifinCueRange],
   );
+
+  // Online sub loaded from the jimaku panel: into mpv, hidden natively (our
+  // overlay draws it), cues into the store, delay reset.
+  const handleOnlineSubtitleLoaded = useCallback(
+    async (sub: LoadedOnlineSubtitle) => {
+      try {
+        await videoRef.current?.addSubtitleFile?.(sub.path, true);
+        await videoRef.current?.setSubtitleVisibility?.(false);
+        await videoRef.current?.setSubtitleDelay?.(0);
+      } catch (e) {
+        console.warn(
+          `[STREMIO] failed to load online sub into mpv: ${(e as Error).message}`,
+        );
+      }
+      setSubDelayMs(0);
+      setExternalSub(sub);
+      setYomifinCueRange(null);
+      refreshTracks();
+      console.log(
+        `[STREMIO] online subtitle active: "${sub.name}" (${sub.cues.length} cues)`,
+      );
+    },
+    [setYomifinCueRange, refreshTracks],
+  );
+
+  const handleSubDelayChange = useCallback((ms: number) => {
+    setSubDelayMs(ms);
+    videoRef.current?.setSubtitleDelay?.(ms / 1000).catch(() => {});
+  }, []);
+
+  // Auto sync: only possible when the stream's addon supplied an external sub
+  // (its cues are the reference). Embedded-only playback → null → manual nudges.
+  const handleAutoSync = useCallback(() => {
+    const ext = externalSubRef.current;
+    if (!ext || referenceCuesRef.current.length === 0) return null;
+    const est = estimateSubtitleOffset(referenceCuesRef.current, ext.cues);
+    if (est) handleSubDelayChange(Math.round(est.offsetMs));
+    return est;
+  }, [handleSubDelayChange]);
 
   const onSubtitleText = useCallback(
     (e: { nativeEvent: { text: string; start?: number; end?: number } }) => {
       setSubtitleText(cleanSubtitleOverlayText(e.nativeEvent?.text ?? ""));
+      // mpv reports the cue's FILE-timeline times; a delayed online sub needs
+      // VIDEO time = file time + delay for capture/anchoring.
+      const delaySec = externalSubRef.current
+        ? subDelayMsRef.current / 1000
+        : 0;
       cueRef.current = {
-        start: e.nativeEvent?.start ?? 0,
-        end: e.nativeEvent?.end ?? 0,
+        start: (e.nativeEvent?.start ?? 0) + delaySec,
+        end: (e.nativeEvent?.end ?? 0) + delaySec,
       };
     },
     [],
@@ -322,6 +421,10 @@ export default function StremioPlayerPage() {
 
   const [seekBarWidth, setSeekBarWidth] = useState(1);
 
+  const rewindTime = settings.rewindSkipTime ?? 10;
+  const forwardTime = settings.forwardSkipTime ?? 30;
+  const showSubtitleNav = selectedSubId !== -1 || externalSub !== null;
+
   if (!url) {
     return (
       <View style={styles.center}>
@@ -380,7 +483,7 @@ export default function StremioPlayerPage() {
               onPress={() => navigation.goBack()}
               hitSlop={12}
             >
-              <Text style={styles.buttonText}>✕</Text>
+              <Ionicons name='close' size={22} color='white' />
             </Pressable>
             <Text style={styles.title} numberOfLines={1}>
               {title || "Stremio stream"}
@@ -393,7 +496,11 @@ export default function StremioPlayerPage() {
               }}
               hitSlop={12}
             >
-              <Text style={styles.buttonText}>CC</Text>
+              <Ionicons
+                name='chatbox-ellipses-outline'
+                size={22}
+                color='white'
+              />
             </Pressable>
           </View>
 
@@ -402,27 +509,64 @@ export default function StremioPlayerPage() {
             style={[styles.bottomBar, { paddingBottom: insets.bottom + 12 }]}
           >
             <View style={styles.transportRow}>
-              <Pressable
-                onPress={() => videoRef.current?.subSeek?.(-1)}
-                hitSlop={10}
-              >
-                <Text style={styles.transportText}>|◂</Text>
-              </Pressable>
-              <Pressable onPress={() => seekBy(-10)} hitSlop={10}>
-                <Text style={styles.transportText}>-10</Text>
+              {showSubtitleNav ? (
+                <Pressable
+                  onPress={() => videoRef.current?.subSeek?.(-1)}
+                  hitSlop={10}
+                  accessibilityLabel='Previous subtitle'
+                >
+                  <View style={styles.subNavPair}>
+                    <Ionicons name='caret-back' size={18} color='white' />
+                    <Ionicons
+                      name='chatbox-ellipses-outline'
+                      size={16}
+                      color='white'
+                    />
+                  </View>
+                </Pressable>
+              ) : null}
+              <Pressable onPress={() => seekBy(-rewindTime)} hitSlop={10}>
+                <View style={styles.skipWrap}>
+                  <Ionicons
+                    name='refresh-outline'
+                    size={34}
+                    color='white'
+                    style={{
+                      transform: [{ scaleY: -1 }, { rotate: "180deg" }],
+                    }}
+                  />
+                  <Text style={styles.skipText}>{rewindTime}</Text>
+                </View>
               </Pressable>
               <Pressable onPress={togglePlay} hitSlop={14}>
-                <Text style={styles.playText}>{isPlaying ? "⏸" : "▶"}</Text>
+                <Ionicons
+                  name={isPlaying ? "pause" : "play"}
+                  size={40}
+                  color='white'
+                />
               </Pressable>
-              <Pressable onPress={() => seekBy(10)} hitSlop={10}>
-                <Text style={styles.transportText}>+10</Text>
+              <Pressable onPress={() => seekBy(forwardTime)} hitSlop={10}>
+                <View style={styles.skipWrap}>
+                  <Ionicons name='refresh-outline' size={34} color='white' />
+                  <Text style={styles.skipText}>{forwardTime}</Text>
+                </View>
               </Pressable>
-              <Pressable
-                onPress={() => videoRef.current?.subSeek?.(1)}
-                hitSlop={10}
-              >
-                <Text style={styles.transportText}>▸|</Text>
-              </Pressable>
+              {showSubtitleNav ? (
+                <Pressable
+                  onPress={() => videoRef.current?.subSeek?.(1)}
+                  hitSlop={10}
+                  accessibilityLabel='Next subtitle'
+                >
+                  <View style={styles.subNavPair}>
+                    <Ionicons
+                      name='chatbox-ellipses-outline'
+                      size={16}
+                      color='white'
+                    />
+                    <Ionicons name='caret-forward' size={18} color='white' />
+                  </View>
+                </Pressable>
+              ) : null}
             </View>
             <View style={styles.seekRow}>
               <Text style={styles.timeText}>{fmtTime(positionSec)}</Text>
@@ -469,7 +613,7 @@ export default function StremioPlayerPage() {
             <Text
               style={[
                 styles.subMenuText,
-                selectedSubId === -1 && styles.subMenuSelected,
+                selectedSubId === -1 && !externalSub && styles.subMenuSelected,
               ]}
             >
               Subtitles off
@@ -484,7 +628,9 @@ export default function StremioPlayerPage() {
               <Text
                 style={[
                   styles.subMenuText,
-                  selectedSubId === t.id && styles.subMenuSelected,
+                  selectedSubId === t.id &&
+                    !externalSub &&
+                    styles.subMenuSelected,
                 ]}
                 numberOfLines={1}
               >
@@ -495,6 +641,27 @@ export default function StremioPlayerPage() {
           ))}
           {subTracks.length === 0 ? (
             <Text style={styles.subMenuText}>No subtitle tracks</Text>
+          ) : null}
+          {settings.yomifinJimakuApiKey ? (
+            <Pressable
+              style={[styles.subMenuRow, styles.subMenuDivider]}
+              onPress={() => {
+                setShowSubMenu(false);
+                setOnlineSubsVisible(true);
+              }}
+            >
+              <Text
+                style={[
+                  styles.subMenuText,
+                  externalSub && styles.subMenuSelected,
+                ]}
+                numberOfLines={1}
+              >
+                {externalSub
+                  ? `Online: ${externalSub.name}`
+                  : "Online subtitles (jimaku)…"}
+              </Text>
+            </Pressable>
           ) : null}
         </View>
       ) : null}
@@ -510,6 +677,27 @@ export default function StremioPlayerPage() {
           onCaptureMedia={captureMedia}
           languageHint={null}
           documentTitle={title || "Stremio stream"}
+        />
+      </YomifinErrorBoundary>
+
+      {/* Online subtitle search (jimaku) + sync panel. */}
+      <YomifinErrorBoundary label='stremio-online-subs'>
+        <OnlineSubtitlesModal
+          visible={onlineSubsVisible}
+          onClose={() => setOnlineSubsVisible(false)}
+          defaultQuery={query || title || ""}
+          defaultEpisode={
+            episode && /^\d+$/.test(episode) ? Number(episode) : undefined
+          }
+          anilistId={
+            anilistId && /^\d+$/.test(anilistId) ? Number(anilistId) : undefined
+          }
+          activeSubName={externalSub?.name ?? null}
+          activeCueCount={externalSub?.cues.length ?? 0}
+          delayMs={subDelayMs}
+          onDelayChange={handleSubDelayChange}
+          onAutoSync={handleAutoSync}
+          onSubtitleLoaded={handleOnlineSubtitleLoaded}
         />
       </YomifinErrorBoundary>
     </View>
@@ -575,11 +763,22 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 28,
+    gap: 30,
     marginBottom: 8,
   },
-  transportText: { color: "#fff", fontSize: 17, fontWeight: "600" },
-  playText: { color: "#fff", fontSize: 30 },
+  subNavPair: { flexDirection: "row", alignItems: "center" },
+  skipWrap: {
+    position: "relative",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  skipText: {
+    position: "absolute",
+    color: "white",
+    fontSize: 10,
+    fontWeight: "bold",
+    bottom: 7,
+  },
   seekRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   timeText: {
     color: "#ddd",
@@ -606,6 +805,12 @@ const styles = StyleSheet.create({
     maxWidth: 320,
   },
   subMenuRow: { paddingVertical: 8, paddingHorizontal: 12 },
+  subMenuDivider: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#444",
+    marginTop: 4,
+    paddingTop: 10,
+  },
   subMenuText: { color: "#ddd", fontSize: 14 },
   subMenuSelected: { color: "#a855f7", fontWeight: "700" },
 });
