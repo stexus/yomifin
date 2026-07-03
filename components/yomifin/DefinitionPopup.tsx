@@ -45,7 +45,14 @@ import {
   View,
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import Animated, { FadeInLeft, FadeInRight } from "react-native-reanimated";
+import Animated, {
+  FadeInLeft,
+  FadeInRight,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
 import { addAnkiCard, flattenGloss } from "@/utils/yomifin/anki";
@@ -229,26 +236,62 @@ export default function DefinitionPopup({
   const goPrev = () => cyclePane(-1);
   const goNext = () => cyclePane(1);
 
-  // Pane cycling by horizontal swipe anywhere on the popup. `.runOnJS(true)` (no
-  // worklets — same pattern as GestureOverlay); the activation offsets keep vertical
-  // scrolling and plain taps (selection Pressables) unaffected: the pan only
-  // activates after a decisively horizontal drag.
+  // Pane cycling by horizontal swipe anywhere on the popup — INTERACTIVE: the pane
+  // follows the finger from the moment the pan activates. Per-frame updates are
+  // UI-thread WORKLETS writing a SharedValue (never per-frame runOnJS — the reverted
+  // drag-to-seek proved that lags); only the final pane COMMIT crosses to JS once.
+  // The activation offsets keep vertical scrolling and plain taps (selection
+  // Pressables) unaffected: the pan only activates after a decisively horizontal drag.
+  const dragX = useSharedValue(0);
   const swipeGesture = useMemo(
     () =>
       Gesture.Pan()
         .enabled(paneCount > 1 && !editing)
-        .runOnJS(true)
         .activeOffsetX([-32, 32])
         .failOffsetY([-24, 24])
+        .onUpdate((e) => {
+          // Subtract the 32px activation distance so the pane starts moving from 0
+          // exactly when the gesture activates (no initial jump).
+          const sign = e.translationX > 0 ? 1 : -1;
+          dragX.value = e.translationX - 32 * sign;
+        })
         .onEnd((e) => {
-          const dir = e.translationX <= -40 ? 1 : e.translationX >= 40 ? -1 : 0;
-          if (dir !== 0) {
-            paneDirRef.current = dir;
-            setPaneIndex((i) => (i + dir + paneCount) % paneCount);
+          let dir: 1 | -1 | 0 = 0;
+          if (
+            e.translationX <= -72 ||
+            (e.velocityX <= -600 && e.translationX < -40)
+          ) {
+            dir = 1; // dragged left → next pane
+          } else if (
+            e.translationX >= 72 ||
+            (e.velocityX >= 600 && e.translationX > 40)
+          ) {
+            dir = -1; // dragged right → previous pane
           }
+          if (dir !== 0) {
+            // Reset BEFORE the commit re-renders, so the incoming pane (keyed
+            // remount + FadeIn entering) isn't born with the old drag offset.
+            dragX.value = 0;
+            runOnJS(cyclePane)(dir);
+          } else {
+            // Below threshold — spring the pane back into place.
+            dragX.value = withSpring(0, { damping: 22, stiffness: 320 });
+          }
+        })
+        .onFinalize((_e, success) => {
+          // Gesture cancelled (e.g. another recognizer won): never leave the pane
+          // stranded mid-drag.
+          if (!success)
+            dragX.value = withSpring(0, { damping: 22, stiffness: 320 });
         }),
+    // (dragX is a stable shared value; cyclePane only closes over paneCount)
     [paneCount, editing],
   );
+  // Live drag feedback: mild resistance (×0.55) + a fade toward the edges.
+  const dragStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: dragX.value * 0.55 }],
+    opacity: 1 - Math.min(Math.abs(dragX.value) / 480, 0.45),
+  }));
 
   // Phase 8: the card's sentence is the SELECTED CUE RANGE when the cue store has the
   // track; otherwise the single live cue frozen at tap time (bitmap/fetch-failure).
@@ -459,7 +502,7 @@ export default function DefinitionPopup({
                     ◀ ▶ and edge taps all read as motion toward the next pane. */}
                 <Animated.View
                   key={safeIndex}
-                  style={styles.entry}
+                  style={[styles.entry, dragStyle]}
                   entering={(paneDirRef.current > 0
                     ? FadeInRight
                     : FadeInLeft
