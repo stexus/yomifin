@@ -1,5 +1,6 @@
 /*
- * Stremio tab home: configured addons + their browsable catalogs.
+ * Stremio tab home: Discover-style poster shelves, one per browsable catalog of
+ * every configured addon (addon management folded behind "Manage addons").
  *
  * MVP shell over utils/stremio/client.ts — entirely separate from the Jellyfin
  * browsing surface (see FEATURES.md backlog item 1).
@@ -14,7 +15,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Text } from "@/components/common/Text";
-import useRouter from "@/hooks/useAppRouter";
+import CatalogShelf from "@/components/stremio/CatalogShelf";
 import { useSettings } from "@/utils/atoms/settings";
 import { browsableCatalogs } from "@/utils/stremio/client";
 import {
@@ -23,7 +24,6 @@ import {
 } from "@/utils/stremio/useStremioAddons";
 
 export default function StremioHome() {
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   const { settings, updateSettings } = useSettings();
   const { states, retry } = useStremioAddons();
@@ -133,30 +133,18 @@ export default function StremioHome() {
                 if (cats.length === 0)
                   return (
                     <Text className='text-neutral-500 text-xs'>
-                      No browsable catalogs (stream/meta provider)
+                      No browsable catalogs (stream/meta-only addon — it still
+                      contributes streams on playback)
                     </Text>
                   );
                 return cats.map((c) => (
-                  <Pressable
+                  <CatalogShelf
                     key={`${c.type}/${c.id}`}
-                    className='bg-neutral-900 rounded-xl px-4 py-3 mb-2 flex-row items-center justify-between'
-                    onPress={() =>
-                      router.push({
-                        // Typed-routes cast: route added on this branch; the
-                        // generated Href union regenerates on next `expo start`.
-                        pathname: "/(auth)/(tabs)/(stremio)/catalog" as any,
-                        params: {
-                          manifestUrl: s.manifestUrl,
-                          type: c.type,
-                          id: c.id,
-                          name: c.name ?? c.id,
-                        },
-                      })
-                    }
-                  >
-                    <Text className='text-white'>{c.name ?? c.id}</Text>
-                    <Text className='text-neutral-500 text-xs'>{c.type}</Text>
-                  </Pressable>
+                    manifestUrl={s.manifestUrl}
+                    type={c.type}
+                    id={c.id}
+                    name={c.name ?? c.id}
+                  />
                 ));
               })()
             : null}
