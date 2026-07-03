@@ -221,6 +221,17 @@ export default function TabLayout() {
           }}
         />
         <NativeTabs.Screen
+          name='(stremio)'
+          options={{
+            title: "Stremio",
+            tabBarItemHidden: Platform.isTV,
+            tabBarIcon:
+              Platform.OS === "android"
+                ? (_e) => require("@/assets/icons/link.png")
+                : (_e) => ({ sfSymbol: "play.rectangle.on.rectangle.fill" }),
+          }}
+        />
+        <NativeTabs.Screen
           name='(custom-links)'
           options={{
             title: t("tabs.custom_links"),

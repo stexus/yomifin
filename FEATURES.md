@@ -64,6 +64,27 @@ restores native/overlay rendering. Remove rows from this note as verified.
 ## Backlog (roughly priority-ordered)
 
 ### 1. Stremio addon sources (separate tab, mining-capable)
+**MVP SHIPPED on branch `yomifin-stremio` (2026-07-03, pending device verification).**
+What exists: `utils/stremio/client.ts` (pure addon client — manifest/catalog/meta/
+stream, capability checks, torrent filtering; `client.test.ts` is step 16 of
+`yomifin-test.sh`, validated against the real AIOMetadata/AIOStreams manifests),
+`utils/stremio/useStremioAddons.ts` (manifest cache over `Settings.stremioAddonUrls`
+— both personal addon URLs are the DEFAULT value in settings.ts), a new bottom tab
+`app/(auth)/(tabs)/(stremio)/` (addons+catalogs → poster grid w/ skip-paging → meta
+detail + episode list → stream picker), and `app/(auth)/player/stremio-player.tsx` —
+a self-contained minimal route (NOT threaded through direct-player, which is
+untouched → zero Jellyfin regression risk) with basic controls (tap-toggle, seek
+bar, ±10s, sub-seek, CC track menu w/ text-vs-bitmap visibility handling) + the
+full yomifin pipeline (tappable overlay, lookup popup, pause-on-lookup, Anki
+capture with sourceUrl = the playing debrid URL, cue store from the first
+`stream.subtitles` URL via `parseSubtitleText`). DEVICE GATES (JS-only → `just
+dev`): browse catalog → play a debrid stream; embedded JA sub tappable; a card's
+audio+image capture from the stream URL; external-SRT cue store (multi-sentence).
+Deliberately deferred: shared player-wiring extraction from direct-player.tsx,
+catalog search/genre extras, `/subtitles/` resource, jimaku panel in the stremio
+player, watch-state/resume.
+
+Original item (kept for the post-MVP steps):
 Play content resolved via Stremio addons alongside Jellyfin, with the full mining
 pipeline (tappable subs → lookup → Anki card with audio+image). **Prerequisites
 are already met:** the user has debrid services (Real-Debrid-style) set up and

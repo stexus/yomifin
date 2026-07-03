@@ -67,8 +67,12 @@ echo "── [14/15] subtitle sync estimation (offset correlation) ────�
 bun utils/yomifin/subSync.test.ts
 
 echo
-echo "── [15/15] jimaku.cc client (request shape / errors) ───────────────"
+echo "── [15/16] jimaku.cc client (request shape / errors) ───────────────"
 bun utils/yomifin/jimaku.test.ts
+
+echo
+echo "── [16/16] stremio addon client (urls / capability / aggregation) ──"
+bun utils/stremio/client.test.ts
 
 echo
 echo "── [optional] subSync ↔ real alass cross-check (skips if not installed) ─"
