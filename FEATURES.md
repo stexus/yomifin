@@ -61,67 +61,28 @@ restores native/overlay rendering. Remove rows from this note as verified.
 | Subtitle rendering QoL | `utils/yomifin/subtitleParse.ts` (+test), `srt.ts` (VTT cue-id tolerance), `TappableSubtitleOverlay.tsx`, `YomifinLookupLayer.tsx`, Settings → Reader | ASS/SSA parse for the CUE STORE (`parseAss`/`parseSubtitleText`: Format field order, override tags stripped, `\N`→newline, `{\p}` drawing cues dropped, layered dupes deduped) + VTT; the LIVE overlay stays mpv-driven — mpv's `sub-text` is already tag-stripped, `cleanSubtitleOverlayText` is defensive insurance in `onSubtitleText`; overlay style knobs (runtime settings): font size, outline none/normal/strong (textShadow tiers), bottom offset |
 | Online subtitles (jimaku.cc) + sync | `utils/yomifin/{jimaku,subSync,subtitleParse}.ts` (+tests), `components/yomifin/OnlineSubtitlesModal.tsx`, `utils/atoms/yomifinOnlineSubs.ts`, `DropdownView.tsx` (menu entry, gated on API key), `direct-player.tsx` wiring, native `setSubtitleDelay` seam (mpv `sub-delay`; iOS) | side panel: search by AniList id (item ProviderIds, any key casing) else title → entry → episode-filtered files → download to cache (`yomifin_sub_*`, sweeper-compatible) → mpv `sub-add` + hidden native rendering (tappable overlay takes over) + parsed cues into the cue store; SYNC: auto = pure offset correlation vs the item's own track (`estimateSubtitleOffset`, coarse→fine sweep, peak-sharpness confidence gate, null → manual) — this is alass's NO-SPLIT objective in TS (shipping the real tools is impossible: ffsubsync = Python+VAD, alass = Rust, Hermes has no wasm) and is CROSS-VALIDATED against real `alass-cli --no-split` by `scripts/yomifin-sync-crosscheck.ts` (brew install alass; runs in yomifin-test.sh, skips if absent; agreement ≤10ms on knowns; drop real pairs in `scripts/sync-fixtures/`, gitignored); manual ±0.1/±0.5s nudges; delay bookkeeping: store cues shifted into VIDEO timeline, live `sub-start/end` shifted by delay in JS (mpv reports FILE timeline — assumption to confirm on device: if audio clips land 2×delay off, drop the JS-side shift); picking a Jellyfin track dismisses the external sub + zeroes delay; API key in Settings → Reader |
 
+| Stremio addon sources (separate tab + minimal player, mining-capable) | `utils/stremio/client.ts` (+`client.test.ts`, step 16 of yomifin-test.sh), `useStremioAddons.ts`, tab `app/(auth)/(tabs)/(stremio)/` + `components/stremio/CatalogShelf.tsx`, route `app/(auth)/player/stremio-player.tsx`, `Settings.stremioAddonUrls` | DEVICE-VERIFIED 2026-07-03: catalog → debrid stream → jimaku sub → mined card. Pure addon client (manifest/catalog/meta/stream, capability checks, `skip` paging, torrent/`infoHash` streams filtered — debrid/HTTP only); Discover-style shelves → grid → meta/episodes → aggregated stream picker; player is a self-contained minimal route (direct-player UNTOUCHED — deliberate, see pruned backlog design) reusing MpvPlayerView + the full yomifin pipeline (tappable overlay, popup, pause-on-lookup, capture w/ sourceUrl = playing debrid URL, cue store from `stream.subtitles[0]` else jimaku); CC menu hosts the jimaku panel (same `OnlineSubtitlesModal`; auto-sync reference = addon-provided sub's cues when present, else manual nudges); icons = direct-player's Ionicons shrunk. NB addon manifest URLs (contain tokens) are settings DEFAULTS — private fork only |
+
 ## Backlog (roughly priority-ordered)
 
-### 1. Stremio addon sources (separate tab, mining-capable)
-**MVP SHIPPED on branch `yomifin-stremio` (2026-07-03, pending device verification).**
-What exists: `utils/stremio/client.ts` (pure addon client — manifest/catalog/meta/
-stream, capability checks, torrent filtering; `client.test.ts` is step 16 of
-`yomifin-test.sh`, validated against the real AIOMetadata/AIOStreams manifests),
-`utils/stremio/useStremioAddons.ts` (manifest cache over `Settings.stremioAddonUrls`
-— both personal addon URLs are the DEFAULT value in settings.ts), a new bottom tab
-`app/(auth)/(tabs)/(stremio)/` (addons+catalogs → poster grid w/ skip-paging → meta
-detail + episode list → stream picker), and `app/(auth)/player/stremio-player.tsx` —
-a self-contained minimal route (NOT threaded through direct-player, which is
-untouched → zero Jellyfin regression risk) with basic controls (tap-toggle, seek
-bar, ±10s, sub-seek, CC track menu w/ text-vs-bitmap visibility handling) + the
-full yomifin pipeline (tappable overlay, lookup popup, pause-on-lookup, Anki
-capture with sourceUrl = the playing debrid URL, cue store from the first
-`stream.subtitles` URL via `parseSubtitleText`). DEVICE GATES (JS-only → `just
-dev`): browse catalog → play a debrid stream; embedded JA sub tappable; a card's
-audio+image capture from the stream URL; external-SRT cue store (multi-sentence).
-Deliberately deferred: shared player-wiring extraction from direct-player.tsx,
-catalog search/genre extras, `/subtitles/` resource, jimaku panel in the stremio
-player, watch-state/resume.
-
-Original item (kept for the post-MVP steps):
-Play content resolved via Stremio addons alongside Jellyfin, with the full mining
-pipeline (tappable subs → lookup → Anki card with audio+image). **Prerequisites
-are already met:** the user has debrid services (Real-Debrid-style) set up and
-Stremio addons configured — so `/stream/` resolution returns range-seekable HTTPS
-direct links, which is exactly what mpv playback AND the capture seams need. Do
-NOT build on-device torrent playback; debrid-resolved (or plain HTTP) streams only.
-
-Why mining mostly survives the source swap (verified against the code):
-- Tappable subs are mpv-driven (Pivot B) — embedded subs work for any source; the
-  mpv module already supports external subtitle URLs (`externalSubtitles` load
-  option + `addSubtitleFile(url)` → `sub-add`).
-- `captureScreenshot`/`extractAudio` take a `sourceUrl` — any range-seekable HTTPS
-  URL works (that's what the debrid links are); `""` falls back to the playing URL.
-- Lookup/popup/Anki are source-agnostic. `{document-title}` comes from addon meta.
-- Cue store: the only Jellyfin-specific seam (`Stream.srt` fetch). External
-  subtitle files feed `parseSubtitleText` (ASS/VTT/SRT) directly — this path
-  SHIPPED with "Online subtitles (jimaku.cc)": reuse `OnlineSubtitlesModal` +
-  direct-player's externalSub wiring; embedded-only subs degrade to single-cue
-  (already handled).
-
-Architecture boundary (design before building):
-1. `utils/stremio/` — pure, bun-testable addon client mirroring the yomifin
-   pattern: manifest fetch/validation, catalog/meta/stream resolution, addon list
-   + debrid config in settings. Stremio addons are plain HTTP JSON APIs
-   (`manifest.json`, `/catalog/{type}/{id}.json`, `/meta/`, `/stream/`,
-   `/subtitles/`). Tests against recorded fixtures.
-2. Separate tab: catalogs → meta → stream picker, shell UI over (1).
-3. A second, MINIMAL player route taking `{url, title, subtitleUrls}` — do NOT
-   thread Stremio through `direct-player.tsx` with conditionals. First extract the
-   yomifin wiring (cue store, capture context, pause-on-lookup, popup mount) from
-   `direct-player.tsx` into a shared hook/component both players use — this is the
-   one risky step (touches the load-bearing file): one careful session + a full
-   Jellyfin-side device regression pass before building the new route on top.
-
-Exit criteria (on device): browse an addon catalog, play a debrid-resolved stream,
-subtitles tappable (embedded AND an external SRT), mine a card whose audio+image
-capture from the stream URL; the Jellyfin player path is demonstrably unregressed.
+### 1. Stremio post-MVP (deferred from the shipped MVP)
+In rough order of expected want:
+- **Shared player-wiring extraction** — pull the yomifin glue (cue store, capture
+  context, pause-on-lookup, popup mount, onSubtitleText/delay bookkeeping) out of
+  `direct-player.tsx` into a hook/component both players use, then grow the
+  stremio player's controls toward parity (gestures, playback speed, controls-dim,
+  trickplay n/a). This is the one risky step (touches the load-bearing file): one
+  careful session + a full Jellyfin-side device regression pass. Trigger: actually
+  missing a control during real use — keep a list.
+- Watch-state / resume for stremio playback (nothing is persisted today; every
+  play starts at 0).
+- Catalog `search` / `genre` extras (client already builds the extra segment;
+  UI only) + a Stremio search surface.
+- `/subtitles/` resource resolution (both installed addons serve it) as another
+  subtitle source next to jimaku + `stream.subtitles`.
+- Embedded-sub gate never explicitly verified: tappable overlay on a stream's
+  EMBEDDED text track (jimaku path is verified; embedded should be identical —
+  confirm once).
 
 ### 2. Drag-anywhere-to-seek, done right (first attempt reverted 2026-07-02)
 Infuse-style: horizontal drag anywhere on the video acts like a seek-bar drag.
