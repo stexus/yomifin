@@ -1785,6 +1785,7 @@ export default function DirectPlayerPage() {
                 onCaptureMedia={yomifinCaptureMedia}
                 languageHint={yomifinLanguageHint}
                 profileKey={item?.SeriesId ?? item?.Id ?? undefined}
+                controlsVisible={showControls}
                 documentTitle={
                   item?.SeriesName
                     ? `${item.SeriesName} - ${item?.Name ?? ""}`

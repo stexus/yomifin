@@ -17,6 +17,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSettings } from "@/utils/atoms/settings";
 import {
   yomifinCueRangeAtom,
@@ -87,6 +88,11 @@ interface Props {
    * still works but only flips the app-wide active profile.
    */
   profileKey?: string;
+  /**
+   * Whether the player controls are up — the profile pill only shows alongside
+   * them (it's a control, not reading chrome).
+   */
+  controlsVisible?: boolean;
 }
 
 type DictStatus = "loading" | "ready" | "none" | "error";
@@ -101,7 +107,9 @@ export default function YomifinLookupLayer({
   documentTitle,
   languageHint,
   profileKey,
+  controlsVisible = false,
 }: Props) {
+  const insets = useSafeAreaInsets();
   const { settings, updateSettings } = useSettings();
   // Profiles (JA/ZH bundles): per-title manual override (pill) > track-language hint
   // > manual default. The resolved profile supplies the dictionary set AND the
@@ -275,21 +283,24 @@ export default function YomifinLookupLayer({
         outline={settings.yomifinSubtitleOutline ?? "normal"}
         bottomOffset={settings.yomifinSubtitleBottomOffset ?? 64}
       />
-      {/* Profile pill — always-visible indicator of the ACTIVE lookup profile.
-          Tap = switch (remembered for this title); long-press = back to auto. */}
-      <Pressable
-        style={styles.profilePill}
-        onPress={switchProfile}
-        onLongPress={clearProfileOverride}
-        hitSlop={8}
-      >
-        <Text style={styles.profilePillText}>
-          {profileId.toUpperCase()}
-          <Text style={styles.profilePillMode}>
-            {overridden ? "" : " · auto"}
+      {/* Profile pill — shows the ACTIVE lookup profile, only while the player
+          controls are up (top-center, just below the top bar). Tap = switch
+          (remembered for this title); long-press = back to auto. */}
+      {controlsVisible ? (
+        <Pressable
+          style={[styles.profilePill, { top: insets.top + 56 }]}
+          onPress={switchProfile}
+          onLongPress={clearProfileOverride}
+          hitSlop={8}
+        >
+          <Text style={styles.profilePillText}>
+            {profileId.toUpperCase()}
+            <Text style={styles.profilePillMode}>
+              {overridden ? "" : " · auto"}
+            </Text>
           </Text>
-        </Text>
-      </Pressable>
+        </Pressable>
+      ) : null}
       {status === "loading" ? (
         <View style={styles.badge} pointerEvents='none'>
           <ActivityIndicator size='small' color='#fff' />
@@ -370,13 +381,12 @@ const styles = StyleSheet.create({
     zIndex: 10000,
   },
   badgeText: { color: "#fff", fontSize: 13 },
-  // Bottom-left corner: clear of the subtitle overlay (bottom-center), the popup
-  // (side-anchored, higher z) and the controls' top bar. zIndex above the backdrop
-  // (9990) so it stays tappable while a popup is open.
+  // Top-center, just below the controls' top bar (back/title/track buttons), only
+  // mounted while controls are visible. zIndex above the popup backdrop (9990) so
+  // it stays tappable while a popup is open.
   profilePill: {
     position: "absolute",
-    bottom: 16,
-    left: 16,
+    alignSelf: "center",
     backgroundColor: "rgba(0,0,0,0.55)",
     borderRadius: 14,
     paddingHorizontal: 10,

@@ -677,6 +677,7 @@ export default function StremioPlayerPage() {
           onCaptureMedia={captureMedia}
           languageHint={null}
           profileKey={query || title ? `stremio:${query || title}` : undefined}
+          controlsVisible={showControls}
           documentTitle={title || "Stremio stream"}
         />
       </YomifinErrorBoundary>
