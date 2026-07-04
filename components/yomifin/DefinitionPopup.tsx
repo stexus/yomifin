@@ -37,14 +37,19 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   useWindowDimensions,
   View,
 } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
+// RNGH's ScrollView (drop-in): registers the scroll with the gesture system so the
+// pane-swipe pan can run simultaneously instead of being cancelled by UIScrollView.
+import {
+  Gesture,
+  GestureDetector,
+  ScrollView,
+} from "react-native-gesture-handler";
 import Animated, {
   FadeInLeft,
   FadeInRight,
@@ -243,29 +248,37 @@ export default function DefinitionPopup({
   // The activation offsets keep vertical scrolling and plain taps (selection
   // Pressables) unaffected: the pan only activates after a decisively horizontal drag.
   const dragX = useSharedValue(0);
+  // translationX at ACTIVATION — baseline so the pane starts moving from exactly 0
+  // when the pan activates. (v1 subtracted `32 * sign(translationX)`, which JUMPS by
+  // 64px whenever a wobbly drag crosses zero — the source of the on-device chop.)
+  const dragStart = useSharedValue(0);
+  // The popup's vertical ScrollView must be known to RNGH (scrollRef +
+  // simultaneousWithExternalGesture below): as a plain RN ScrollView its native
+  // UIScrollView pan kept trying to claim/cancel the touches mid-drag, which read
+  // as stalls. Simultaneous recognition + our own active/fail offsets arbitrate:
+  // decisively vertical → pan fails (scroll wins), horizontal → pane drags while
+  // the (vertical-only) scroll has nothing to do.
+  const scrollRef = useRef(null);
   const swipeGesture = useMemo(
     () =>
       Gesture.Pan()
         .enabled(paneCount > 1 && !editing)
-        .activeOffsetX([-32, 32])
+        .activeOffsetX([-16, 16])
         .failOffsetY([-24, 24])
+        .simultaneousWithExternalGesture(scrollRef)
+        .onStart((e) => {
+          dragStart.value = e.translationX;
+          dragX.value = 0;
+        })
         .onUpdate((e) => {
-          // Subtract the 32px activation distance so the pane starts moving from 0
-          // exactly when the gesture activates (no initial jump).
-          const sign = e.translationX > 0 ? 1 : -1;
-          dragX.value = e.translationX - 32 * sign;
+          dragX.value = e.translationX - dragStart.value;
         })
         .onEnd((e) => {
+          const dx = e.translationX - dragStart.value;
           let dir: 1 | -1 | 0 = 0;
-          if (
-            e.translationX <= -72 ||
-            (e.velocityX <= -600 && e.translationX < -40)
-          ) {
+          if (dx <= -64 || (e.velocityX <= -600 && dx < -24)) {
             dir = 1; // dragged left → next pane
-          } else if (
-            e.translationX >= 72 ||
-            (e.velocityX >= 600 && e.translationX > 40)
-          ) {
+          } else if (dx >= 64 || (e.velocityX >= 600 && dx > 24)) {
             dir = -1; // dragged right → previous pane
           }
           if (dir !== 0) {
@@ -284,12 +297,12 @@ export default function DefinitionPopup({
           if (!success)
             dragX.value = withSpring(0, { damping: 22, stiffness: 320 });
         }),
-    // (dragX is a stable shared value; cyclePane only closes over paneCount)
+    // (dragX/dragStart/scrollRef are stable; cyclePane only closes over paneCount)
     [paneCount, editing],
   );
-  // Live drag feedback: mild resistance (×0.55) + a fade toward the edges.
+  // Live drag feedback: near-1:1 tracking + a fade toward the edges.
   const dragStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: dragX.value * 0.55 }],
+    transform: [{ translateX: dragX.value * 0.9 }],
     opacity: 1 - Math.min(Math.abs(dragX.value) / 480, 0.45),
   }));
 
@@ -494,6 +507,7 @@ export default function DefinitionPopup({
               </View>
             ) : (
               <ScrollView
+                ref={scrollRef}
                 style={styles.scroll}
                 contentContainerStyle={styles.scrollContent}
               >
