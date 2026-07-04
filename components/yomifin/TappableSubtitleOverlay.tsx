@@ -22,7 +22,7 @@
  *     with crisp (no-blur) stacked black copies — worse than native, better than none.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Pressable,
   StyleSheet,
@@ -30,10 +30,10 @@ import {
   type TextStyle,
   View,
 } from "react-native";
-import { OutlinedTextView } from "@/modules";
+import { logOutlinedTextStatus, OutlinedTextView } from "@/modules";
 import { segmentLine, type Token } from "@/utils/yomifin/segment";
 
-export type SubtitleOutline = "none" | "normal" | "strong";
+export type SubtitleOutline = "none" | "thin" | "normal" | "strong";
 
 interface Props {
   /** Current subtitle text from mpv (empty string = nothing showing). */
@@ -47,15 +47,29 @@ interface Props {
   /** Rendering QoL (runtime settings; Settings → Reader + player dropdown). */
   fontSize?: number;
   outline?: SubtitleOutline;
+  /** CSS-style font weight (400/500/600/700). */
+  fontWeight?: number;
   /** Distance of the line stack from the bottom edge (pt). */
   bottomOffset?: number;
 }
 
-/** Outline thickness in pt, scaled with the font (32pt → 2pt; strong = +1). */
+/**
+ * Outline thickness in pt (FRACTIONAL — CoreGraphics strokes sub-pixel fine).
+ * Deliberately thin: dense CJK at a 2pt-outside stroke blobs its counters shut
+ * (device-observed as "blocky"). mpv's default border is ≈5.5% of the font size;
+ * "normal" sits just under that, "strong" just over, "thin" is a hairline.
+ */
 function outlineWidthFor(outline: SubtitleOutline, fontSize: number): number {
-  if (outline === "none") return 0;
-  const base = Math.max(1, Math.round(fontSize / 16));
-  return outline === "strong" ? base + 1 : base;
+  switch (outline) {
+    case "none":
+      return 0;
+    case "thin":
+      return fontSize * 0.025;
+    case "strong":
+      return fontSize * 0.075;
+    default:
+      return fontSize * 0.04;
+  }
 }
 
 function handleTap(
@@ -78,11 +92,24 @@ export default function TappableSubtitleOverlay({
   onWordTap,
   fontSize = 32,
   outline = "normal",
+  fontWeight = 500,
   bottomOffset = 64,
 }: Props) {
+  // Stale-binary probe, once per player screen (fires even while no cue shows).
+  useEffect(() => {
+    logOutlinedTextStatus();
+  }, []);
+
   const trimmed = text?.trim() ?? "";
   if (!trimmed) return null;
-  const common = { trimmed, onWordTap, fontSize, outline, bottomOffset };
+  const common = {
+    trimmed,
+    onWordTap,
+    fontSize,
+    outline,
+    fontWeight,
+    bottomOffset,
+  };
   return OutlinedTextView ? (
     <NativeOverlay {...common} />
   ) : (
@@ -95,6 +122,7 @@ interface OverlayProps {
   onWordTap?: (input: string, token: Token) => void;
   fontSize: number;
   outline: SubtitleOutline;
+  fontWeight: number;
   bottomOffset: number;
 }
 
@@ -105,6 +133,7 @@ function NativeOverlay({
   onWordTap,
   fontSize,
   outline,
+  fontWeight,
   bottomOffset,
 }: OverlayProps) {
   const Native = OutlinedTextView;
@@ -151,15 +180,21 @@ function NativeOverlay({
       <Native
         text={trimmed}
         fontSize={fontSize}
-        fontWeight={600}
+        fontWeight={fontWeight}
         lineHeight={lineHeight}
         strokeWidth={outlineWidth}
         textColor='#FFFFFF'
         strokeColor='#000000'
         onCharacterTap={(e) => handleCharacterTap(e.nativeEvent.index)}
-        onMeasured={(e) =>
-          setMeasured({ text: trimmed, height: e.nativeEvent.height })
-        }
+        onMeasured={(e) => {
+          const scale = e.nativeEvent.scale;
+          if (scale !== undefined && scale < 2) {
+            console.warn(
+              `[YOMIFIN OUTLINE] native view rasterizing at ${scale}x (non-retina) — this is the fuzzy-outline bug; contentsScale fix not active in this binary`,
+            );
+          }
+          setMeasured({ text: trimmed, height: e.nativeEvent.height });
+        }}
         style={{ width: "92%", height }}
       />
     </View>
@@ -169,7 +204,8 @@ function NativeOverlay({
 /* ─────────────── JS fallback (stale binary / non-iOS) ─────────────── */
 
 /** 8-direction offsets (diagonals normalized so the ring is uniform). */
-function outlineOffsets(w: number): [number, number][] {
+function outlineOffsets(width: number): [number, number][] {
+  const w = Math.max(1, Math.round(width));
   const d = Math.max(1, Math.round(w * 0.7));
   return [
     [-w, 0],
@@ -188,6 +224,7 @@ function FallbackOverlay({
   onWordTap,
   fontSize,
   outline,
+  fontWeight,
   bottomOffset,
 }: OverlayProps) {
   const outlineWidth = outlineWidthFor(outline, fontSize);
@@ -195,10 +232,10 @@ function FallbackOverlay({
   const metrics = useMemo<TextStyle>(
     () => ({
       fontSize,
-      fontWeight: "600",
+      fontWeight: String(fontWeight) as TextStyle["fontWeight"],
       lineHeight: Math.ceil(fontSize * 1.3),
     }),
-    [fontSize],
+    [fontSize, fontWeight],
   );
   const textStyle = useMemo<TextStyle>(
     () => ({ ...metrics, color: "white" }),

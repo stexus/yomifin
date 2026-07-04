@@ -52,7 +52,10 @@ prebuild:
 # --- Local build (this Mac) ----------------------------------------------
 
 # Build + deploy to the iPad from this Mac.
+# ensure-pods-linked: a NEW modules/<name>/ pod needs a prebuild/pod-install —
+# `expo run:ios` alone never links it (outlined-text stayed MISSING on device).
 local:
+    ./scripts/ensure-pods-linked.sh
     EXPO_TV=0 bunx expo run:ios --device {{DEVICE_UDID}}
 
 # JS/TS-only dev loop — start Metro (no native rebuild for JS changes).

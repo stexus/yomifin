@@ -132,6 +132,14 @@ Changes to `modules/mpv-player` (or any native dep / app.json plugin) need
 `bun run prebuild` + `expo run:ios` (`just local` / `just remote`). Pure JS/TS
 changes only need Metro (`just dev`).
 
+**NEW local module trap:** editing sources inside an EXISTING module pod
+recompiles fine with plain `expo run:ios`, but a NEW `modules/<name>/` pod only
+links when pod install re-runs — without it the app builds, runs, and
+`requireOptionalNativeModule()` returns null (outlined-text stayed MISSING on
+device through several rebuild rounds). `just local` / `remote-build.sh` now run
+`scripts/ensure-pods-linked.sh` first (auto-prebuilds when a `modules/*/ios/*.podspec`
+pod is absent from `ios/Podfile.lock`).
+
 ## Dev environment & build (hard-won facts)
 
 Toolchain is Nix (`flake.nix`): run everything via `nix develop` (or direnv). The

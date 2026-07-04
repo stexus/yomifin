@@ -8,8 +8,19 @@ public class OutlinedTextModule: Module {
     // mounting the view (a missing view renders Fabric's "Unimplemented component"
     // placeholder instead of throwing). A constant guarantees the module registers
     // a JS-visible record even though it is otherwise view-only.
+    //
+    // renderVersion = which DRAW implementation this binary carries (JS logs it —
+    // a stale binary is otherwise indistinguishable from a broken fix):
+    //   1 = NSAttributedString .strokeWidth two-pass (miter-spiked corners)
+    //   2 = v1 + retina contentsScale fix
+    //   3 = glyph-vector-path stroke, round joins + TextKit fill (uneven border:
+    //       subpixel registration mismatch between path and TextKit rasterizers)
+    //   4 = stroke AND fill from the same glyph path (libass-style, exact
+    //       registration); emoji TextKit-drawn individually
+    // BUMP THIS on every change to OutlinedTextExpoView's rendering.
     Constants([
-      "available": true
+      "available": true,
+      "renderVersion": 4
     ])
 
     View(OutlinedTextExpoView.self) {

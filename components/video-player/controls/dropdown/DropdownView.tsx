@@ -34,7 +34,13 @@ const SUBTITLE_SCALE_PRESETS = [
 // YOMIFIN: tappable-overlay styling steps (same values as Settings → Reader — these
 // entries edit the SAME global settings, just reachable mid-playback).
 const OVERLAY_FONT_STEPS = [24, 28, 32, 38, 44] as const;
-const OVERLAY_OUTLINE_STEPS = ["none", "normal", "strong"] as const;
+const OVERLAY_WEIGHT_STEPS = [
+  { label: "Regular", value: 400 },
+  { label: "Medium", value: 500 },
+  { label: "Semibold", value: 600 },
+  { label: "Bold", value: 700 },
+] as const;
+const OVERLAY_OUTLINE_STEPS = ["none", "thin", "normal", "strong"] as const;
 const OVERLAY_OFFSET_STEPS = [24, 48, 64, 96, 128] as const;
 
 interface DropdownViewProps {
@@ -161,6 +167,16 @@ const DropdownView = ({
         })),
       });
       groups.push({
+        title: "Tappable Subs · Weight",
+        options: OVERLAY_WEIGHT_STEPS.map((w) => ({
+          type: "radio" as const,
+          label: w.label,
+          value: String(w.value),
+          selected: (settings.yomifinSubtitleWeight ?? 500) === w.value,
+          onPress: () => updateSettings({ yomifinSubtitleWeight: w.value }),
+        })),
+      });
+      groups.push({
         title: "Tappable Subs · Outline",
         options: OVERLAY_OUTLINE_STEPS.map((v) => ({
           type: "radio" as const,
@@ -250,6 +266,7 @@ const DropdownView = ({
     audioIndex,
     settings.mpvSubtitleScale,
     settings.yomifinSubtitleFontSize,
+    settings.yomifinSubtitleWeight,
     settings.yomifinSubtitleOutline,
     settings.yomifinSubtitleBottomOffset,
     settings.yomifinJimakuApiKey,

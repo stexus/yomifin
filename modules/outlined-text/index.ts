@@ -5,4 +5,5 @@ export type { OutlinedTextViewProps } from "./src/OutlinedText.types";
 export {
   default as OutlinedTextView,
   isOutlinedTextAvailable,
+  logOutlinedTextStatus,
 } from "./src/OutlinedTextView";

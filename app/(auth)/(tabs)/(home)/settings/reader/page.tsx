@@ -144,6 +144,27 @@ export default function ReaderSettingsPage() {
           />
         </View>
 
+        {/* Subtitle weight */}
+        <View style={{ gap: 8 }}>
+          <Text style={styles.title}>Subtitle weight</Text>
+          <Text style={styles.subtitle}>
+            Thickness of the subtitle glyphs themselves. Media players like mpv
+            default to Regular; heavier weights plus an outline read thick.
+          </Text>
+          <Segmented
+            options={[
+              { label: "Regular", value: "400" },
+              { label: "Medium", value: "500" },
+              { label: "Semibold", value: "600" },
+              { label: "Bold", value: "700" },
+            ]}
+            value={String(settings.yomifinSubtitleWeight ?? 500)}
+            onChange={(v) =>
+              updateSettings({ yomifinSubtitleWeight: Number(v) })
+            }
+          />
+        </View>
+
         {/* Subtitle outline */}
         <View style={{ gap: 8 }}>
           <Text style={styles.title}>Subtitle outline</Text>
@@ -154,13 +175,18 @@ export default function ReaderSettingsPage() {
           <Segmented
             options={[
               { label: "None", value: "none" },
+              { label: "Thin", value: "thin" },
               { label: "Normal", value: "normal" },
               { label: "Strong", value: "strong" },
             ]}
             value={settings.yomifinSubtitleOutline ?? "normal"}
             onChange={(v) =>
               updateSettings({
-                yomifinSubtitleOutline: v as "none" | "normal" | "strong",
+                yomifinSubtitleOutline: v as
+                  | "none"
+                  | "thin"
+                  | "normal"
+                  | "strong",
               })
             }
           />

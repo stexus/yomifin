@@ -368,7 +368,9 @@ export type Settings = {
   /** Tappable subtitle overlay: text size (pt). */
   yomifinSubtitleFontSize: number;
   /** Tappable subtitle overlay: text outline/shadow strength. */
-  yomifinSubtitleOutline: "none" | "normal" | "strong";
+  yomifinSubtitleOutline: "none" | "thin" | "normal" | "strong";
+  /** Tappable subtitle overlay: CSS-style font weight (400/500/600/700). */
+  yomifinSubtitleWeight: number;
   /** Tappable subtitle overlay: distance from the bottom edge (pt). */
   yomifinSubtitleBottomOffset: number;
   /** jimaku.cc API key for online subtitle search (empty = feature hidden). */
@@ -499,6 +501,7 @@ export const defaultValues: Settings = {
   yomifinDragSeekEnabled: true,
   yomifinSubtitleFontSize: 32,
   yomifinSubtitleOutline: "normal",
+  yomifinSubtitleWeight: 500,
   yomifinSubtitleBottomOffset: 64,
   yomifinJimakuApiKey: "",
   // Stremio (personal fork: pre-wired addons; edit in the Stremio tab)

@@ -250,6 +250,7 @@ export default function YomifinLookupLayer({
         onWordTap={status === "ready" ? handleWordTap : undefined}
         fontSize={settings.yomifinSubtitleFontSize ?? 32}
         outline={settings.yomifinSubtitleOutline ?? "normal"}
+        fontWeight={settings.yomifinSubtitleWeight ?? 500}
         bottomOffset={settings.yomifinSubtitleBottomOffset ?? 64}
       />
       {status === "loading" ? (

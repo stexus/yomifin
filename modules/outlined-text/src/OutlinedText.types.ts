@@ -17,7 +17,8 @@ export interface OutlinedTextViewProps {
   strokeColor?: string;
   /** Tap on a glyph → character index into `text` (taps off-glyph are dropped). */
   onCharacterTap?: (e: { nativeEvent: { index: number } }) => void;
-  /** Reports the laid-out text height (pt) for the given width; fires on change. */
-  onMeasured?: (e: { nativeEvent: { height: number } }) => void;
+  /** Reports the laid-out text height (pt) for the given width; fires on change.
+   *  `scale` = the layer's rasterization scale (diagnostic: <screen scale = fuzzy). */
+  onMeasured?: (e: { nativeEvent: { height: number; scale?: number } }) => void;
   style?: StyleProp<ViewStyle>;
 }

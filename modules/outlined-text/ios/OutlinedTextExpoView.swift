@@ -1,62 +1,47 @@
+import CoreText
 import ExpoModulesCore
 import UIKit
 
-/// One TextKit stack (storage → layout manager → container). Two identical stacks
-/// are used so the stroke pass and the fill pass never mutate a shared NSTextStorage
-/// inside draw() (attribute edits there trigger display invalidation → redraw loop).
-private final class TextStack {
-  let storage = NSTextStorage()
-  let layoutManager = NSLayoutManager()
-  let container = NSTextContainer(size: .zero)
-
-  init() {
-    container.lineFragmentPadding = 0
-    layoutManager.addTextContainer(container)
-    storage.addLayoutManager(layoutManager)
-  }
-
-  func setText(_ text: String, attributes: [NSAttributedString.Key: Any]) {
-    storage.setAttributedString(NSAttributedString(string: text, attributes: attributes))
-  }
-
-  func layout(width: CGFloat) -> CGRect {
-    container.size = CGSize(width: width, height: .greatestFiniteMagnitude)
-    layoutManager.ensureLayout(for: container)
-    return layoutManager.usedRect(for: container)
-  }
-
-  func draw(at origin: CGPoint) {
-    let range = layoutManager.glyphRange(for: container)
-    layoutManager.drawGlyphs(forGlyphRange: range, at: origin)
-  }
-}
-
 /// YOMIFIN: crisp outlined subtitle text — the thing React Native cannot draw.
 ///
-/// RN's `textShadow*` is a blur, and the stacked-copies JS trick anti-aliases into
-/// mush. iOS' real mechanism is an attributed-string STROKE: this view renders the
-/// text twice with TextKit — pass 1 stroke-only (`.strokeWidth` positive, doubled so
-/// the requested width lands fully OUTSIDE the glyph edge, round line joins), pass 2
-/// plain fill on top. Same technique as native players (Infuse et al.).
+/// Rendering evolution (each step device-verified against the previous):
+///  1. RN textShadow → blur, not an outline.
+///  2. JS stacked copies → fuzzy (blur AA) and geometry-fragile.
+///  3. NSAttributedString `.strokeWidth` two-pass → real stroke, but CoreText's
+///     attribute stroking uses MITER joins and ignores the context's line-join
+///     setting → blocky/spiky corners on dense CJK.
+///  4. Glyph-vector-path stroke (round joins) + TextKit fill on top → corners
+///     fixed, but the outline was UNEVEN: the visible border is "stroke minus
+///     fill", and TextKit's rasterizer positions glyphs with subpixel differences
+///     vs the raw path (origin rounding/smoothing), so the border came out fat on
+///     one side, thin on the other.
+///  5. CURRENT: ONE geometry source, like libass — stroke AND fill are both
+///     rendered from the same glyph vector path (nonzero winding), so
+///     registration is exact by construction. Only glyphs with NO vector outline
+///     (color/bitmap glyphs, i.e. emoji) are TextKit-drawn, individually, on top
+///     — they get no outline, same as libass.
 ///
-/// It also owns tap handling: `layoutManager.glyphIndex(for:)` maps a touch to a
-/// character index (emitted via `onCharacterTap`), so the JS overlay no longer needs
-/// per-token Pressables — geometry and hit-testing come from the SAME layout.
-/// Sizing: JS provides the width; the view reports the wrapped text height through
-/// `onMeasured` (one event per text/width change).
+/// One TextKit stack drives everything — layout, measurement (`onMeasured`),
+/// per-character tap hit-testing (`onCharacterTap`), the outline path AND the
+/// fill pass — so geometry cannot disagree between them. Off-glyph touches pass
+/// through (`point(inside:)`) so controls-toggle taps beside the text still work.
 final class OutlinedTextExpoView: ExpoView {
-  private let strokeStack = TextStack()
-  private let fillStack = TextStack()
+  private let textStorage = NSTextStorage()
+  private let layoutManager = NSLayoutManager()
+  private let textContainer = NSTextContainer(size: .zero)
 
   // Props (defaults match the JS overlay)
   private var text: String = ""
   private var fontSize: CGFloat = 32
-  private var fontWeightValue: Int = 600
+  private var fontWeightValue: Int = 500
   private var lineHeightPt: CGFloat = 0 // 0 = font default
-  private var strokeWidth: CGFloat = 2 // pt, fully outside the glyph
+  private var strokeWidth: CGFloat = 1.5 // pt, fully outside the glyph
   private var fillColor: UIColor = .white
   private var strokeColor: UIColor = .black
 
+  private var outlinePath: CGPath?
+  /// Glyph indexes with no vector outline (emoji/bitmap glyphs) — TextKit-drawn.
+  private var colorGlyphIndexes: [Int] = []
   private var lastEmittedHeight: CGFloat = -1
   private var lastLayoutWidth: CGFloat = -1
 
@@ -74,6 +59,11 @@ final class OutlinedTextExpoView: ExpoView {
     // non-retina resolution and being upscaled). Draw at the screen's scale.
     contentScaleFactor = UIScreen.main.scale
     layer.contentsScale = UIScreen.main.scale
+
+    textContainer.lineFragmentPadding = 0
+    layoutManager.addTextContainer(textContainer)
+    textStorage.addLayoutManager(layoutManager)
+
     let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
     addGestureRecognizer(tap)
   }
@@ -119,22 +109,13 @@ final class OutlinedTextExpoView: ExpoView {
       para.maximumLineHeight = lineHeightPt
     }
     let font = UIFont.systemFont(ofSize: fontSize, weight: uiFontWeight())
-
-    var fillAttrs: [NSAttributedString.Key: Any] = [
-      .font: font,
-      .paragraphStyle: para,
-      .foregroundColor: fillColor,
-    ]
-    fillStack.setText(text, attributes: fillAttrs)
-
-    // Stroke pass: positive .strokeWidth = stroke WITHOUT fill. The value is a
-    // PERCENTAGE of the font size, and the stroke straddles the glyph edge — so a
-    // line width of 2×strokeWidth puts `strokeWidth` pt fully outside the glyph.
-    fillAttrs[.foregroundColor] = strokeColor
-    fillAttrs[.strokeColor] = strokeColor
-    fillAttrs[.strokeWidth] = fontSize > 0 ? Double((strokeWidth * 2 / fontSize) * 100) : 0
-    strokeStack.setText(text, attributes: fillAttrs)
-
+    textStorage.setAttributedString(
+      NSAttributedString(
+        string: text,
+        attributes: [.font: font, .paragraphStyle: para, .foregroundColor: fillColor]
+      )
+    )
+    outlinePath = nil
     lastLayoutWidth = -1 // force re-measure
     setNeedsLayout()
     setNeedsDisplay()
@@ -142,39 +123,114 @@ final class OutlinedTextExpoView: ExpoView {
 
   // MARK: - Layout / measurement
 
+  private func ensureLaidOut(width: CGFloat) {
+    if abs(width - lastLayoutWidth) < 0.5 { return }
+    lastLayoutWidth = width
+    outlinePath = nil
+    textContainer.size = CGSize(width: width, height: .greatestFiniteMagnitude)
+    layoutManager.ensureLayout(for: textContainer)
+  }
+
   override func layoutSubviews() {
     super.layoutSubviews()
     let width = bounds.width
     guard width > 0 else { return }
-    if abs(width - lastLayoutWidth) < 0.5 { return }
-    lastLayoutWidth = width
-    _ = strokeStack.layout(width: width)
-    let used = fillStack.layout(width: width)
+    ensureLaidOut(width: width)
+    let used = layoutManager.usedRect(for: textContainer)
     let height = ceil(used.height) + strokeWidth * 2
     if abs(height - lastEmittedHeight) > 0.5 {
       lastEmittedHeight = height
-      onMeasured(["height": Double(height)])
+      // `scale` is a diagnostic: JS warns if the layer is rasterizing below the
+      // screen scale (the fuzzy/blocky 1× bug — provable from Metro, not vibes).
+      onMeasured(["height": Double(height), "scale": Double(layer.contentsScale)])
     }
     setNeedsDisplay()
   }
 
-  override func draw(_ rect: CGRect) {
-    guard !text.isEmpty, bounds.width > 0 else { return }
-    if lastLayoutWidth < 0 {
-      _ = strokeStack.layout(width: bounds.width)
-      _ = fillStack.layout(width: bounds.width)
-      lastLayoutWidth = bounds.width
+  // MARK: - Outline path (glyph vectors from the SAME TextKit layout)
+
+  private func buildOutlinePath() -> CGPath {
+    let path = CGMutablePath()
+    colorGlyphIndexes = []
+    let glyphRange = layoutManager.glyphRange(for: textContainer)
+    layoutManager.enumerateLineFragments(forGlyphRange: glyphRange) {
+      [weak self] fragmentRect, _, _, lineGlyphRange, _ in
+      guard let self else { return }
+      let lm = self.layoutManager
+      for glyphIndex in lineGlyphRange.location..<(lineGlyphRange.location + lineGlyphRange.length) {
+        guard lm.isValidGlyphIndex(glyphIndex) else { continue }
+        let glyph = lm.cgGlyph(at: glyphIndex)
+        if glyph == 0 { continue } // control/blank glyphs have no outline
+        let charIndex = lm.characterIndexForGlyph(at: glyphIndex)
+        guard charIndex < self.textStorage.length,
+          // Post-layout, NSTextStorage's attribute fixing has substituted the
+          // EFFECTIVE font per run (e.g. Hiragino for JP under .systemFont), so
+          // this font matches the glyph ids TextKit produced.
+          let font = self.textStorage.attribute(.font, at: charIndex, effectiveRange: nil)
+            as? UIFont
+        else { continue }
+        // Baseline origin in container coords (top-left origin, y-down); glyph
+        // paths are in font space (y-up) → translate to baseline, flip y.
+        let location = lm.location(forGlyphAt: glyphIndex)
+        var transform = CGAffineTransform(
+          translationX: fragmentRect.origin.x + location.x,
+          y: fragmentRect.origin.y + location.y
+        ).scaledBy(x: 1, y: -1)
+        // CTFont is toll-free bridged with UIFont (documented) — same object.
+        let ctFont = unsafeBitCast(font, to: CTFont.self)
+        if let glyphPath = CTFontCreatePathForGlyph(ctFont, glyph, &transform) {
+          path.addPath(glyphPath)
+        } else {
+          // No vector outline. Whitespace/control glyphs are simply blank; a
+          // color/bitmap glyph (emoji) must be drawn by TextKit in draw().
+          let ch = (self.textStorage.string as NSString).character(at: charIndex)
+          let isWhitespace =
+            Unicode.Scalar(ch).map { CharacterSet.whitespacesAndNewlines.contains($0) }
+            ?? false
+          if !isWhitespace {
+            self.colorGlyphIndexes.append(glyphIndex)
+          }
+        }
+      }
     }
+    return path
+  }
+
+  override func draw(_ rect: CGRect) {
+    guard !text.isEmpty, bounds.width > 0, let ctx = UIGraphicsGetCurrentContext()
+    else { return }
+    ensureLaidOut(width: bounds.width)
     let origin = CGPoint(x: 0, y: strokeWidth)
-    if strokeWidth > 0, let ctx = UIGraphicsGetCurrentContext() {
+    if outlinePath == nil { outlinePath = buildOutlinePath() }
+
+    if let path = outlinePath, !path.isEmpty {
       ctx.saveGState()
-      // Round joins/caps keep CJK corners from spiking (miter is the default).
-      ctx.setLineJoin(.round)
-      ctx.setLineCap(.round)
-      strokeStack.draw(at: origin)
+      ctx.translateBy(x: origin.x, y: origin.y)
+      if strokeWidth > 0 {
+        ctx.addPath(path)
+        // ROUND joins are the whole point: CoreText's own `.strokeWidth`
+        // attribute stroking miters corners (blocky on CJK, device-observed).
+        ctx.setLineJoin(.round)
+        ctx.setLineCap(.round)
+        ctx.setLineWidth(strokeWidth * 2) // half falls inside, covered by the fill
+        ctx.setStrokeColor(strokeColor.cgColor)
+        ctx.strokePath()
+      }
+      // Fill from the SAME path as the stroke (nonzero winding = font contour
+      // convention). Filling via TextKit instead put a subpixel-shifted fill over
+      // the stroke — device-observed as an UNEVEN border.
+      ctx.addPath(path)
+      ctx.setFillColor(fillColor.cgColor)
+      ctx.fillPath(using: .winding)
       ctx.restoreGState()
     }
-    fillStack.draw(at: origin)
+
+    // Color/bitmap glyphs (no vector outline — emoji): TextKit draws them, un-
+    // outlined, exactly where the layout put them.
+    for glyphIndex in colorGlyphIndexes {
+      layoutManager.drawGlyphs(
+        forGlyphRange: NSRange(location: glyphIndex, length: 1), at: origin)
+    }
   }
 
   // MARK: - Tap → character index
@@ -183,18 +239,17 @@ final class OutlinedTextExpoView: ExpoView {
   /// and for hit-testing: `glyphIndex(for:)` clamps to the nearest glyph, so without
   /// the bounding-rect check every point in the view would "hit".
   private func glyphHit(at point: CGPoint) -> Int? {
-    guard fillStack.storage.length > 0 else { return nil }
+    guard textStorage.length > 0 else { return nil }
     var p = point
     p.y -= strokeWidth
-    let lm = fillStack.layoutManager
-    let glyphIndex = lm.glyphIndex(for: p, in: fillStack.container)
-    let glyphRect = lm.boundingRect(
+    let glyphIndex = layoutManager.glyphIndex(for: p, in: textContainer)
+    let glyphRect = layoutManager.boundingRect(
       forGlyphRange: NSRange(location: glyphIndex, length: 1),
-      in: fillStack.container
+      in: textContainer
     )
     guard glyphRect.insetBy(dx: -10, dy: -8).contains(p) else { return nil }
-    let charIndex = lm.characterIndexForGlyph(at: glyphIndex)
-    return charIndex < fillStack.storage.length ? charIndex : nil
+    let charIndex = layoutManager.characterIndexForGlyph(at: glyphIndex)
+    return charIndex < textStorage.length ? charIndex : nil
   }
 
   /// The view spans the full subtitle strip; only GLYPHS may swallow touches.

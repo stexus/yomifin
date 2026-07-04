@@ -48,9 +48,12 @@ echo "› Building + deploying to device $DEVICE_UDID via Nix shell…"
 #
 # Run directly if already inside the Nix dev shell (IN_NIX_SHELL is set by
 # `nix develop`), otherwise enter it first.
+# ensure-pods-linked: a NEW modules/<name>/ pod needs a prebuild/pod-install —
+# `expo run:ios` alone never links it (outlined-text stayed MISSING on device).
 if [ -n "${IN_NIX_SHELL:-}" ]; then
+  ./scripts/ensure-pods-linked.sh
   exec env EXPO_TV=0 bunx expo run:ios --device "$DEVICE_UDID"
 else
   exec nix develop --command bash -c \
-    "EXPO_TV=0 bunx expo run:ios --device $DEVICE_UDID"
+    "./scripts/ensure-pods-linked.sh && EXPO_TV=0 bunx expo run:ios --device $DEVICE_UDID"
 fi
