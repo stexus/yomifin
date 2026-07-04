@@ -19,6 +19,8 @@ import {
 } from "./profiles";
 import {
   DEFAULT_WORD_AUDIO_SOURCES,
+  defaultWordAudioSources,
+  mergeWordAudioSources,
   type WordAudioSourceConfig,
 } from "./wordAudioSources";
 
@@ -88,17 +90,21 @@ export function getAnkiConfig(profileId?: ProfileId): AnkiConfig {
     const id = profileId ?? activeProfileId(settings);
     const stored = resolveProfile(settings, id)
       .ankiConfig as Partial<AnkiConfig> | null;
-    if (!stored) return DEFAULT_ANKI_CONFIG;
+    // Word-audio defaults are per-language (ZH leads with Wiktionary recordings);
+    // stored lists get new source types appended so old configs pick them up.
+    const audioDefaults = defaultWordAudioSources(id);
+    if (!stored)
+      return { ...DEFAULT_ANKI_CONFIG, wordAudioSources: audioDefaults };
     return {
       ...DEFAULT_ANKI_CONFIG,
       ...stored,
       fieldTemplates:
         stored.fieldTemplates ?? DEFAULT_ANKI_CONFIG.fieldTemplates,
       tags: stored.tags ?? DEFAULT_ANKI_CONFIG.tags,
-      wordAudioSources:
-        stored.wordAudioSources && stored.wordAudioSources.length > 0
-          ? stored.wordAudioSources
-          : DEFAULT_ANKI_CONFIG.wordAudioSources,
+      wordAudioSources: mergeWordAudioSources(
+        stored.wordAudioSources,
+        audioDefaults,
+      ),
     };
   } catch (e) {
     console.warn("[YOMIFIN ANKI] config read failed, using defaults:", e);

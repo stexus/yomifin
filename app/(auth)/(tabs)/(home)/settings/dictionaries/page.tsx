@@ -22,6 +22,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
+import * as Sharing from "expo-sharing";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -50,6 +51,7 @@ import {
   importDictionaryZip,
   importPrebuiltDb,
   listInstalledDictionaries,
+  prepareDbForExport,
   removeDictionary,
 } from "@/utils/yomifin/dictionaryStore";
 import { resetInstalledDictionaryCache } from "@/utils/yomifin/loadInstalledDictionary";
@@ -278,6 +280,25 @@ export default function DictionariesPage() {
       setBusy(null);
     }
   }, [refresh]);
+
+  // Export the combined .db via the share sheet (AirDrop / Files) — the fast-restore
+  // counterpart of "Import .db" after a reinstall, and an offline backup.
+  const exportDb = useCallback(async () => {
+    try {
+      setBusy("Preparing export…");
+      const file = prepareDbForExport(); // WAL checkpoint so the single file is complete
+      setBusy(null);
+      await Sharing.shareAsync(file.uri, {
+        mimeType: "application/x-sqlite3",
+        dialogTitle: "Export dictionary database",
+      });
+    } catch (e) {
+      console.error("[YOMIFIN] db export failed:", e);
+      Alert.alert("Export failed", String(e instanceof Error ? e.message : e));
+    } finally {
+      setBusy(null);
+    }
+  }, []);
 
   const confirmRemove = useCallback(
     (title: string) => {
@@ -574,6 +595,11 @@ export default function DictionariesPage() {
           <View style={{ flex: 1 }}>
             <Button label='Import .db' onPress={importDb} disabled={!!busy} />
           </View>
+          {installed.length > 0 ? (
+            <View style={{ flex: 1 }}>
+              <Button label='Export .db' onPress={exportDb} disabled={!!busy} />
+            </View>
+          ) : null}
           {rows.length > 0 ? (
             <View style={{ flex: 1 }}>
               <Button
@@ -588,7 +614,8 @@ export default function DictionariesPage() {
         <Text style={{ color: "#666", fontSize: 11, lineHeight: 16 }}>
           Pick one or more Yomitan .zip files (same files you feed Yomitan). A
           prebuilt .db imports in seconds and replaces the whole set — best for
-          restoring after a reinstall.
+          restoring after a reinstall. Export shares the combined database
+          (AirDrop / Files) for backup or another device.
         </Text>
       </View>
     </View>

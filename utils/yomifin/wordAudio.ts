@@ -11,16 +11,26 @@
 import * as Crypto from "expo-crypto";
 import { wordAudioKey } from "./mediaKey";
 import {
+  AZURE_TTS_OUTPUT_FORMAT,
   audioExtensionForMime,
+  azureTtsSsml,
+  azureTtsUrl,
   bytesToBase64,
+  commonsImageInfoUrl,
   customAudioUrl,
   extractJishoAudioUrl,
   JPOD101_INVALID_AUDIO_SHA256,
   jishoSearchUrl,
   jpod101Url,
+  parseCommonsImageInfo,
   parseCustomJsonAudio,
   type WordAudioSourceConfig,
+  wiktionaryAudioUrls,
+  wiktionaryFileNames,
 } from "./wordAudioSources";
+
+/** Descriptive UA — Wikimedia asks for one and throttles anonymous defaults. */
+const USER_AGENT = "yomifin/1.0 (personal language-learning app)";
 
 export interface WordAudioResult {
   /** Anki media filename — content-derived (term+reading), so the same word always
@@ -33,11 +43,14 @@ const FETCH_TIMEOUT_MS = 8000;
 /** Bodies smaller than this are error pages / empty clips, not audio. */
 const MIN_AUDIO_BYTES = 256;
 
-async function fetchWithTimeout(url: string): Promise<Response> {
+async function fetchWithTimeout(
+  url: string,
+  init?: RequestInit,
+): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    return await fetch(url, { signal: controller.signal });
+    return await fetch(url, { ...(init ?? {}), signal: controller.signal });
   } finally {
     clearTimeout(timer);
   }
@@ -55,7 +68,9 @@ async function fetchAudioBytes(
   url: string,
   checkJpodSentinel: boolean,
 ): Promise<{ bytes: Uint8Array; mime: string | null } | null> {
-  const res = await fetchWithTimeout(url);
+  const res = await fetchWithTimeout(url, {
+    headers: { "User-Agent": USER_AGENT },
+  });
   if (!res.ok) return null;
   const mime = res.headers.get("content-type");
   const buf = await res.arrayBuffer();
@@ -82,6 +97,24 @@ async function candidateUrls(
   switch (source.type) {
     case "jpod101":
       return [jpod101Url(term, reading)];
+    case "wiktionary": {
+      // zh candidates are pinyin-derived from the READING (Commons naming).
+      const lang = source.lang ?? "zh";
+      const names = wiktionaryFileNames(lang, term, reading);
+      if (names.length === 0) return [];
+      // Preferred: ONE imageinfo API query for all candidates — a miss costs a
+      // single 200 instead of a 404 per candidate (Wikimedia rate-limits 404
+      // storms; observed live as 429s). API failure → blind FilePath probing.
+      try {
+        const res = await fetchWithTimeout(commonsImageInfoUrl(names), {
+          headers: { "User-Agent": USER_AGENT },
+        });
+        if (res.ok) return parseCommonsImageInfo(await res.text(), names);
+      } catch {
+        // fall through to Special:FilePath probing
+      }
+      return wiktionaryAudioUrls(lang, term, reading);
+    }
     case "jisho": {
       const page = await fetchWithTimeout(jishoSearchUrl(term));
       if (!page.ok) return [];
@@ -107,6 +140,37 @@ async function candidateUrls(
 }
 
 /**
+ * Azure Speech synthesis (POST, audio bytes in the response body) — doesn't fit the
+ * GET-candidate-URLs shape above. Returns null when unconfigured or on any failure.
+ */
+async function fetchAzureTtsAudio(
+  source: WordAudioSourceConfig,
+  term: string,
+): Promise<{ bytes: Uint8Array; mime: string | null } | null> {
+  const region = source.region?.trim();
+  const key = source.key?.trim();
+  const voice = source.voice?.trim();
+  if (!region || !key || !voice) return null;
+  const res = await fetchWithTimeout(azureTtsUrl(region), {
+    method: "POST",
+    headers: {
+      "Ocp-Apim-Subscription-Key": key,
+      "Content-Type": "application/ssml+xml",
+      "X-Microsoft-OutputFormat": AZURE_TTS_OUTPUT_FORMAT,
+      "User-Agent": "yomifin",
+    },
+    body: azureTtsSsml(voice, term),
+  });
+  if (!res.ok) {
+    console.warn(`[YOMIFIN AUDIO] azure-tts HTTP ${res.status}`);
+    return null;
+  }
+  const buf = await res.arrayBuffer();
+  if (buf.byteLength < MIN_AUDIO_BYTES) return null;
+  return { bytes: new Uint8Array(buf), mime: "audio/mpeg" };
+}
+
+/**
  * Try the enabled sources in order; return the first valid clip, or null.
  * The filename is content-derived (term+reading hash) so repeated fetches of the
  * same word reference the SAME Anki media file.
@@ -120,6 +184,22 @@ export async function fetchWordAudio(
   for (const source of sources) {
     if (!source.enabled) continue;
     try {
+      // Azure TTS is a POST that answers with audio directly — own branch.
+      if (source.type === "azure-tts") {
+        const audio = await fetchAzureTtsAudio(source, term);
+        if (audio) {
+          const result: WordAudioResult = {
+            filename: `yomifin_word_${wordAudioKey(term, reading)}.${audioExtensionForMime(audio.mime)}`,
+            base64: bytesToBase64(audio.bytes),
+          };
+          console.log(
+            `[YOMIFIN AUDIO] word audio via azure-tts: ${audio.bytes.length} bytes -> ${result.filename}`,
+          );
+          return result;
+        }
+        console.log(`[YOMIFIN AUDIO] azure-tts: no audio for "${term}"`);
+        continue;
+      }
       const urls = await candidateUrls(source, term, reading);
       for (const url of urls) {
         const audio = await fetchAudioBytes(url, source.type === "jpod101");
@@ -158,7 +238,18 @@ export function fetchWordAudioCached(
   reading: string,
 ): Promise<WordAudioResult | null> {
   const key = `${wordAudioKey(term, reading)}|${JSON.stringify(
-    sources.map((s) => (s.enabled ? `${s.type}:${s.url ?? ""}` : "")),
+    sources.map((s) =>
+      s.enabled
+        ? [
+            s.type,
+            s.url ?? "",
+            s.lang ?? "",
+            s.region ?? "",
+            s.voice ?? "",
+            s.key ? "k" : "",
+          ].join(",")
+        : "",
+    ),
   )}`;
   const hit = wordAudioCache.get(key);
   if (hit) return hit;

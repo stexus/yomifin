@@ -11,6 +11,9 @@
  * Persists to Settings.yomifinProfiles[profile].ankiConfig; getAnkiConfig(profile)
  * reads it (JA falls back to the legacy yomifinAnkiConfig key) and defaults per-key.
  */
+import * as DocumentPicker from "expo-document-picker";
+import { File, Paths } from "expo-file-system";
+import * as Sharing from "expo-sharing";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -36,6 +39,11 @@ import {
   getAnkiConfig,
   seedFieldTemplates,
 } from "@/utils/yomifin/ankiConfig";
+import {
+  applyAnkiSettingsImport,
+  parseAnkiSettingsExport,
+  serializeAnkiSettings,
+} from "@/utils/yomifin/ankiSettingsTransfer";
 import { listInstalledDictionaries } from "@/utils/yomifin/dictionaryStore";
 import {
   activeProfileId,
@@ -44,7 +52,11 @@ import {
   titlesForProfile,
   withProfileData,
 } from "@/utils/yomifin/profiles";
-import type { WordAudioSourceConfig } from "@/utils/yomifin/wordAudioSources";
+import {
+  defaultWordAudioSources,
+  mergeWordAudioSources,
+  type WordAudioSourceConfig,
+} from "@/utils/yomifin/wordAudioSources";
 
 const MARKER_HELP: Array<[string, string]> = [
   ["{expression}", "headword of the active pane"],
@@ -65,7 +77,10 @@ const MARKER_HELP: Array<[string, string]> = [
   ["{dictionary}", "highest-priority dictionary name"],
   ["{tags}", "dictionary tags"],
   ["{document-title}", "the video's title"],
-  ["{audio}", "word audio (jpod101 / jisho / custom URL)"],
+  [
+    "{audio}",
+    "word audio (jpod101 / jisho / Wiktionary recordings / Azure TTS / custom URL)",
+  ],
   ["{sentence-audio}", "audio clip spanning the selected line(s)"],
   ["{picture}", "captured video frame"],
 ];
@@ -200,13 +215,88 @@ export default function AnkiSettingsPage() {
     type: WordAudioSourceConfig["type"],
     patch: Partial<WordAudioSourceConfig>,
   ) => {
-    const sources = config.wordAudioSources.map((s) =>
-      s.type === type ? { ...s, ...patch } : s,
-    );
+    // getAnkiConfig() already merges missing source types in, but be defensive:
+    // append (from the profile's defaults) if the stored list predates this type.
+    const exists = config.wordAudioSources.some((s) => s.type === type);
+    const sources = exists
+      ? config.wordAudioSources.map((s) =>
+          s.type === type ? { ...s, ...patch } : s,
+        )
+      : [
+          ...config.wordAudioSources,
+          {
+            ...(defaultWordAudioSources(profileId).find(
+              (d) => d.type === type,
+            ) ?? { type, enabled: false }),
+            ...patch,
+          },
+        ];
     persist({ ...config, wordAudioSources: sources });
   };
   const sourceOf = (type: WordAudioSourceConfig["type"]) =>
     config.wordAudioSources.find((s) => s.type === type);
+
+  // --- Backup: export / import ALL profiles' Anki settings as JSON ------------------
+  const exportSettings = useCallback(async () => {
+    try {
+      const json = serializeAnkiSettings(settings);
+      const f = new File(Paths.cache, "yomifin-anki-settings.json");
+      if (f.exists) f.delete();
+      f.write(json);
+      await Sharing.shareAsync(f.uri, {
+        mimeType: "application/json",
+        dialogTitle: "Export Anki settings",
+      });
+    } catch (e) {
+      toast.error((e as Error)?.message || "Export failed");
+    }
+  }, [settings]);
+
+  const importSettings = useCallback(async () => {
+    try {
+      const res = await DocumentPicker.getDocumentAsync({
+        type: "*/*",
+        copyToCacheDirectory: true,
+      });
+      if (res.canceled || !res.assets?.[0]) return;
+      const text = await new File(res.assets[0].uri).text();
+      const imported = parseAnkiSettingsExport(text);
+      updateSettings({
+        yomifinProfiles: applyAnkiSettingsImport(
+          settings.yomifinProfiles,
+          imported,
+        ),
+      });
+      // Refresh the visible working copy from the imported data (getAnkiConfig
+      // semantics: default per-key, merge word-audio sources).
+      const mine = imported[profileId];
+      if (mine) {
+        const next: AnkiConfig = {
+          ...DEFAULT_ANKI_CONFIG,
+          ...mine,
+          fieldTemplates:
+            mine.fieldTemplates ?? DEFAULT_ANKI_CONFIG.fieldTemplates,
+          tags: mine.tags ?? DEFAULT_ANKI_CONFIG.tags,
+          wordAudioSources: mergeWordAudioSources(
+            mine.wordAudioSources,
+            defaultWordAudioSources(profileId),
+          ),
+        };
+        setConfig(next);
+        setTagsText(next.tags.join(", "));
+        setConnected(false);
+        setDecks([]);
+        setModels([]);
+      }
+      toast.success(
+        `Imported Anki settings (${Object.keys(imported)
+          .map((id) => id.toUpperCase())
+          .join(", ")})`,
+      );
+    } catch (e) {
+      toast.error((e as Error)?.message || "Import failed");
+    }
+  }, [settings.yomifinProfiles, profileId, updateSettings]);
 
   return (
     <ScrollView
@@ -446,7 +536,8 @@ export default function AnkiSettingsPage() {
         <View style={{ gap: 8 }}>
           <Text style={styles.title}>Word audio ({"{audio}"})</Text>
           <Text style={styles.subtitle}>
-            Sources are tried in order until one has audio for the word.
+            Sources are tried in order until one has audio for the word. Azure
+            TTS is tried last — synthesized audio only when no recording exists.
           </Text>
           <Row title='JapanesePod101'>
             <Switch
@@ -458,6 +549,15 @@ export default function AnkiSettingsPage() {
             <Switch
               value={sourceOf("jisho")?.enabled ?? false}
               onValueChange={(v) => setSource("jisho", { enabled: v })}
+            />
+          </Row>
+          <Row
+            title='Wiktionary (Wikimedia Commons)'
+            subtitle={`Recorded pronunciations (${sourceOf("wiktionary")?.lang ?? profileId}-….ogg files). The main Chinese source.`}
+          >
+            <Switch
+              value={sourceOf("wiktionary")?.enabled ?? false}
+              onValueChange={(v) => setSource("wiktionary", { enabled: v })}
             />
           </Row>
           <Row
@@ -479,6 +579,69 @@ export default function AnkiSettingsPage() {
             placeholder='https://example.com/audio?kanji={term}&kana={reading}'
             placeholderTextColor='#666'
           />
+          <Row
+            title='Azure TTS'
+            subtitle='Synthesized fallback via Azure Speech (needs a Speech resource: region + key + voice). Always tried after the recorded sources.'
+          >
+            <Switch
+              value={sourceOf("azure-tts")?.enabled ?? false}
+              onValueChange={(v) => setSource("azure-tts", { enabled: v })}
+            />
+          </Row>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <TextInput
+              style={[styles.input, { flex: 1 }]}
+              value={sourceOf("azure-tts")?.region ?? ""}
+              onChangeText={(region) => setSource("azure-tts", { region })}
+              autoCapitalize='none'
+              autoCorrect={false}
+              placeholder='region (e.g. eastasia)'
+              placeholderTextColor='#666'
+            />
+            <TextInput
+              style={[styles.input, { flex: 2 }]}
+              value={sourceOf("azure-tts")?.voice ?? ""}
+              onChangeText={(voice) => setSource("azure-tts", { voice })}
+              autoCapitalize='none'
+              autoCorrect={false}
+              placeholder='voice (e.g. zh-CN-XiaoxiaoNeural)'
+              placeholderTextColor='#666'
+            />
+          </View>
+          <TextInput
+            style={styles.input}
+            value={sourceOf("azure-tts")?.key ?? ""}
+            onChangeText={(key) => setSource("azure-tts", { key })}
+            autoCapitalize='none'
+            autoCorrect={false}
+            secureTextEntry
+            placeholder='Azure Speech resource key'
+            placeholderTextColor='#666'
+          />
+        </View>
+
+        {/* Backup — export/import EVERY profile's Anki settings as JSON. */}
+        <View style={{ gap: 8 }}>
+          <Text style={styles.title}>Backup</Text>
+          <Text style={styles.subtitle}>
+            Export all profiles' Anki settings (server, deck, note type, field
+            templates, word-audio sources) as a JSON file — import it on another
+            install to clone this setup.
+          </Text>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <Pressable
+              style={[styles.button, { paddingVertical: 10 }]}
+              onPress={exportSettings}
+            >
+              <Text style={styles.buttonText}>Export</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.button, { paddingVertical: 10 }]}
+              onPress={importSettings}
+            >
+              <Text style={styles.buttonText}>Import</Text>
+            </Pressable>
+          </View>
         </View>
 
         {/* Marker reference */}
@@ -499,8 +662,13 @@ export default function AnkiSettingsPage() {
         <Pressable
           style={styles.resetBtn}
           onPress={() => {
-            persist(DEFAULT_ANKI_CONFIG);
-            setTagsText(DEFAULT_ANKI_CONFIG.tags.join(", "));
+            // Word-audio defaults are per-language (ZH leads with Wiktionary).
+            const next = {
+              ...DEFAULT_ANKI_CONFIG,
+              wordAudioSources: defaultWordAudioSources(profileId),
+            };
+            persist(next);
+            setTagsText(next.tags.join(", "));
             toast.success("Anki settings reset to defaults");
           }}
         >

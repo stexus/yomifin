@@ -71,8 +71,12 @@ echo "── [15/16] jimaku.cc client (request shape / errors) ─────�
 bun utils/yomifin/jimaku.test.ts
 
 echo
-echo "── [16/16] stremio addon client (urls / capability / aggregation) ──"
+echo "── [16/17] stremio addon client (urls / capability / aggregation) ──"
 bun utils/stremio/client.test.ts
+
+echo
+echo "── [17/17] anki settings export/import (transfer schema) ───────────"
+bun utils/yomifin/ankiSettingsTransfer.test.ts
 
 echo
 echo "── [optional] subSync ↔ real alass cross-check (skips if not installed) ─"

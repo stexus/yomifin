@@ -129,6 +129,26 @@ export async function importPrebuiltDb(
   return list;
 }
 
+/**
+ * Prepare the combined db for export (share sheet): checkpoint + truncate the WAL so
+ * the single .db file contains every committed write (expo-sqlite runs in WAL mode;
+ * sharing just the main file would otherwise silently drop recent imports), then
+ * return its handle for Sharing.shareAsync.
+ */
+export function prepareDbForExport(): File {
+  const f = getDbFile();
+  if (!f.exists) throw new Error("No dictionary database to export yet");
+  const db = openDictionaryDb();
+  try {
+    db.execSync("PRAGMA wal_checkpoint(TRUNCATE);");
+  } catch (e) {
+    console.warn("[YOMIFIN] wal checkpoint before export failed:", e);
+  } finally {
+    db.closeSync();
+  }
+  return f;
+}
+
 /** Remove one dictionary's rows (keeps the file + other dictionaries). */
 export function removeDictionary(title: string): void {
   if (!dictionaryDbExists()) return;

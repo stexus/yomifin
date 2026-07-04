@@ -7,12 +7,23 @@
 import { seedFieldTemplates } from "./ankiFieldSeeds";
 import {
   audioExtensionForMime,
+  azureTtsSsml,
+  azureTtsUrl,
+  azureVoiceLang,
   base64ToBytes,
   bytesToBase64,
+  commonsImageInfoUrl,
   customAudioUrl,
+  defaultWordAudioSources,
   extractJishoAudioUrl,
   jpod101Url,
+  mergeWordAudioSources,
+  normalizePinyinReading,
+  numberedPinyinSyllable,
+  parseCommonsImageInfo,
   parseCustomJsonAudio,
+  type WordAudioSourceConfig,
+  wiktionaryAudioUrls,
 } from "./wordAudioSources";
 
 let pass = 0;
@@ -107,6 +118,214 @@ check(
   "custom JSON wrong shape = []",
   parseCustomJsonAudio('{"foo":1}').length === 0,
 );
+
+// --- pinyin normalization + numbered syllable --------------------------------------------
+
+check(
+  "pinyin normalize lowercase",
+  normalizePinyinReading("Zhōngguó") === "zhōngguó",
+);
+check(
+  "pinyin normalize strips separators",
+  normalizePinyinReading("nǐ hǎo") === "nǐhǎo" &&
+    normalizePinyinReading("xī'ān") === "xīān",
+);
+check(
+  "pinyin normalize u:/v → ü",
+  normalizePinyinReading("nu:3") === "nü3" &&
+    normalizePinyinReading("nv3") === "nü3",
+);
+check(
+  "pinyin normalize NFC (combining marks)",
+  normalizePinyinReading("ni\u030c") === "nǐ",
+);
+check(
+  "non-pinyin reading rejected",
+  normalizePinyinReading("ねこ") === "" && normalizePinyinReading("") === "",
+);
+
+check("numbered: mǎ → ma3", numberedPinyinSyllable("mǎ") === "ma3");
+check("numbered: hǎo → hao3", numberedPinyinSyllable("hǎo") === "hao3");
+check(
+  "numbered: zhuāng → zhuang1",
+  numberedPinyinSyllable("zhuāng") === "zhuang1",
+);
+check(
+  "numbered: multi-syllable (nǐhǎo) rejected",
+  numberedPinyinSyllable("nǐhǎo") === null,
+);
+check(
+  "numbered: one mark but two syllables (xièxie) rejected",
+  numberedPinyinSyllable("xièxie") === null,
+);
+check(
+  "numbered: toneless (ma) rejected",
+  numberedPinyinSyllable("ma") === null,
+);
+
+// --- wiktionary (Wikimedia Commons) URLs -----------------------------------------------
+// Commons zh files are named by PINYIN (Zh-nǐ.ogg / Zh-māma.ogg / Zh-hao3.ogg), NOT hanzi
+// — building zh-你.ogg was the original bug (common words all 404'd).
+
+const fp = (name: string) =>
+  `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(name)}`;
+
+check(
+  "wiktionary zh: pinyin (.ogg/.oga) + numbered + hanzi last resort",
+  JSON.stringify(wiktionaryAudioUrls("zh", "你", "nǐ")) ===
+    JSON.stringify([
+      fp("zh-nǐ.ogg"),
+      fp("zh-nǐ.oga"),
+      fp("zh-ni3.ogg"),
+      fp("zh-你.ogg"),
+    ]),
+  JSON.stringify(wiktionaryAudioUrls("zh", "你", "nǐ")),
+);
+check(
+  "wiktionary zh multi-syllable: no numbered candidate",
+  JSON.stringify(wiktionaryAudioUrls("zh", "妈妈", "māma")) ===
+    JSON.stringify([fp("zh-māma.ogg"), fp("zh-māma.oga"), fp("zh-妈妈.ogg")]),
+  JSON.stringify(wiktionaryAudioUrls("zh", "妈妈", "māma")),
+);
+check(
+  "wiktionary zh non-pinyin reading: hanzi candidate only",
+  JSON.stringify(wiktionaryAudioUrls("zh", "你好", "")) ===
+    JSON.stringify([fp("zh-你好.ogg")]),
+);
+check(
+  "wiktionary ja: term + reading, kanji-named",
+  JSON.stringify(wiktionaryAudioUrls("ja", "猫", "ねこ")) ===
+    JSON.stringify([
+      fp("ja-猫.ogg"),
+      fp("ja-猫.oga"),
+      fp("ja-ねこ.ogg"),
+      fp("ja-ねこ.oga"),
+    ]),
+);
+check(
+  "wiktionary empty term+reading = []",
+  wiktionaryAudioUrls("zh", "", "").length === 0,
+);
+
+// --- Commons imageinfo API (preferred over blind FilePath probing — one query, no
+// 404 storm; Wikimedia was observed 429-ing repeated probe misses) ---------------------
+
+check(
+  "commons imageinfo url batches all candidates",
+  commonsImageInfoUrl(["zh-nǐ.ogg", "zh-ni3.ogg"]) ===
+    `https://commons.wikimedia.org/w/api.php?action=query&format=json&prop=imageinfo&iiprop=url&titles=${encodeURIComponent("File:zh-nǐ.ogg|File:zh-ni3.ogg")}`,
+);
+
+{
+  // Realistic response shape: `normalized` maps our titles to MediaWiki's ucfirst
+  // form, `pages` is keyed by pageid (order meaningless), missing files have no
+  // imageinfo. Candidate ORDER must be preserved in the output.
+  const body = JSON.stringify({
+    batchcomplete: "",
+    query: {
+      normalized: [
+        { from: "File:zh-nǐ.ogg", to: "File:Zh-nǐ.ogg" },
+        { from: "File:zh-nǐ.oga", to: "File:Zh-nǐ.oga" },
+        { from: "File:zh-ni3.ogg", to: "File:Zh-ni3.ogg" },
+      ],
+      pages: {
+        "999": {
+          title: "File:Zh-ni3.ogg",
+          imageinfo: [{ url: "https://upload.wikimedia.org/x/ni3.ogg" }],
+        },
+        "-1": { title: "File:Zh-nǐ.oga", missing: "" },
+        "123": {
+          title: "File:Zh-nǐ.ogg",
+          imageinfo: [{ url: "https://upload.wikimedia.org/x/nǐ.ogg" }],
+        },
+      },
+    },
+  });
+  const names = ["zh-nǐ.ogg", "zh-nǐ.oga", "zh-ni3.ogg"];
+  check(
+    "commons imageinfo parse: existing urls in candidate order, missing dropped",
+    JSON.stringify(parseCommonsImageInfo(body, names)) ===
+      JSON.stringify([
+        "https://upload.wikimedia.org/x/nǐ.ogg",
+        "https://upload.wikimedia.org/x/ni3.ogg",
+      ]),
+    JSON.stringify(parseCommonsImageInfo(body, names)),
+  );
+  check(
+    "commons imageinfo parse: garbage / wrong shape = []",
+    parseCommonsImageInfo("not json", names).length === 0 &&
+      parseCommonsImageInfo("{}", names).length === 0,
+  );
+}
+
+// --- Azure TTS helpers ------------------------------------------------------------------
+
+check(
+  "azure url",
+  azureTtsUrl("eastasia") ===
+    "https://eastasia.tts.speech.microsoft.com/cognitiveservices/v1",
+);
+check(
+  "azure voice lang zh",
+  azureVoiceLang("zh-CN-XiaoxiaoNeural") === "zh-CN",
+);
+check("azure voice lang ja", azureVoiceLang("ja-JP-NanamiNeural") === "ja-JP");
+check(
+  "azure voice lang 3-letter primary (wuu)",
+  azureVoiceLang("wuu-CN-XiaotongNeural") === "wuu-CN",
+);
+check("azure voice lang garbage → en-US", azureVoiceLang("nope") === "en-US");
+check(
+  "azure ssml shape + escaping",
+  azureTtsSsml("zh-CN-XiaoxiaoNeural", "你<好>&") ===
+    "<speak version='1.0' xml:lang='zh-CN'><voice name='zh-CN-XiaoxiaoNeural'>你&lt;好&gt;&amp;</voice></speak>",
+  azureTtsSsml("zh-CN-XiaoxiaoNeural", "你<好>&"),
+);
+
+// --- per-language defaults + stored-config merge ----------------------------------------
+
+{
+  const ja = defaultWordAudioSources("ja");
+  const zh = defaultWordAudioSources("zh");
+  check(
+    "ja defaults lead with jpod101, azure last + disabled",
+    ja[0].type === "jpod101" &&
+      ja[ja.length - 1].type === "azure-tts" &&
+      ja[ja.length - 1].enabled === false,
+  );
+  check(
+    "zh defaults lead with wiktionary(zh) enabled, azure last + disabled",
+    zh[0].type === "wiktionary" &&
+      zh[0].enabled === true &&
+      zh[0].lang === "zh" &&
+      zh[zh.length - 1].type === "azure-tts" &&
+      zh[zh.length - 1].enabled === false,
+  );
+
+  // A config stored BEFORE wiktionary/azure existed keeps its order and settings,
+  // and picks the new types up appended with default config.
+  const legacy: WordAudioSourceConfig[] = [
+    { type: "jisho", enabled: false },
+    { type: "jpod101", enabled: true },
+    { type: "custom", enabled: true, url: "https://x/{term}" },
+  ];
+  const merged = mergeWordAudioSources(legacy, ja);
+  check(
+    "merge keeps stored order/settings, appends new types",
+    merged.length === 5 &&
+      merged[0].type === "jisho" &&
+      merged[0].enabled === false &&
+      merged[2].url === "https://x/{term}" &&
+      merged[3].type === "wiktionary" &&
+      merged[4].type === "azure-tts",
+    JSON.stringify(merged),
+  );
+  check(
+    "merge with empty stored = defaults",
+    mergeWordAudioSources([], zh) === zh &&
+      mergeWordAudioSources(null, zh) === zh,
+  );
+}
 
 // --- mime / base64 helpers -------------------------------------------------------------------
 
