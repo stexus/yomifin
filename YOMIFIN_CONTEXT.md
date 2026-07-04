@@ -100,6 +100,7 @@ Key principles (violating these has bitten us before):
 | Settings keys (`yomifin*`, `controlsDimOpacity`) | `utils/atoms/settings.ts` |
 | Settings screens: Dictionaries / Anki / Reader | `app/(auth)/(tabs)/(home)/settings/{dictionaries,anki,reader}/` |
 | Native mpv seams (subtitle text, sub-seek, capture) | `modules/mpv-player/` (`MpvPlayerView.swift`, `MPVLayerRenderer.swift`, module + TS ref) |
+| Native outlined subtitle text (TextKit stroke + char-index tap) | `modules/outlined-text/` (falls back to JS stacked copies on stale binary/non-iOS) |
 | Offline dictionary .db builder | `scripts/build-dictionary-db.ts` |
 | Regression guards | `./scripts/yomifin-test.sh` |
 
@@ -119,6 +120,13 @@ Key principles (violating these has bitten us before):
 - `captureScreenshot(path, sourceUrl, pos)` / `extractAudio(start, end, aid, path, sourceUrl)`
   — background-queue Promises (see Settled decision 4).
 - `getCurrentAudioTrack()`, `getSubtitleTracks()`, `getTechnicalInfo()`.
+- **Gesture surface (separate module, `modules/gesture-surface/`)** —
+  `YomifinGestureSurface` expo view owning ALL video tap gestures (single/double/
+  two-finger) via one UIKit recognizer tree; mounted inside `GestureOverlay.tsx`.
+  Sync availability probe: `requireOptionalNativeModule` (null = stale binary →
+  legacy RNGH-tap fallback). mpv's `twoFingerTapSeamVersion` = 3 in binaries that
+  have it (the old window recognizer is REMOVED there). PAN stays an RNGH worklet
+  on purpose — drag-anywhere-to-seek writes SharedValues on the UI thread.
 
 Changes to `modules/mpv-player` (or any native dep / app.json plugin) need
 `bun run prebuild` + `expo run:ios` (`just local` / `just remote`). Pure JS/TS
@@ -192,13 +200,27 @@ Facts that cost real time to learn (all reproducible via `app.json`/plugins —
   2026-07-02 as two-finger → seek); seam v2 sets a UIGestureRecognizerDelegate
   returning true from shouldRecognizeSimultaneouslyWith, making the native
   recognizer un-preventable — which is what allowed deleting GestureOverlay's
-  RNGH two-finger recognizers for good (v2 verified working on device). NEVER
+  RNGH two-finger recognizers for good (v2 verified working on device).
+  **Seam v3 (DEVICE-VERIFIED 2026-07-03):** ALL taps moved into the
+  dedicated `YomifinGestureSurface` native view (`modules/gesture-surface/`,
+  mounted by GestureOverlay where the dim View sits) — UIKit `require(toFail:)`
+  does the disambiguation, the mpv window recognizer is gone, and the whole
+  suppression/grace/nonce machinery survives ONLY as GestureOverlay's fallback
+  for stale (pre-v3) binaries and Android. UIKit's stock double-tap window
+  (~350ms) made single tap sluggish → surface apiVersion 2 replaces the double
+  recognizer with `TimedDoubleTapRecognizer` (force-fails after
+  `doubleTapMaxIntervalMs`, default 220ms). RNGH keeps ONLY the pan (worklet —
+  drag-anywhere-to-seek needs UI-thread SharedValue writes; taps and pans are
+  disjoint, so no coupling). NEVER
   run a v1/seam-less binary with this JS: the Metro probe logs the seam VERSION
-  (`twoFingerTapSeamVersion`; v2 = current) — bump it on ANY native seam change
-  so stale installs are provable. Feedback bubble: direct-player bumps
-  `twoFingerNonce` → Controls → GestureOverlay effect shows pause/play. Also: a "full rebuild" that doesn't land on the iPad looks
+  (`twoFingerTapSeamVersion`; v3 = current) — bump it on ANY native seam change
+  so stale installs are provable. Feedback bubble: on the fallback path
+  direct-player bumps
+  `twoFingerNonce` → Controls → GestureOverlay effect shows pause/play; on the
+  surface path GestureOverlay shows it directly. Also: a "full rebuild" that doesn't land on the iPad looks
   exactly like a broken native feature — the `hasTwoFingerTapSeam` probe logs
-  PRESENT/MISSING in Metro on video load; trust it over assumptions.
+  PRESENT/MISSING in Metro on video load (plus GestureOverlay's own
+  "native gesture surface: PRESENT/MISSING" line); trust them over assumptions.
   JS-side `onTouchesDown` events are also unreliable here (missed events,
   `trackedTouchCount` warnings): don't build gesture logic on them, and don't
   call `mgr.fail()` from `runOnJS(true)` callbacks (`setGestureState` is

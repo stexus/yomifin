@@ -39,15 +39,24 @@ per backlog item to start work without re-exploration.
 | 🔊 word audio in popup | `DefinitionPopup.tsx`, `wordAudio.ts` (`fetchWordAudioCached`) | speaker button beside headword; expo-audio playback; fetch cached per term+reading so `{audio}` on card-add reuses the clip; filename content-derived `yomifin_word_<fnv>.<ext>`; 2026-07-02 fix: `Crypto.digest` needs a TypedArray (raw ArrayBuffer threw on-device and broke the jpod101 sentinel check) |
 | AnkiConnect timeouts | `anki.ts` `ankiInvoke` | AbortController: 4s control actions, 15s media uploads — unreachable Anki used to hang ~60s ("frozen" settings pane / card add) |
 | ZH word audio + Azure TTS fallback | `utils/yomifin/wordAudioSources.ts` (`wiktionary` + `azure-tts` source types, pinyin normalize/numbered helpers, Commons imageinfo API url+parse, `defaultWordAudioSources`/`mergeWordAudioSources`, SSML helpers; +tests), `wordAudio.ts` (API-first wiktionary branch, Azure POST branch, UA header), `ankiConfig.ts` (per-profile audio defaults + merge), Settings → Anki (toggles, Azure region/key/voice inputs) | DEVICE-VERIFIED 2026-07-03 (Commons recordings on-device; Azure TTS branch is code+tests+live-URL checked but not yet exercised with a real key — spot-check when one exists). ZH profile defaults to Wikimedia Commons recordings. NAMING (live-verified): zh files are PINYIN-named, NOT hanzi — `Zh-nǐ.ogg`/`Zh-māma.ogg` = the CC-CEDICT reading lowercased/concatenated, plus an old single-syllable numbered set (`Zh-hao3.ogg`); candidates = diacritic .ogg/.oga → numbered → hanzi last-resort, resolved via ONE `imageinfo` API query (blind Special:FilePath probing = a 404 per miss and Wikimedia 429s 404-storms — observed live; FilePath kept only as API-failure fallback; descriptive User-Agent sent). Azure Speech TTS (REST, SSML, mp3 out) sits LAST in the order BY DESIGN — synthesized only when every recorded source missed (real gaps: 妈 alone, 中国); stored source lists predating these types get new ones appended via merge (JA: disabled; ZH legacy: wiktionary enabled) — no migration; popup 🔊 and `{audio}` share the same cached fetch |
+| Unified native gesture surface (seam v3) | `modules/gesture-surface/` (`YomifinGestureSurface`; sync `requireOptionalNativeModule` probe), `GestureOverlay.tsx`, `MpvPlayerView.swift` (window recognizer REMOVED; `twoFingerTapSeamVersion` → 3) | DEVICE-VERIFIED 2026-07-03. ONE UIKit tap tree (single/double/two-finger, `require(toFail:)` arbitration) on a native view where the dim layer sits — no grace delays/`tapSuppression`/`twoFingerNonce` on the live path. PAN deliberately stays an RNGH worklet (drag-seek needs UI-thread SharedValue writes; native pan events = per-frame bridge lag). Behavior delta vs the window recognizer (accepted): two-finger taps ON subtitle text/popup no longer toggle play. Legacy fallback (RNGH taps + window seam + suppression) still auto-selected on stale binaries/Android — deletion = backlog §2 |
+| Drag-anywhere-to-seek (attempt 2) | `GestureOverlay.tsx` (worklet pan modes), `ScrubBubble.tsx`, `Controls.tsx` scrub lifecycle, `Settings.yomifinDragSeekEnabled` (default ON; Settings → Reader) | DEVICE-VERIFIED 2026-07-03. Worklet `onUpdate` → SharedValues (zero per-frame bridge); dedicated bubble: trickplay tile (~120ms JS prefetch) + ReText timestamps (`useAnimatedProps` on TextInput), independent of awesome-slider; commit exactly once on release/cancel, pause-during/seek+resume; full width = full duration; `progress.value` written live so the slider tracks. Off → legacy flick-to-skip; exclusion zones + volume/brightness verticals unchanged |
+| Stremio player polish (gestures + dim + speed + resume) | `stremio-player.tsx` (shared GestureOverlay replaces the bare Pressable), `utils/stremio/watchState.ts` (MMKV, keyed title+episode via fnv1a — NOT the per-resolve debrid URL; >96% watched clears; ~10s cadence + save on leave) | DEVICE-VERIFIED 2026-07-03. Full gesture parity incl. drag-seek (timestamp-only bubble), controls-dim, top-bar speed cycler (1→1.25→1.5→2→0.75), resume via `startPosition` |
+| Pane cycler polish (buttons-only, animated) | `DefinitionPopup.tsx` | DEVICE-VERIFIED 2026-07-03: prominent n/m index beside the headword; footer ◀ ▶ + edge-tap zones (34px strips + hitSlop, faint ‹ › chevrons) drive a keyed direction-aware `FadeInLeft/Right` (180ms) pane transition. SWIPE WAS REMOVED: two attempts (post-swipe commit, then fully interactive worklet drag with baselined offset + RNGH-aware scroll arbitration) both read as choppy/discontinuous on device over the popup's dense subtree — tombstone comment in the file warns not to re-add a pan without a two-pane tracking design (neighbor pane rendered live under the drag) |
 **⚠️ Pending device verification:** the rows below are code+test complete but NOT
-yet demonstrated on the iPad. The first four (maxResults, profiles, Chinese parity,
-pane cycler) and "Subtitle rendering QoL" are JS-only → `just dev`. "Online
-subtitles + sync" adds a NATIVE seam (`setSubtitleDelay`) → needs `just local` /
-`just remote` (nudge/auto-sync silently no-op on a stale binary; everything else in
-the panel still works). Gates: zh auto-select + st/ts folding with the CC-CEDICT
+yet demonstrated on the iPad. The first three (maxResults, profiles, Chinese
+parity) are JS-only → `just dev`. "Subtitle rendering QoL" and "Online
+subtitles + sync" add NATIVE code (`modules/outlined-text`, `setSubtitleDelay`) →
+need `just local` / `just remote` (on a stale binary the overlay falls back to the
+JS stacked-copies outline — known-fuzzy — and sync nudge/auto-sync silently no-op).
+"Snappier single tap" is NATIVE (gesture-surface apiVersion 2) → `just local`;
+on a v1-surface binary the prop is ignored and the stock ~350ms window stays
+(Metro logs the surface version). Its gate: with double-tap seek ON, single tap
+toggles controls noticeably faster than before, and double-tap seek still lands
+reliably at a normal tapping rhythm. Gates: zh auto-select + st/ts folding with the CC-CEDICT
 TERM zip (`assets/dictionaries/CC-CEDICT.zip`; the `…Hanzi….zip` variant is
-kanji-bank-only and imports 0 terms), JA path unregressed, popup swipe vs
-ScrollView/selection taps, zh card → zh profile's Anki config; overlay styling knobs
+kanji-bank-only and imports 0 terms), JA path unregressed, zh card → zh profile's
+Anki config; overlay styling knobs
 visibly apply mid-playback; jimaku search→file→load with a real key, tappable
 external ASS + a mined card with correct audio span after a nonzero delay, auto-sync
 lands within a nudge on a known-offset sub, and switching back to a Jellyfin track
@@ -61,26 +70,25 @@ deck/model/templates for BOTH profiles). Remove rows from this note as verified.
 | Lookup knob: max results | `lookup.ts` `maxResults` (default 32 = Yomitan), Settings → Reader, threaded via `loadInstalledDictionary` opts | trims the entry TAIL after sorting (headline/order untouched); pinned in `lookup.test.ts`; remaining parity knobs (maxScanLength, preprocessor toggles) parked under Small |
 | Profiles (JA/ZH bundles) | `utils/yomifin/profiles.ts` (+test), settings keys `yomifinActiveProfile`/`yomifinProfiles`, Settings → Dictionaries/Anki profile switcher, `direct-player.tsx` `yomifinLanguageHint` | { language, dictionary set, Anki config } per profile; NO-MIGRATION design: legacy `yomifinDictionaryConfig`/`yomifinAnkiConfig` keys ARE the JA profile's fallback storage until first profile-aware edit shadows them; player auto-selects profile from subtitle-track language (then audio), manual choice is the fallback; effective profile threads popup → `getAnkiConfig(profileId)` → `addAnkiCard`. Follow-ups (same pending batch): in-player profile PILL (`ProfilePill.tsx`, rendered IN the controls top bars — next to the ⋯ dropdown via `Controls`/`HeaderControls` `headerLeftSlot`/`leftSlot` in direct-player, beside the ✕ button in stremio-player — so it shows/fades exactly with the controls; shows `JA/ZH · auto`, tap = switch remembered per-title via `yomifinProfileOverrides` keyed SeriesId/ItemId or `stremio:<name>`, long-press = back to auto; precedence override > track hint > manual default, pinned in profiles.test.ts); per-profile DICTIONARY VISIBILITY (`yomifinDictionaryLanguages` title→profile map, unmapped = ja so zero migration; lookups and Settings → Dictionaries list only the active profile's dicts, `→ ZH`/`→ JA` chip moves a row across, imports auto-assign to the importing profile, `{single-glossary:…}` picker filtered too) |
 | Chinese parity (st↔ts folding) | `yomitan/chinese-text-preprocessors.js` (OURS, `chinese-simple2traditional` dep — MIT, char-level, no `\p{}`), registered in `language-descriptors.js`; zh cases in `lookup.test.ts` | closes LOOKUP_FIDELITY §4 divergence: 汉语 finds 漢語-stored entries and vice versa; zh = exact + longest-match, no deinflection; `language` threads from the active profile. NOTE: `assets/dictionaries/CC-CEDICT.zip` is the TERM dictionary to import — the `…Hanzi….zip` variant is kanji-bank-only (importer reads `term_bank_*` → would import 0 terms) |
-| Pane cycler polish | `DefinitionPopup.tsx` | prominent n/m index beside the headword, horizontal swipe (RNGH pan, `.runOnJS(true)`, activeOffsetX ±32 / failOffsetY ±24 so scroll+taps unaffected), left/right edge-tap strips over the card gutters; footer ◀ ▶ kept. Follow-up (same pending batch): INTERACTIVE swipe — pane tracks the finger from pan activation (worklet `onUpdate` → SharedValue → `useAnimatedStyle` translateX ×0.55 + fade; NO per-frame runOnJS, per the drag-to-seek lesson), commit at 72px or 600pt/s velocity → keyed remount with direction-aware `FadeInLeft/Right` (180ms), sub-threshold/cancel springs back (`onFinalize` guard); edge zones widened 24→34px + hitSlop with faint ‹ › chevron affordances |
-| Subtitle rendering QoL | `utils/yomifin/subtitleParse.ts` (+test), `srt.ts` (VTT cue-id tolerance), `TappableSubtitleOverlay.tsx`, `YomifinLookupLayer.tsx`, Settings → Reader | ASS/SSA parse for the CUE STORE (`parseAss`/`parseSubtitleText`: Format field order, override tags stripped, `\N`→newline, `{\p}` drawing cues dropped, layered dupes deduped) + VTT; the LIVE overlay stays mpv-driven — mpv's `sub-text` is already tag-stripped, `cleanSubtitleOverlayText` is defensive insurance in `onSubtitleText`; overlay style knobs (runtime settings): font size, outline none/normal/strong (textShadow tiers), bottom offset |
+| Subtitle rendering QoL | `utils/yomifin/subtitleParse.ts` (+test), `srt.ts` (VTT cue-id tolerance), `TappableSubtitleOverlay.tsx`, `YomifinLookupLayer.tsx`, Settings → Reader | ASS/SSA parse for the CUE STORE (`parseAss`/`parseSubtitleText`: Format field order, override tags stripped, `\N`→newline, `{\p}` drawing cues dropped, layered dupes deduped) + VTT; the LIVE overlay stays mpv-driven — mpv's `sub-text` is already tag-stripped, `cleanSubtitleOverlayText` is defensive insurance in `onSubtitleText`; overlay style knobs (runtime settings, in Settings → Reader AND the in-player dropdown next to Subtitle Scale): font size, outline none/normal/strong, bottom offset. Outline is NATIVE (`modules/outlined-text`, iOS): TextKit two-pass stroke-then-fill (round joins, stroke fully outside the glyph — the Infuse look) with per-character tap hit-testing from the SAME layout (`onCharacterTap` → char index → token mapping in JS) and off-glyph touch pass-through (`point(inside:)`); height reported via `onMeasured`. RN cannot draw a text stroke — textShadow is a blur, and the 8×-stacked-copies JS trick was DEVICE-REJECTED as fuzzy (kept only as the stale-binary/non-iOS fallback, de-blurred) |
 | Export dictionary .db + Anki settings backup | `dictionaryStore.ts` `prepareDbForExport` (WAL checkpoint) + Settings → Dictionaries "Export .db" (expo-sharing); `utils/yomifin/ankiSettingsTransfer.ts` (+test, step 17 of yomifin-test.sh) + Settings → Anki "Backup" Export/Import | .db export runs `PRAGMA wal_checkpoint(TRUNCATE)` first (expo-sqlite is WAL — sharing the bare file would silently drop recent imports) then hands the combined file to the share sheet; Anki settings = versioned JSON (`yomifin-anki-settings` v1) holding BOTH profiles' RAW stored configs (JA legacy-key fallback included via resolveProfile; Azure key rides along on purpose — cloning a working setup is the point); import validates type/version/shape, merges per-profile via `withProfileData`, leaves dictionaryConfig untouched; getAnkiConfig's per-key defaulting makes partial imports safe |
 | Online subtitles (jimaku.cc) + sync | `utils/yomifin/{jimaku,subSync,subtitleParse}.ts` (+tests), `components/yomifin/OnlineSubtitlesModal.tsx`, `utils/atoms/yomifinOnlineSubs.ts`, `DropdownView.tsx` (menu entry, gated on API key), `direct-player.tsx` wiring, native `setSubtitleDelay` seam (mpv `sub-delay`; iOS) | side panel: search by AniList id (item ProviderIds, any key casing) else title → entry → episode-filtered files → download to cache (`yomifin_sub_*`, sweeper-compatible) → mpv `sub-add` + hidden native rendering (tappable overlay takes over) + parsed cues into the cue store; SYNC: auto = pure offset correlation vs the item's own track (`estimateSubtitleOffset`, coarse→fine sweep, peak-sharpness confidence gate, null → manual) — this is alass's NO-SPLIT objective in TS (shipping the real tools is impossible: ffsubsync = Python+VAD, alass = Rust, Hermes has no wasm) and is CROSS-VALIDATED against real `alass-cli --no-split` by `scripts/yomifin-sync-crosscheck.ts` (brew install alass; runs in yomifin-test.sh, skips if absent; agreement ≤10ms on knowns; drop real pairs in `scripts/sync-fixtures/`, gitignored); manual ±0.1/±0.5s nudges; delay bookkeeping: store cues shifted into VIDEO timeline, live `sub-start/end` shifted by delay in JS (mpv reports FILE timeline — assumption to confirm on device: if audio clips land 2×delay off, drop the JS-side shift); picking a Jellyfin track dismisses the external sub + zeroes delay; API key in Settings → Reader |
 
+| Snappier single tap (gesture-surface apiVersion 2) | `TimedDoubleTapRecognizer` in `GestureSurfaceView.swift`; `doubleTapMaxIntervalMs` prop (native default 220ms), passed as `DOUBLE_TAP_WINDOW_MS` from `GestureOverlay.tsx` | UIKit's stock double-tap window (~350ms, not exposed) IS the single-tap latency behind `require(toFail:)` — device-verified as sluggish on surface v1. The subclass force-fails itself (`state = .failed`, needs `UIGestureRecognizerSubclass`) 220ms after the first tap lifts unless a second touch has begun, releasing the failure chain early. Trade-off (same one RNGH's old maxDelay(280) made): a second tap slower than the window becomes a fresh single tap |
 | Stremio addon sources (separate tab + minimal player, mining-capable) | `utils/stremio/client.ts` (+`client.test.ts`, step 16 of yomifin-test.sh), `useStremioAddons.ts`, tab `app/(auth)/(tabs)/(stremio)/` + `components/stremio/CatalogShelf.tsx`, route `app/(auth)/player/stremio-player.tsx`, `Settings.stremioAddonUrls` | DEVICE-VERIFIED 2026-07-03: catalog → debrid stream → jimaku sub → mined card. Pure addon client (manifest/catalog/meta/stream, capability checks, `skip` paging, torrent/`infoHash` streams filtered — debrid/HTTP only); Discover-style shelves → grid → meta/episodes → aggregated stream picker; player is a self-contained minimal route (direct-player UNTOUCHED — deliberate, see pruned backlog design) reusing MpvPlayerView + the full yomifin pipeline (tappable overlay, popup, pause-on-lookup, capture w/ sourceUrl = playing debrid URL, cue store from `stream.subtitles[0]` else jimaku); CC menu hosts the jimaku panel (same `OnlineSubtitlesModal`; auto-sync reference = addon-provided sub's cues when present, else manual nudges); icons = direct-player's Ionicons shrunk. NB addon manifest URLs (contain tokens) are settings DEFAULTS — private fork only |
 
 ## Backlog (roughly priority-ordered)
 
-### 1. Stremio post-MVP (deferred from the shipped MVP)
+### 1. Stremio post-MVP (remaining after the 2026-07-03 polish pass)
 In rough order of expected want:
 - **Shared player-wiring extraction** — pull the yomifin glue (cue store, capture
   context, pause-on-lookup, popup mount, onSubtitleText/delay bookkeeping) out of
-  `direct-player.tsx` into a hook/component both players use, then grow the
-  stremio player's controls toward parity (gestures, playback speed, controls-dim,
-  trickplay n/a). This is the one risky step (touches the load-bearing file): one
-  careful session + a full Jellyfin-side device regression pass. Trigger: actually
-  missing a control during real use — keep a list.
-- Watch-state / resume for stremio playback (nothing is persisted today; every
-  play starts at 0).
+  `direct-player.tsx` into a hook/component both players use. Deliberately NOT
+  done in the polish pass: it's the one risky step (touches the load-bearing
+  file) and needs its own session + a full Jellyfin-side device regression pass.
+  Trigger: actually missing a control during real use — keep a list. (Gestures,
+  controls-dim, playback speed, and watch-state/resume shipped WITHOUT it — the
+  shared `GestureOverlay` needed no extraction.)
 - Catalog `search` / `genre` extras (client already builds the extra segment;
   UI only) + a Stremio search surface.
 - `/subtitles/` resource resolution (both installed addons serve it) as another
@@ -89,44 +97,23 @@ In rough order of expected want:
   EMBEDDED text track (jimaku path is verified; embedded should be identical —
   confirm once).
 
-### 2. Drag-anywhere-to-seek, done right (first attempt reverted 2026-07-02)
-Infuse-style: horizontal drag anywhere on the video acts like a seek-bar drag.
-Attempt 1 (reverted; flick-to-skip ±s restored on `enableHorizontalSwipeSkip`)
-drove the vestigial remote-scrub shared values from the RNGH pan via
-`runOnJS(true)` per-frame callbacks + a debounced `handleSliderChange` — device
-verdict: **very laggy, and no trickplay thumbnails** (react-native-awesome-slider
-only renders its bubble during ITS OWN internal gesture; an external scrub can't
-summon it). Requirements for attempt 2: (a) pan `onUpdate` as a WORKLET writing a
-SharedValue directly (UI thread, zero bridge traffic per frame); (b) a dedicated
-scrub-bubble component (thumbnail + timestamp) positioned via reanimated from
-that SharedValue, independent of awesome-slider; (c) commit seek only on release
-(+ throttled trickplay-tile prefetch on the JS side); (d) same lifecycle contract
-as attempt 1 (pause during, seek + resume on release, exactly-once end,
-cancel-safe). Pairs naturally with item 3 (all-native gesture surface) if that
-lands first.
+### 2. Gesture-layer cleanup (unblocked — surface verified 2026-07-03)
+The unified surface + drag-seek are device-verified; once the apiVersion-2
+tap-window row clears too, in its own small pass: delete GestureOverlay's legacy branch (RNGH tap tree + `GRACE_MS` grace delays),
+`tapSuppression.ts`, the `twoFingerNonce` plumbing (GestureOverlay prop + both
+players' `onTwoFingerTap` MpvPlayerView handlers), and `MpvPlayerView.swift`'s
+now-dead `onTwoFingerTap` EventDispatcher. Android note: the gesture-surface
+module is iOS-only (`platforms: ["apple"]`); Android keeps the legacy RNGH
+branch — if Android ever matters, port the surface view there BEFORE this
+cleanup.
 
-### 3. All-native gesture surface (end-state refactor — trigger, don't schedule)
-Today's player gestures are TWO recognizer trees deduplicated through
-`tapSuppression.ts` + 80ms grace delays: RNGH (single/double tap, pan) and the
-native window two-finger tap (seam v2). It works and the coupling is ~30 lines,
-but the correct end state is ONE UIKit tree: a native "gesture surface" expo view
-sitting exactly where `GestureOverlay`'s View sits (below buttons, above video)
-owning UITapGestureRecognizers (single/double/two-finger, arbitrated via
-`require(toFail:)`) + UIPanGestureRecognizer, emitting semantic events
-(`onSingleTap`, `onDoubleTap(x)`, `onTwoFingerTap`, pan stream). Deletes
-tapSuppression, grace delays, and the `twoFingerNonce` plumbing. Do it WHEN a
-trigger arrives — a new gesture (pinch-to-zoom), another arbitration bug, or
-spare native-iteration budget — not before: it re-pays every hit-testing subtlety
-(button pass-through, dim layer, exclusion zones, window-wide two-finger) in
-Swift, and gesture tuning needs many on-device rebuild loops.
-
-### 4. Subtitle sidebar (transcript) — do last
+### 3. Subtitle sidebar (transcript) — do last
 Collapsible flex-row panel over the existing cue store (`yomifinCuesAtom` already
 holds the full parsed track): timestamp + line rows, active line highlighted +
 auto-scrolled, tap row → `seek(cue.start*1000)`. Bitmap tracks: unavailable,
 degrade gracefully.
 
-### 5. Claude integration for asking about specific word usage or sentence meaning
+### 4. Claude integration for asking about specific word usage or sentence meaning
 
 
 ### Small / opportunistic
