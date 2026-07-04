@@ -43,21 +43,8 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-// RNGH's ScrollView (drop-in): registers the scroll with the gesture system so the
-// pane-swipe pan can run simultaneously instead of being cancelled by UIScrollView.
-import {
-  Gesture,
-  GestureDetector,
-  ScrollView,
-} from "react-native-gesture-handler";
-import Animated, {
-  FadeInLeft,
-  FadeInRight,
-  runOnJS,
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
-} from "react-native-reanimated";
+import { ScrollView } from "react-native-gesture-handler";
+import Animated, { FadeInLeft, FadeInRight } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
 import { addAnkiCard, flattenGloss } from "@/utils/yomifin/anki";
@@ -241,70 +228,14 @@ export default function DefinitionPopup({
   const goPrev = () => cyclePane(-1);
   const goNext = () => cyclePane(1);
 
-  // Pane cycling by horizontal swipe anywhere on the popup — INTERACTIVE: the pane
-  // follows the finger from the moment the pan activates. Per-frame updates are
-  // UI-thread WORKLETS writing a SharedValue (never per-frame runOnJS — the reverted
-  // drag-to-seek proved that lags); only the final pane COMMIT crosses to JS once.
-  // The activation offsets keep vertical scrolling and plain taps (selection
-  // Pressables) unaffected: the pan only activates after a decisively horizontal drag.
-  const dragX = useSharedValue(0);
-  // translationX at ACTIVATION — baseline so the pane starts moving from exactly 0
-  // when the pan activates. (v1 subtracted `32 * sign(translationX)`, which JUMPS by
-  // 64px whenever a wobbly drag crosses zero — the source of the on-device chop.)
-  const dragStart = useSharedValue(0);
-  // The popup's vertical ScrollView must be known to RNGH (scrollRef +
-  // simultaneousWithExternalGesture below): as a plain RN ScrollView its native
-  // UIScrollView pan kept trying to claim/cancel the touches mid-drag, which read
-  // as stalls. Simultaneous recognition + our own active/fail offsets arbitrate:
-  // decisively vertical → pan fails (scroll wins), horizontal → pane drags while
-  // the (vertical-only) scroll has nothing to do.
-  const scrollRef = useRef(null);
-  const swipeGesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .enabled(paneCount > 1 && !editing)
-        .activeOffsetX([-16, 16])
-        .failOffsetY([-24, 24])
-        .simultaneousWithExternalGesture(scrollRef)
-        .onStart((e) => {
-          dragStart.value = e.translationX;
-          dragX.value = 0;
-        })
-        .onUpdate((e) => {
-          dragX.value = e.translationX - dragStart.value;
-        })
-        .onEnd((e) => {
-          const dx = e.translationX - dragStart.value;
-          let dir: 1 | -1 | 0 = 0;
-          if (dx <= -64 || (e.velocityX <= -600 && dx < -24)) {
-            dir = 1; // dragged left → next pane
-          } else if (dx >= 64 || (e.velocityX >= 600 && dx > 24)) {
-            dir = -1; // dragged right → previous pane
-          }
-          if (dir !== 0) {
-            // Reset BEFORE the commit re-renders, so the incoming pane (keyed
-            // remount + FadeIn entering) isn't born with the old drag offset.
-            dragX.value = 0;
-            runOnJS(cyclePane)(dir);
-          } else {
-            // Below threshold — spring the pane back into place.
-            dragX.value = withSpring(0, { damping: 22, stiffness: 320 });
-          }
-        })
-        .onFinalize((_e, success) => {
-          // Gesture cancelled (e.g. another recognizer won): never leave the pane
-          // stranded mid-drag.
-          if (!success)
-            dragX.value = withSpring(0, { damping: 22, stiffness: 320 });
-        }),
-    // (dragX/dragStart/scrollRef are stable; cyclePane only closes over paneCount)
-    [paneCount, editing],
-  );
-  // Live drag feedback: near-1:1 tracking + a fade toward the edges.
-  const dragStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: dragX.value * 0.9 }],
-    opacity: 1 - Math.min(Math.abs(dragX.value) / 480, 0.45),
-  }));
+  // NOTE: pane-cycling used to also have a swipe gesture (two attempts: post-swipe
+  // commit, then a fully interactive worklet drag). DEVICE-REJECTED 2026-07-03 —
+  // even with UI-thread worklets, a baselined activation offset and RNGH-aware
+  // scroll arbitration it read as choppy/discontinuous over the popup's dense
+  // subtree, and the spring-back visually fought the committed remount. Cycling is
+  // now buttons only (footer ◀ ▶ + edge-tap zones + top index), which keep the
+  // keyed direction-aware FadeIn transition below. Don't re-add a pan here without
+  // a two-pane tracking design (render the neighbor pane live under the drag).
 
   // Phase 8: the card's sentence is the SELECTED CUE RANGE when the cue store has the
   // track; otherwise the single live cue frozen at tap time (bitmap/fetch-failure).
@@ -464,413 +395,410 @@ export default function DefinitionPopup({
           },
         ]}
       >
-        <GestureDetector gesture={swipeGesture}>
-          <View style={styles.cardInner}>
-            {!hasEntries || !entry ? (
-              <Text style={styles.noResult}>
-                No dictionary entry for「{result.matchedText || "—"}」
-              </Text>
-            ) : editing ? (
-              /* ✎ manual trim fallback: plain-text editor — native selection/editing
+        <View style={styles.cardInner}>
+          {!hasEntries || !entry ? (
+            <Text style={styles.noResult}>
+              No dictionary entry for「{result.matchedText || "—"}」
+            </Text>
+          ) : editing ? (
+            /* ✎ manual trim fallback: plain-text editor — native selection/editing
                works here because it IS plain text at this point (see Phase 8 notes:
                RN can't read selection back from styled Text). */
-              <View style={styles.editorWrap}>
-                <Text style={styles.editorTitle}>
-                  Selection text for this card
-                </Text>
-                <TextInput
-                  style={styles.editorInput}
-                  value={draft}
-                  onChangeText={setDraft}
-                  multiline
-                  autoFocus
-                  autoCorrect={false}
-                  textAlignVertical='top'
-                  selectionColor={t.accent}
-                />
-                <View style={styles.editorBtns}>
-                  <Pressable
-                    style={styles.editorCancel}
-                    onPress={() => setEditing(false)}
-                    hitSlop={6}
-                  >
-                    <Text style={styles.editorCancelText}>Cancel</Text>
-                  </Pressable>
-                  <Pressable
-                    style={styles.editorUse}
-                    onPress={commitEditor}
-                    hitSlop={6}
-                  >
-                    <Text style={styles.editorUseText}>Use this text</Text>
-                  </Pressable>
-                </View>
+            <View style={styles.editorWrap}>
+              <Text style={styles.editorTitle}>
+                Selection text for this card
+              </Text>
+              <TextInput
+                style={styles.editorInput}
+                value={draft}
+                onChangeText={setDraft}
+                multiline
+                autoFocus
+                autoCorrect={false}
+                textAlignVertical='top'
+                selectionColor={t.accent}
+              />
+              <View style={styles.editorBtns}>
+                <Pressable
+                  style={styles.editorCancel}
+                  onPress={() => setEditing(false)}
+                  hitSlop={6}
+                >
+                  <Text style={styles.editorCancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.editorUse}
+                  onPress={commitEditor}
+                  hitSlop={6}
+                >
+                  <Text style={styles.editorUseText}>Use this text</Text>
+                </Pressable>
               </View>
-            ) : (
-              <ScrollView
-                ref={scrollRef}
-                style={styles.scroll}
-                contentContainerStyle={styles.scrollContent}
-              >
-                {/* Keyed on the pane index: cycling remounts the pane content with a
+            </View>
+          ) : (
+            <ScrollView
+              style={styles.scroll}
+              contentContainerStyle={styles.scrollContent}
+            >
+              {/* Keyed on the pane index: cycling remounts the pane content with a
                     direction-aware slide+fade (subtle — ~25px offset), so swipes,
                     ◀ ▶ and edge taps all read as motion toward the next pane. */}
-                <Animated.View
-                  key={safeIndex}
-                  style={[styles.entry, dragStyle]}
-                  entering={(paneDirRef.current > 0
-                    ? FadeInRight
-                    : FadeInLeft
-                  ).duration(180)}
-                >
-                  <View style={styles.headwordRow}>
-                    <Text style={styles.term}>{entry.term}</Text>
-                    {entry.reading && entry.reading !== entry.term ? (
-                      <Text style={styles.reading}>【{entry.reading}】</Text>
-                    ) : null}
-                    {entry.wordClasses.length > 0 ? (
-                      <Text style={styles.wordClass}>
-                        {entry.wordClasses.join(" · ")}
-                      </Text>
-                    ) : null}
-                    <Pressable
-                      style={styles.audioBtn}
-                      onPress={playWordAudio}
-                      disabled={audioBusy}
-                      hitSlop={8}
-                    >
-                      {audioBusy ? (
-                        <ActivityIndicator size='small' color={t.reading} />
-                      ) : (
-                        <Ionicons
-                          name='volume-medium'
-                          size={20}
-                          color={t.reading}
-                        />
-                      )}
-                    </Pressable>
-                    {/* Prominent pane index beside the headword (◀ ▶ also in footer;
-                      swipe/edge-tap cycle too). */}
-                    {paneCount > 1 ? (
-                      <Text style={styles.paneIndexTop}>
-                        {safeIndex + 1} / {paneCount}
-                      </Text>
-                    ) : null}
-                  </View>
-                  {entry.inflectionChain.length > 0 ? (
-                    <Text style={styles.inflection}>
-                      {entry.inflectionChain.join(" ← ")}
+              <Animated.View
+                key={safeIndex}
+                style={styles.entry}
+                entering={(paneDirRef.current > 0
+                  ? FadeInRight
+                  : FadeInLeft
+                ).duration(180)}
+              >
+                <View style={styles.headwordRow}>
+                  <Text style={styles.term}>{entry.term}</Text>
+                  {entry.reading && entry.reading !== entry.term ? (
+                    <Text style={styles.reading}>【{entry.reading}】</Text>
+                  ) : null}
+                  {entry.wordClasses.length > 0 ? (
+                    <Text style={styles.wordClass}>
+                      {entry.wordClasses.join(" · ")}
                     </Text>
                   ) : null}
-                  {entry.definitions.map((group, gi) => {
-                    const tint = dictTints[group.dictionary] ?? t.reading;
-                    const dictSelected =
-                      selection?.kind === "dictionary" &&
-                      selection.paneIndex === safeIndex &&
-                      selection.dictionary === group.dictionary;
-                    return (
-                      <Pressable
-                        key={gi}
-                        onPress={() =>
-                          select({
+                  <Pressable
+                    style={styles.audioBtn}
+                    onPress={playWordAudio}
+                    disabled={audioBusy}
+                    hitSlop={8}
+                  >
+                    {audioBusy ? (
+                      <ActivityIndicator size='small' color={t.reading} />
+                    ) : (
+                      <Ionicons
+                        name='volume-medium'
+                        size={20}
+                        color={t.reading}
+                      />
+                    )}
+                  </Pressable>
+                  {/* Prominent pane index beside the headword (◀ ▶ also in footer;
+                      swipe/edge-tap cycle too). */}
+                  {paneCount > 1 ? (
+                    <Text style={styles.paneIndexTop}>
+                      {safeIndex + 1} / {paneCount}
+                    </Text>
+                  ) : null}
+                </View>
+                {entry.inflectionChain.length > 0 ? (
+                  <Text style={styles.inflection}>
+                    {entry.inflectionChain.join(" ← ")}
+                  </Text>
+                ) : null}
+                {entry.definitions.map((group, gi) => {
+                  const tint = dictTints[group.dictionary] ?? t.reading;
+                  const dictSelected =
+                    selection?.kind === "dictionary" &&
+                    selection.paneIndex === safeIndex &&
+                    selection.dictionary === group.dictionary;
+                  return (
+                    <Pressable
+                      key={gi}
+                      onPress={() =>
+                        select({
+                          kind: "dictionary",
+                          paneIndex: safeIndex,
+                          dictionary: group.dictionary,
+                        })
+                      }
+                      onLongPress={() =>
+                        openEditor(
+                          flattenSelectionText(result, {
                             kind: "dictionary",
                             paneIndex: safeIndex,
                             dictionary: group.dictionary,
-                          })
-                        }
-                        onLongPress={() =>
-                          openEditor(
-                            flattenSelectionText(result, {
-                              kind: "dictionary",
-                              paneIndex: safeIndex,
-                              dictionary: group.dictionary,
-                            }),
-                          )
-                        }
-                        style={[
-                          styles.defGroup,
-                          {
-                            backgroundColor: t.tintBg(tint),
-                            borderLeftColor: dictSelected
-                              ? t.selectedBorder
-                              : t.tintBorder(tint),
-                            borderLeftWidth: dictSelected ? 4 : 3,
-                          },
-                          dictSelected && styles.blockSelected,
-                        ]}
-                      >
-                        <Text style={[styles.dictName, { color: tint }]}>
-                          {group.dictionary}
-                        </Text>
-                        {group.glossary.map((gloss, li) => {
-                          const defSelected =
-                            selection?.kind === "definition" &&
-                            selection.paneIndex === safeIndex &&
-                            selection.dictionary === group.dictionary &&
-                            selection.glossIndex === li;
-                          const senseSelected =
-                            selection?.kind === "sense" &&
-                            selection.paneIndex === safeIndex &&
-                            selection.dictionary === group.dictionary &&
-                            selection.glossIndex === li
-                              ? serializePath(selection.path)
-                              : null;
-                          const info = senseMap[gi]?.[li];
-                          return (
-                            <Pressable
-                              key={li}
-                              onPress={() =>
-                                select({
+                          }),
+                        )
+                      }
+                      style={[
+                        styles.defGroup,
+                        {
+                          backgroundColor: t.tintBg(tint),
+                          borderLeftColor: dictSelected
+                            ? t.selectedBorder
+                            : t.tintBorder(tint),
+                          borderLeftWidth: dictSelected ? 4 : 3,
+                        },
+                        dictSelected && styles.blockSelected,
+                      ]}
+                    >
+                      <Text style={[styles.dictName, { color: tint }]}>
+                        {group.dictionary}
+                      </Text>
+                      {group.glossary.map((gloss, li) => {
+                        const defSelected =
+                          selection?.kind === "definition" &&
+                          selection.paneIndex === safeIndex &&
+                          selection.dictionary === group.dictionary &&
+                          selection.glossIndex === li;
+                        const senseSelected =
+                          selection?.kind === "sense" &&
+                          selection.paneIndex === safeIndex &&
+                          selection.dictionary === group.dictionary &&
+                          selection.glossIndex === li
+                            ? serializePath(selection.path)
+                            : null;
+                        const info = senseMap[gi]?.[li];
+                        return (
+                          <Pressable
+                            key={li}
+                            onPress={() =>
+                              select({
+                                kind: "definition",
+                                paneIndex: safeIndex,
+                                dictionary: group.dictionary,
+                                glossIndex: li,
+                              })
+                            }
+                            onLongPress={() =>
+                              openEditor(
+                                flattenSelectionText(result, {
                                   kind: "definition",
                                   paneIndex: safeIndex,
                                   dictionary: group.dictionary,
                                   glossIndex: li,
-                                })
-                              }
-                              onLongPress={() =>
-                                openEditor(
-                                  flattenSelectionText(result, {
-                                    kind: "definition",
-                                    paneIndex: safeIndex,
-                                    dictionary: group.dictionary,
-                                    glossIndex: li,
-                                  }),
-                                )
-                              }
-                              style={[
-                                styles.gloss,
-                                defSelected && styles.glossSelected,
-                              ]}
-                            >
-                              {info && info.segments.length > 0 ? (
-                                // Textual senses (blob dict): render each segment as its
-                                // own tappable fragment (inner Pressable wins the tap).
-                                info.segments.map((segment, si) => {
-                                  const segSelected =
-                                    selection?.kind === "segment" &&
-                                    selection.paneIndex === safeIndex &&
-                                    selection.dictionary === group.dictionary &&
-                                    selection.glossIndex === li &&
-                                    selection.segIndex === si;
-                                  return (
-                                    <Pressable
-                                      key={si}
-                                      onPress={() =>
-                                        select({
+                                }),
+                              )
+                            }
+                            style={[
+                              styles.gloss,
+                              defSelected && styles.glossSelected,
+                            ]}
+                          >
+                            {info && info.segments.length > 0 ? (
+                              // Textual senses (blob dict): render each segment as its
+                              // own tappable fragment (inner Pressable wins the tap).
+                              info.segments.map((segment, si) => {
+                                const segSelected =
+                                  selection?.kind === "segment" &&
+                                  selection.paneIndex === safeIndex &&
+                                  selection.dictionary === group.dictionary &&
+                                  selection.glossIndex === li &&
+                                  selection.segIndex === si;
+                                return (
+                                  <Pressable
+                                    key={si}
+                                    onPress={() =>
+                                      select({
+                                        kind: "segment",
+                                        paneIndex: safeIndex,
+                                        dictionary: group.dictionary,
+                                        glossIndex: li,
+                                        segIndex: si,
+                                      })
+                                    }
+                                    onLongPress={() =>
+                                      openEditor(
+                                        flattenSelectionText(result, {
                                           kind: "segment",
                                           paneIndex: safeIndex,
                                           dictionary: group.dictionary,
                                           glossIndex: li,
                                           segIndex: si,
-                                        })
-                                      }
-                                      onLongPress={() =>
-                                        openEditor(
-                                          flattenSelectionText(result, {
-                                            kind: "segment",
-                                            paneIndex: safeIndex,
-                                            dictionary: group.dictionary,
-                                            glossIndex: li,
-                                            segIndex: si,
-                                          }),
-                                        )
-                                      }
-                                      style={[
-                                        styles.segment,
-                                        segSelected && styles.glossSelected,
-                                      ]}
-                                    >
-                                      <StructuredContent
-                                        content={segment}
-                                        color={t.text}
-                                        linkColor={t.link}
-                                        onLinkPress={onLinkPress}
-                                      />
-                                    </Pressable>
-                                  );
-                                })
-                              ) : (
-                                <StructuredContent
-                                  content={gloss}
-                                  color={t.text}
-                                  linkColor={t.link}
-                                  onLinkPress={onLinkPress}
-                                  selectablePaths={info?.paths}
-                                  selectedPath={senseSelected}
-                                  onSelectPath={(path) =>
-                                    select({
+                                        }),
+                                      )
+                                    }
+                                    style={[
+                                      styles.segment,
+                                      segSelected && styles.glossSelected,
+                                    ]}
+                                  >
+                                    <StructuredContent
+                                      content={segment}
+                                      color={t.text}
+                                      linkColor={t.link}
+                                      onLinkPress={onLinkPress}
+                                    />
+                                  </Pressable>
+                                );
+                              })
+                            ) : (
+                              <StructuredContent
+                                content={gloss}
+                                color={t.text}
+                                linkColor={t.link}
+                                onLinkPress={onLinkPress}
+                                selectablePaths={info?.paths}
+                                selectedPath={senseSelected}
+                                onSelectPath={(path) =>
+                                  select({
+                                    kind: "sense",
+                                    paneIndex: safeIndex,
+                                    dictionary: group.dictionary,
+                                    glossIndex: li,
+                                    path,
+                                  })
+                                }
+                                onLongPressPath={(path) =>
+                                  openEditor(
+                                    flattenSelectionText(result, {
                                       kind: "sense",
                                       paneIndex: safeIndex,
                                       dictionary: group.dictionary,
                                       glossIndex: li,
                                       path,
-                                    })
-                                  }
-                                  onLongPressPath={(path) =>
-                                    openEditor(
-                                      flattenSelectionText(result, {
-                                        kind: "sense",
-                                        paneIndex: safeIndex,
-                                        dictionary: group.dictionary,
-                                        glossIndex: li,
-                                        path,
-                                      }),
-                                    )
-                                  }
-                                  selectedBg={t.selectedBg}
-                                  selectedBorder={t.selectedBorder}
-                                />
-                              )}
-                            </Pressable>
-                          );
-                        })}
-                      </Pressable>
-                    );
-                  })}
-                </Animated.View>
-              </ScrollView>
-            )}
-            {hasEntries && !editing && customText ? (
-              <View style={styles.customRow}>
-                <Text style={styles.customLabel} numberOfLines={1}>
-                  ✎ {customText}
+                                    }),
+                                  )
+                                }
+                                selectedBg={t.selectedBg}
+                                selectedBorder={t.selectedBorder}
+                              />
+                            )}
+                          </Pressable>
+                        );
+                      })}
+                    </Pressable>
+                  );
+                })}
+              </Animated.View>
+            </ScrollView>
+          )}
+          {hasEntries && !editing && customText ? (
+            <View style={styles.customRow}>
+              <Text style={styles.customLabel} numberOfLines={1}>
+                ✎ {customText}
+              </Text>
+              <Pressable onPress={() => setCustomText(null)} hitSlop={8}>
+                <Text style={styles.customClear}>✕</Text>
+              </Pressable>
+            </View>
+          ) : null}
+          {hasEntries && !editing ? (
+            <View style={styles.sentenceStrip}>
+              <View style={styles.sentenceTextWrap}>
+                <Text style={styles.sentenceLabel}>
+                  Sentence{cueSpan > 1 ? ` · ${cueSpan} lines` : ""}
                 </Text>
-                <Pressable onPress={() => setCustomText(null)} hitSlop={8}>
-                  <Text style={styles.customClear}>✕</Text>
+                <Text style={styles.sentenceText} numberOfLines={3}>
+                  {displaySentence || "—"}
+                </Text>
+              </View>
+              {hasCueStore && onCueRangeChange ? (
+                <View style={styles.sentenceBtns}>
+                  {/* ↺ first so the ＋ buttons never shift position. */}
+                  <Pressable
+                    style={[
+                      styles.extendBtn,
+                      cueSpan <= 1 && styles.extendBtnDisabled,
+                    ]}
+                    hitSlop={6}
+                    disabled={cueSpan <= 1}
+                    onPress={onCueRangeReset}
+                  >
+                    <Text style={styles.extendBtnText}>↺</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[
+                      styles.extendBtn,
+                      cueRange.startIndex <= 0 && styles.extendBtnDisabled,
+                    ]}
+                    hitSlop={6}
+                    disabled={cueRange.startIndex <= 0}
+                    onPress={() =>
+                      onCueRangeChange(extendRange(cueRange, -1, cues.length))
+                    }
+                  >
+                    <Text style={styles.extendBtnText}>‹＋</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[
+                      styles.extendBtn,
+                      cueRange.endIndex >= cues.length - 1 &&
+                        styles.extendBtnDisabled,
+                    ]}
+                    hitSlop={6}
+                    disabled={cueRange.endIndex >= cues.length - 1}
+                    onPress={() =>
+                      onCueRangeChange(extendRange(cueRange, 1, cues.length))
+                    }
+                  >
+                    <Text style={styles.extendBtnText}>＋›</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+          {hasEntries && !editing ? (
+            <View style={styles.footer}>
+              {paneCount > 1 ? (
+                <View style={styles.cycler}>
+                  <Pressable
+                    style={styles.cycleBtn}
+                    onPress={goPrev}
+                    hitSlop={8}
+                  >
+                    <Text style={styles.cycleArrow}>◀</Text>
+                  </Pressable>
+                  <Text style={styles.cycleIndex}>
+                    {safeIndex + 1} / {paneCount}
+                  </Text>
+                  <Pressable
+                    style={styles.cycleBtn}
+                    onPress={goNext}
+                    hitSlop={8}
+                  >
+                    <Text style={styles.cycleArrow}>▶</Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <View />
+              )}
+              <View style={styles.footerRight}>
+                <Pressable
+                  style={styles.editBtn}
+                  onPress={() => openEditor()}
+                  hitSlop={6}
+                >
+                  <Text style={styles.editBtnText}>✎</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.addBtn, added && styles.addBtnDone]}
+                  onPress={handleAddCard}
+                  disabled={adding || added}
+                  hitSlop={6}
+                >
+                  {adding ? (
+                    <ActivityIndicator size='small' color={t.accentText} />
+                  ) : (
+                    <Text style={styles.addBtnText}>
+                      {added ? "✓ Added" : "+ Anki card"}
+                    </Text>
+                  )}
                 </Pressable>
               </View>
-            ) : null}
-            {hasEntries && !editing ? (
-              <View style={styles.sentenceStrip}>
-                <View style={styles.sentenceTextWrap}>
-                  <Text style={styles.sentenceLabel}>
-                    Sentence{cueSpan > 1 ? ` · ${cueSpan} lines` : ""}
-                  </Text>
-                  <Text style={styles.sentenceText} numberOfLines={3}>
-                    {displaySentence || "—"}
-                  </Text>
-                </View>
-                {hasCueStore && onCueRangeChange ? (
-                  <View style={styles.sentenceBtns}>
-                    {/* ↺ first so the ＋ buttons never shift position. */}
-                    <Pressable
-                      style={[
-                        styles.extendBtn,
-                        cueSpan <= 1 && styles.extendBtnDisabled,
-                      ]}
-                      hitSlop={6}
-                      disabled={cueSpan <= 1}
-                      onPress={onCueRangeReset}
-                    >
-                      <Text style={styles.extendBtnText}>↺</Text>
-                    </Pressable>
-                    <Pressable
-                      style={[
-                        styles.extendBtn,
-                        cueRange.startIndex <= 0 && styles.extendBtnDisabled,
-                      ]}
-                      hitSlop={6}
-                      disabled={cueRange.startIndex <= 0}
-                      onPress={() =>
-                        onCueRangeChange(extendRange(cueRange, -1, cues.length))
-                      }
-                    >
-                      <Text style={styles.extendBtnText}>‹＋</Text>
-                    </Pressable>
-                    <Pressable
-                      style={[
-                        styles.extendBtn,
-                        cueRange.endIndex >= cues.length - 1 &&
-                          styles.extendBtnDisabled,
-                      ]}
-                      hitSlop={6}
-                      disabled={cueRange.endIndex >= cues.length - 1}
-                      onPress={() =>
-                        onCueRangeChange(extendRange(cueRange, 1, cues.length))
-                      }
-                    >
-                      <Text style={styles.extendBtnText}>＋›</Text>
-                    </Pressable>
-                  </View>
-                ) : null}
-              </View>
-            ) : null}
-            {hasEntries && !editing ? (
-              <View style={styles.footer}>
-                {paneCount > 1 ? (
-                  <View style={styles.cycler}>
-                    <Pressable
-                      style={styles.cycleBtn}
-                      onPress={goPrev}
-                      hitSlop={8}
-                    >
-                      <Text style={styles.cycleArrow}>◀</Text>
-                    </Pressable>
-                    <Text style={styles.cycleIndex}>
-                      {safeIndex + 1} / {paneCount}
-                    </Text>
-                    <Pressable
-                      style={styles.cycleBtn}
-                      onPress={goNext}
-                      hitSlop={8}
-                    >
-                      <Text style={styles.cycleArrow}>▶</Text>
-                    </Pressable>
-                  </View>
-                ) : (
-                  <View />
-                )}
-                <View style={styles.footerRight}>
-                  <Pressable
-                    style={styles.editBtn}
-                    onPress={() => openEditor()}
-                    hitSlop={6}
-                  >
-                    <Text style={styles.editBtnText}>✎</Text>
-                  </Pressable>
-                  <Pressable
-                    style={[styles.addBtn, added && styles.addBtnDone]}
-                    onPress={handleAddCard}
-                    disabled={adding || added}
-                    hitSlop={6}
-                  >
-                    {adding ? (
-                      <ActivityIndicator size='small' color={t.accentText} />
-                    ) : (
-                      <Text style={styles.addBtnText}>
-                        {added ? "✓ Added" : "+ Anki card"}
-                      </Text>
-                    )}
-                  </Pressable>
-                </View>
-              </View>
-            ) : null}
-            {/* Edge-tap zones: strips along the popup's own left/right edges cycle
+            </View>
+          ) : null}
+          {/* Edge-tap zones: strips along the popup's own left/right edges cycle
                 panes (they sit over the card's padding gutters, above the
                 ScrollView), with faint chevrons as the affordance. hitSlop widens
                 the touch target beyond the visible strip. */}
-            {hasEntries && !editing && paneCount > 1 ? (
-              <>
-                <Pressable
-                  style={[styles.edgeZone, styles.edgeZoneLeft]}
-                  onPress={goPrev}
-                  hitSlop={{ left: 8, right: 10 }}
-                >
-                  <Text style={styles.edgeChevron}>‹</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.edgeZone, styles.edgeZoneRight]}
-                  onPress={goNext}
-                  hitSlop={{ left: 10, right: 8 }}
-                >
-                  <Text style={styles.edgeChevron}>›</Text>
-                </Pressable>
-              </>
-            ) : null}
-            <Pressable style={styles.closeBtn} onPress={onClose} hitSlop={8}>
-              <Text style={styles.closeBtnText}>✕</Text>
-            </Pressable>
-          </View>
-        </GestureDetector>
+          {hasEntries && !editing && paneCount > 1 ? (
+            <>
+              <Pressable
+                style={[styles.edgeZone, styles.edgeZoneLeft]}
+                onPress={goPrev}
+                hitSlop={{ left: 8, right: 10 }}
+              >
+                <Text style={styles.edgeChevron}>‹</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.edgeZone, styles.edgeZoneRight]}
+                onPress={goNext}
+                hitSlop={{ left: 10, right: 8 }}
+              >
+                <Text style={styles.edgeChevron}>›</Text>
+              </Pressable>
+            </>
+          ) : null}
+          <Pressable style={styles.closeBtn} onPress={onClose} hitSlop={8}>
+            <Text style={styles.closeBtnText}>✕</Text>
+          </Pressable>
+        </View>
       </View>
     </View>
   );
