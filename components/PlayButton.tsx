@@ -3,7 +3,7 @@ import { Feather, Ionicons } from "@expo/vector-icons";
 import { BottomSheetView } from "@gorhom/bottom-sheet";
 import type { BaseItemDto } from "@jellyfin/sdk/lib/generated-client";
 import { useAtom, useAtomValue } from "jotai";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Platform, TouchableOpacity, View } from "react-native";
 import CastContext, {
@@ -81,14 +81,25 @@ export const PlayButton: React.FC<Props> = ({
   const { settings, updateSettings } = useSettings();
   const lightHapticFeedback = useHaptic("light");
 
+  // Guards against a fast double-tap pushing the player screen twice.
+  const isNavigatingRef = useRef(false);
+
   const goToPlayer = useCallback(
     (q: string) => {
+      if (isNavigatingRef.current) return;
+      isNavigatingRef.current = true;
+      // Release the lock shortly after so the button is usable again
+      // once the player screen has been pushed / on navigation return.
+      setTimeout(() => {
+        isNavigatingRef.current = false;
+      }, 1000);
+
       if (settings.maxAutoPlayEpisodeCount.value !== -1) {
         updateSettings({ autoPlayEpisodeCount: 0 });
       }
       router.push(`/player/direct-player?${q}`);
     },
-    [router, isOffline],
+    [router, isOffline, settings.maxAutoPlayEpisodeCount.value, updateSettings],
   );
 
   const handleNormalPlayFlow = useCallback(async () => {
