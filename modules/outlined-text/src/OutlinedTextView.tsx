@@ -19,7 +19,7 @@ let NativeOutlinedTextView: React.ComponentType<OutlinedTextViewProps> | null =
   null;
 
 /** Draw-implementation version the RUNNING BINARY carries (see the Swift module). */
-export const EXPECTED_RENDER_VERSION = 4;
+export const EXPECTED_RENDER_VERSION = 5;
 let nativeRenderVersion = 0;
 
 if (Platform.OS === "ios") {
@@ -52,7 +52,7 @@ export function logOutlinedTextStatus(): void {
     NativeOutlinedTextView
       ? nativeRenderVersion >= EXPECTED_RENDER_VERSION
         ? `[YOMIFIN OUTLINE] native OutlinedText view: PRESENT, render v${nativeRenderVersion} (current)`
-        : `[YOMIFIN OUTLINE] native OutlinedText view: PRESENT but render v${nativeRenderVersion} — STALE binary (JS expects v${EXPECTED_RENDER_VERSION}: path-fill registration). Run \`just local\` / \`just remote\` and verify the install replaced the app.`
+        : `[YOMIFIN OUTLINE] native OutlinedText view: PRESENT but render v${nativeRenderVersion} — STALE binary (JS expects v${EXPECTED_RENDER_VERSION}: bottom-aligned draw). Run \`just local\` / \`just remote\` and verify the install replaced the app.`
       : "[YOMIFIN OUTLINE] native OutlinedText view: MISSING — stale binary (run `just local` / `just remote`); using the JS stacked-copies fallback",
   );
 }

@@ -15,11 +15,17 @@ import UIKit
 ///     fill", and TextKit's rasterizer positions glyphs with subpixel differences
 ///     vs the raw path (origin rounding/smoothing), so the border came out fat on
 ///     one side, thin on the other.
-///  5. CURRENT: ONE geometry source, like libass — stroke AND fill are both
-///     rendered from the same glyph vector path (nonzero winding), so
-///     registration is exact by construction. Only glyphs with NO vector outline
-///     (color/bitmap glyphs, i.e. emoji) are TextKit-drawn, individually, on top
-///     — they get no outline, same as libass.
+///  5. ONE geometry source, like libass — stroke AND fill are both rendered from
+///     the same glyph vector path (nonzero winding), so registration is exact by
+///     construction. Only glyphs with NO vector outline (color/bitmap glyphs,
+///     i.e. emoji) are TextKit-drawn, individually, on top — no outline, same as
+///     libass.
+///  6. CURRENT: BOTTOM-aligned draw. The overlay is bottom-anchored and sizes
+///     this view from a GUESSED height first, then the native `onMeasured`
+///     height — a top-aligned draw made the visible line jump when that height
+///     settled. Drawing from the bottom (empty space goes above the text) pins
+///     the on-screen line regardless of the frame height; tap hit-testing uses
+///     the same origin so touches still land on the glyphs.
 ///
 /// One TextKit stack drives everything — layout, measurement (`onMeasured`),
 /// per-character tap hit-testing (`onCharacterTap`), the outline path AND the
@@ -44,6 +50,9 @@ final class OutlinedTextExpoView: ExpoView {
   private var colorGlyphIndexes: [Int] = []
   private var lastEmittedHeight: CGFloat = -1
   private var lastLayoutWidth: CGFloat = -1
+  /// Y of the last draw's text origin (bottom-aligned) — kept so tap hit-testing
+  /// uses the SAME vertical offset the glyphs were actually drawn at.
+  private var drawOriginY: CGFloat = 0
 
   let onCharacterTap = EventDispatcher()
   let onMeasured = EventDispatcher()
@@ -196,11 +205,21 @@ final class OutlinedTextExpoView: ExpoView {
     return path
   }
 
+  /// Bottom-aligned text origin for the current frame. Empty space (from a frame
+  /// taller than the text — e.g. the pre-measurement guess) sits ABOVE the text,
+  /// keeping the bottom edge — and thus the on-screen line — fixed.
+  private func textOrigin() -> CGPoint {
+    let usedHeight = ceil(layoutManager.usedRect(for: textContainer).height)
+    let y = max(strokeWidth, bounds.height - usedHeight - strokeWidth)
+    return CGPoint(x: 0, y: y)
+  }
+
   override func draw(_ rect: CGRect) {
     guard !text.isEmpty, bounds.width > 0, let ctx = UIGraphicsGetCurrentContext()
     else { return }
     ensureLaidOut(width: bounds.width)
-    let origin = CGPoint(x: 0, y: strokeWidth)
+    let origin = textOrigin()
+    drawOriginY = origin.y
     if outlinePath == nil { outlinePath = buildOutlinePath() }
 
     if let path = outlinePath, !path.isEmpty {
@@ -241,7 +260,8 @@ final class OutlinedTextExpoView: ExpoView {
   private func glyphHit(at point: CGPoint) -> Int? {
     guard textStorage.length > 0 else { return nil }
     var p = point
-    p.y -= strokeWidth
+    // Match draw()'s bottom-aligned origin so taps land on the visible glyphs.
+    p.y -= drawOriginY
     let glyphIndex = layoutManager.glyphIndex(for: p, in: textContainer)
     let glyphRect = layoutManager.boundingRect(
       forGlyphRange: NSRange(location: glyphIndex, length: 1),

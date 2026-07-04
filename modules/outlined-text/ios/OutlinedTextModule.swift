@@ -17,10 +17,12 @@ public class OutlinedTextModule: Module {
     //       subpixel registration mismatch between path and TextKit rasterizers)
     //   4 = stroke AND fill from the same glyph path (libass-style, exact
     //       registration); emoji TextKit-drawn individually
+    //   5 = v4 + bottom-aligned draw so the guess→measured height update never
+    //       shifts the visible line (bottom-anchored overlay; text was jumping)
     // BUMP THIS on every change to OutlinedTextExpoView's rendering.
     Constants([
       "available": true,
-      "renderVersion": 4
+      "renderVersion": 5
     ])
 
     View(OutlinedTextExpoView.self) {
