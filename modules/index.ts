@@ -24,6 +24,8 @@ export type {
   VideoSource as MpvVideoSource,
 } from "./mpv-player";
 export { MpvPlayerView } from "./mpv-player";
+export type { OutlinedTextViewProps } from "./outlined-text";
+export { isOutlinedTextAvailable, OutlinedTextView } from "./outlined-text";
 // Top Shelf cache (tvOS)
 export type {
   TopShelfCacheItem,

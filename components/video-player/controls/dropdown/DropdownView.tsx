@@ -31,6 +31,12 @@ const SUBTITLE_SCALE_PRESETS = [
   { label: "3.0x", value: 3.0 },
 ] as const;
 
+// YOMIFIN: tappable-overlay styling steps (same values as Settings → Reader — these
+// entries edit the SAME global settings, just reachable mid-playback).
+const OVERLAY_FONT_STEPS = [24, 28, 32, 38, 44] as const;
+const OVERLAY_OUTLINE_STEPS = ["none", "normal", "strong"] as const;
+const OVERLAY_OFFSET_STEPS = [24, 48, 64, 96, 128] as const;
+
 interface DropdownViewProps {
   playbackSpeed?: number;
   setPlaybackSpeed?: (speed: number, scope: PlaybackSpeedScope) => void;
@@ -141,6 +147,39 @@ const DropdownView = ({
           onPress: () => updateSettings({ mpvSubtitleScale: preset.value }),
         })),
       });
+
+      // YOMIFIN: tappable-overlay styling, adjustable without leaving the player
+      // ("Subtitle Scale" above only affects mpv's NATIVE rendering — bitmap subs).
+      groups.push({
+        title: "Tappable Subs · Text Size",
+        options: OVERLAY_FONT_STEPS.map((v) => ({
+          type: "radio" as const,
+          label: String(v),
+          value: String(v),
+          selected: (settings.yomifinSubtitleFontSize ?? 32) === v,
+          onPress: () => updateSettings({ yomifinSubtitleFontSize: v }),
+        })),
+      });
+      groups.push({
+        title: "Tappable Subs · Outline",
+        options: OVERLAY_OUTLINE_STEPS.map((v) => ({
+          type: "radio" as const,
+          label: v[0].toUpperCase() + v.slice(1),
+          value: v,
+          selected: (settings.yomifinSubtitleOutline ?? "normal") === v,
+          onPress: () => updateSettings({ yomifinSubtitleOutline: v }),
+        })),
+      });
+      groups.push({
+        title: "Tappable Subs · Position",
+        options: OVERLAY_OFFSET_STEPS.map((v) => ({
+          type: "radio" as const,
+          label: String(v),
+          value: String(v),
+          selected: (settings.yomifinSubtitleBottomOffset ?? 64) === v,
+          onPress: () => updateSettings({ yomifinSubtitleBottomOffset: v }),
+        })),
+      });
     }
 
     // YOMIFIN: online subtitle search (jimaku.cc) — needs network + an API key.
@@ -210,6 +249,9 @@ const DropdownView = ({
     subtitleIndex,
     audioIndex,
     settings.mpvSubtitleScale,
+    settings.yomifinSubtitleFontSize,
+    settings.yomifinSubtitleOutline,
+    settings.yomifinSubtitleBottomOffset,
     settings.yomifinJimakuApiKey,
     setOnlineSubsVisible,
     updateSettings,
