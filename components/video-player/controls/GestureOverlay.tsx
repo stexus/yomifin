@@ -93,6 +93,12 @@ interface Props {
   onSkipBackward: () => void;
   /** Two-finger tap → play/pause (native gesture-surface path). */
   onTogglePlay?: () => void;
+  /**
+   * Legacy full-screen dim behind the controls. The reworked Jellyfin player uses
+   * ControlsScrims instead (no dim), so it leaves this false; the minimal Stremio
+   * player opts in to keep its previous look.
+   */
+  dimWhenControlsShown?: boolean;
   // ---- drag-anywhere-to-seek (all optional; absent = flick-skip only) ----
   /** Player progress in ms — written live during a scrub (slider tracks free). */
   progress?: SharedValue<number>;
@@ -136,6 +142,7 @@ export const GestureOverlay = ({
   onScrubEnd,
   trickPlayUrl,
   trickplayInfo,
+  dimWhenControlsShown = false,
 }: Props) => {
   const { settings } = useSettings();
   const lightHaptic = useHaptic("light");
@@ -638,12 +645,12 @@ export const GestureOverlay = ({
 
   return (
     <>
-      {/* Single gesture surface for BOTH control states. When controls are up it doubles
-          as the dim layer (style toggle, not conditional mount — remounting the detector
-          mid-gesture breaks recognition).
-          CRITICAL: dim via backgroundColor rgba, NEVER via the view's `opacity` — UIKit
-          hit-testing ignores views with alpha ≤ 0.01, so `opacity: 0` makes the whole
-          gesture layer untouchable once controls hide (this happened on device). */}
+      {/* Single gesture surface for BOTH control states. Reworked Jellyfin UI passes
+          no dim (ControlsScrims draws subtle top/bottom gradients while controls are
+          up); the Stremio player opts into the legacy dim via dimWhenControlsShown.
+          CRITICAL: keep it `transparent`, NEVER `opacity: 0` — UIKit hit-testing
+          ignores views with alpha ≤ 0.01, which would make the whole gesture layer
+          untouchable (this happened on device). */}
       <GestureDetector gesture={composedGesture}>
         <View
           collapsable={false}
@@ -655,9 +662,10 @@ export const GestureOverlay = ({
             right: 0,
             top: 0,
             bottom: 0,
-            backgroundColor: showControls
-              ? `rgba(0,0,0,${settings.controlsDimOpacity ?? 0.4})`
-              : "transparent",
+            backgroundColor:
+              dimWhenControlsShown && showControls
+                ? `rgba(0,0,0,${settings.controlsDimOpacity ?? 0.4})`
+                : "transparent",
           }}
         >
           {surfaceActive && GestureSurfaceView ? (
@@ -680,6 +688,7 @@ export const GestureOverlay = ({
           active={scrubActive}
           scrubMs={scrubMs}
           startMs={scrubStartMs}
+          max={max ?? scrubMs}
           trickPlayUrl={trickPlayUrl ?? null}
           trickplayInfo={trickplayInfo ?? null}
         />

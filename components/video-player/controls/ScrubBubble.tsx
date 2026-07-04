@@ -51,6 +51,9 @@ function formatMs(ms: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
+// Width of the mini progress bar inside the popup (senplayer-style).
+const MINI_BAR_WIDTH = 150;
+
 interface Props {
   /** 1 while a scrub drag is in flight (written by the pan worklet). */
   active: SharedValue<number>;
@@ -58,6 +61,8 @@ interface Props {
   scrubMs: SharedValue<number>;
   /** Position when the drag started, ms (for the ± delta readout). */
   startMs: SharedValue<number>;
+  /** Total duration, ms (mini progress bar). */
+  max: SharedValue<number>;
   trickPlayUrl?: ScrubTrickplayUrl | null;
   trickplayInfo?: ScrubTrickplayInfo | null;
 }
@@ -66,12 +71,19 @@ export const ScrubBubble: FC<Props> = ({
   active,
   scrubMs,
   startMs,
+  max,
   trickPlayUrl,
   trickplayInfo,
 }) => {
   const containerStyle = useAnimatedStyle(() => ({
     opacity: withTiming(active.value ? 1 : 0, { duration: 120 }),
   }));
+
+  const miniFillStyle = useAnimatedStyle(() => {
+    const dur = max.value || 1;
+    const ratio = Math.min(1, Math.max(0, scrubMs.value / dur));
+    return { width: ratio * MINI_BAR_WIDTH };
+  });
 
   const timeProps = useAnimatedProps(() => {
     return { text: formatMs(scrubMs.value) } as any;
@@ -127,6 +139,9 @@ export const ScrubBubble: FC<Props> = ({
           style={styles.delta}
         />
       </Animated.View>
+      <Animated.View style={styles.miniTrack}>
+        <Animated.View style={[styles.miniFill, miniFillStyle]} />
+      </Animated.View>
     </Animated.View>
   );
 };
@@ -174,5 +189,17 @@ const styles = StyleSheet.create({
     minWidth: 52,
     textAlign: "center",
     padding: 0,
+  },
+  miniTrack: {
+    width: MINI_BAR_WIDTH,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.25)",
+    overflow: "hidden",
+  },
+  miniFill: {
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "#fff",
   },
 });

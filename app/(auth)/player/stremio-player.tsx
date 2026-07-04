@@ -577,6 +577,7 @@ export default function StremioPlayerPage() {
         isSeeking={isSeekingSV}
         onScrubStart={handleScrubStart}
         onScrubEnd={handleScrubEnd}
+        dimWhenControlsShown
       />
 
       {isBuffering && !error ? (

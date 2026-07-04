@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams } from "expo-router";
 import { useSetAtom } from "jotai";
-import { useCallback, useMemo, useRef } from "react";
+import { memo, useCallback, useMemo, useRef } from "react";
 import { Platform, View } from "react-native";
 import { BITRATES } from "@/components/BitrateSelector";
 import {
@@ -43,7 +43,17 @@ const OVERLAY_WEIGHT_STEPS = [
 const OVERLAY_OUTLINE_STEPS = ["none", "thin", "normal", "strong"] as const;
 const OVERLAY_OFFSET_STEPS = [24, 48, 64, 96, 128] as const;
 
+/**
+ * variant controls which sections + trigger icon this dropdown renders:
+ *   "menu"      — the top ⋯ button: quality / speed / technical info.
+ *   "subtitles" — bottom-left subtitle button: track list + scale + tappable-sub
+ *                 styling + online subtitles.
+ *   "audio"     — bottom-left audio button: audio track list.
+ */
+type DropdownVariant = "menu" | "subtitles" | "audio";
+
 interface DropdownViewProps {
+  variant?: DropdownVariant;
   playbackSpeed?: number;
   setPlaybackSpeed?: (speed: number, scope: PlaybackSpeedScope) => void;
   showTechnicalInfo?: boolean;
@@ -51,6 +61,7 @@ interface DropdownViewProps {
 }
 
 const DropdownView = ({
+  variant = "menu",
   playbackSpeed = 1.0,
   setPlaybackSpeed,
   showTechnicalInfo = false,
@@ -114,6 +125,103 @@ const DropdownView = ({
   const optionGroups = useMemo<OptionGroup[]>(() => {
     const groups: OptionGroup[] = [];
 
+    // ===== AUDIO variant: audio track list only =====
+    if (variant === "audio") {
+      if (audioTracks && audioTracks.length > 0) {
+        groups.push({
+          title: "Audio",
+          options: audioTracks.map((track) => ({
+            type: "radio" as const,
+            label: track.name,
+            value: track.index.toString(),
+            selected: audioIndex === track.index.toString(),
+            onPress: () => track.setTrack(),
+          })),
+        });
+      }
+      return groups;
+    }
+
+    // ===== SUBTITLES variant: track list + scale + tappable styling + online =====
+    if (variant === "subtitles") {
+      if (subtitleTracks && subtitleTracks.length > 0) {
+        groups.push({
+          title: "Subtitles",
+          options: subtitleTracks.map((sub) => ({
+            type: "radio" as const,
+            label: sub.name,
+            value: sub.index.toString(),
+            selected: subtitleIndex === sub.index.toString(),
+            onPress: () => sub.setTrack(),
+          })),
+        });
+        groups.push({
+          title: "Subtitle Scale",
+          options: SUBTITLE_SCALE_PRESETS.map((preset) => ({
+            type: "radio" as const,
+            label: preset.label,
+            value: preset.value.toString(),
+            selected: (settings.mpvSubtitleScale ?? 1.0) === preset.value,
+            onPress: () => updateSettings({ mpvSubtitleScale: preset.value }),
+          })),
+        });
+        groups.push({
+          title: "Tappable Subs · Text Size",
+          options: OVERLAY_FONT_STEPS.map((v) => ({
+            type: "radio" as const,
+            label: String(v),
+            value: String(v),
+            selected: (settings.yomifinSubtitleFontSize ?? 32) === v,
+            onPress: () => updateSettings({ yomifinSubtitleFontSize: v }),
+          })),
+        });
+        groups.push({
+          title: "Tappable Subs · Weight",
+          options: OVERLAY_WEIGHT_STEPS.map((w) => ({
+            type: "radio" as const,
+            label: w.label,
+            value: String(w.value),
+            selected: (settings.yomifinSubtitleWeight ?? 500) === w.value,
+            onPress: () => updateSettings({ yomifinSubtitleWeight: w.value }),
+          })),
+        });
+        groups.push({
+          title: "Tappable Subs · Outline",
+          options: OVERLAY_OUTLINE_STEPS.map((v) => ({
+            type: "radio" as const,
+            label: v[0].toUpperCase() + v.slice(1),
+            value: v,
+            selected: (settings.yomifinSubtitleOutline ?? "normal") === v,
+            onPress: () => updateSettings({ yomifinSubtitleOutline: v }),
+          })),
+        });
+        groups.push({
+          title: "Tappable Subs · Position",
+          options: OVERLAY_OFFSET_STEPS.map((v) => ({
+            type: "radio" as const,
+            label: String(v),
+            value: String(v),
+            selected: (settings.yomifinSubtitleBottomOffset ?? 64) === v,
+            onPress: () => updateSettings({ yomifinSubtitleBottomOffset: v }),
+          })),
+        });
+      }
+      if (!isOffline && settings.yomifinJimakuApiKey) {
+        groups.push({
+          options: [
+            {
+              type: "action" as const,
+              label: "Online subtitles (jimaku)…",
+              onPress: () => setOnlineSubsVisible(true),
+            },
+          ],
+        });
+      }
+      return groups;
+    }
+
+    // ===== MENU variant (default): quality / speed / technical info =====
+
     // Quality Section
     if (!isOffline) {
       groups.push({
@@ -126,102 +234,6 @@ const DropdownView = ({
             selected: bitrateValue === (bitrate.value?.toString() ?? ""),
             onPress: () => changeBitrate(bitrate.value?.toString() ?? ""),
           })) || [],
-      });
-    }
-
-    // Subtitle Section
-    if (subtitleTracks && subtitleTracks.length > 0) {
-      groups.push({
-        title: "Subtitles",
-        options: subtitleTracks.map((sub) => ({
-          type: "radio" as const,
-          label: sub.name,
-          value: sub.index.toString(),
-          selected: subtitleIndex === sub.index.toString(),
-          onPress: () => sub.setTrack(),
-        })),
-      });
-
-      // Subtitle Scale Section
-      groups.push({
-        title: "Subtitle Scale",
-        options: SUBTITLE_SCALE_PRESETS.map((preset) => ({
-          type: "radio" as const,
-          label: preset.label,
-          value: preset.value.toString(),
-          selected: (settings.mpvSubtitleScale ?? 1.0) === preset.value,
-          onPress: () => updateSettings({ mpvSubtitleScale: preset.value }),
-        })),
-      });
-
-      // YOMIFIN: tappable-overlay styling, adjustable without leaving the player
-      // ("Subtitle Scale" above only affects mpv's NATIVE rendering — bitmap subs).
-      groups.push({
-        title: "Tappable Subs · Text Size",
-        options: OVERLAY_FONT_STEPS.map((v) => ({
-          type: "radio" as const,
-          label: String(v),
-          value: String(v),
-          selected: (settings.yomifinSubtitleFontSize ?? 32) === v,
-          onPress: () => updateSettings({ yomifinSubtitleFontSize: v }),
-        })),
-      });
-      groups.push({
-        title: "Tappable Subs · Weight",
-        options: OVERLAY_WEIGHT_STEPS.map((w) => ({
-          type: "radio" as const,
-          label: w.label,
-          value: String(w.value),
-          selected: (settings.yomifinSubtitleWeight ?? 500) === w.value,
-          onPress: () => updateSettings({ yomifinSubtitleWeight: w.value }),
-        })),
-      });
-      groups.push({
-        title: "Tappable Subs · Outline",
-        options: OVERLAY_OUTLINE_STEPS.map((v) => ({
-          type: "radio" as const,
-          label: v[0].toUpperCase() + v.slice(1),
-          value: v,
-          selected: (settings.yomifinSubtitleOutline ?? "normal") === v,
-          onPress: () => updateSettings({ yomifinSubtitleOutline: v }),
-        })),
-      });
-      groups.push({
-        title: "Tappable Subs · Position",
-        options: OVERLAY_OFFSET_STEPS.map((v) => ({
-          type: "radio" as const,
-          label: String(v),
-          value: String(v),
-          selected: (settings.yomifinSubtitleBottomOffset ?? 64) === v,
-          onPress: () => updateSettings({ yomifinSubtitleBottomOffset: v }),
-        })),
-      });
-    }
-
-    // YOMIFIN: online subtitle search (jimaku.cc) — needs network + an API key.
-    if (!isOffline && settings.yomifinJimakuApiKey) {
-      groups.push({
-        options: [
-          {
-            type: "action" as const,
-            label: "Online subtitles (jimaku)…",
-            onPress: () => setOnlineSubsVisible(true),
-          },
-        ],
-      });
-    }
-
-    // Audio Section
-    if (audioTracks && audioTracks.length > 0) {
-      groups.push({
-        title: "Audio",
-        options: audioTracks.map((track) => ({
-          type: "radio" as const,
-          label: track.name,
-          value: track.index.toString(),
-          selected: audioIndex === track.index.toString(),
-          onPress: () => track.setTrack(),
-        })),
       });
     }
 
@@ -257,6 +269,7 @@ const DropdownView = ({
     return groups;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    variant,
     isOffline,
     bitrateValue,
     changeBitrate,
@@ -281,21 +294,36 @@ const DropdownView = ({
   ]);
 
   // Memoize the trigger to prevent re-renders
+  const triggerIcon =
+    variant === "subtitles"
+      ? "chatbox-ellipses"
+      : variant === "audio"
+        ? "volume-high"
+        : "ellipsis-horizontal";
   const trigger = useMemo(
     () => (
       <View className='aspect-square flex flex-col rounded-xl items-center justify-center p-2'>
-        <Ionicons name='ellipsis-horizontal' size={24} color={"white"} />
+        <Ionicons name={triggerIcon} size={24} color={"white"} />
       </View>
     ),
-    [],
+    [triggerIcon],
   );
 
   // Hide on TV platforms
   if (Platform.isTV) return null;
+  // Nothing to show (e.g. audio picker with no tracks) — render nothing so the
+  // button doesn't appear as a dead control.
+  if (optionGroups.length === 0) return null;
 
   return (
     <PlatformDropdown
-      title='Playback Options'
+      title={
+        variant === "subtitles"
+          ? "Subtitles"
+          : variant === "audio"
+            ? "Audio"
+            : "Playback Options"
+      }
       groups={optionGroups}
       trigger={trigger}
       expoUIConfig={{}}
@@ -306,4 +334,9 @@ const DropdownView = ({
   );
 };
 
-export default DropdownView;
+// Memoized: BottomControls (which now hosts the subtitle/audio pickers) re-renders
+// every second as the clock ticks. Re-rendering the underlying @expo/ui SwiftUI
+// Menu host that often crashes natively (regression from moving these pickers out of
+// the tick-free HeaderControls). The picker variants take only a stable `variant`
+// prop, so memo fully insulates them; the menu variant's props change rarely.
+export default memo(DropdownView);

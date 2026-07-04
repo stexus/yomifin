@@ -6,6 +6,7 @@ import { MediaToggles } from "@/components/settings/MediaToggles";
 import { MpvBufferSettings } from "@/components/settings/MpvBufferSettings";
 import { MpvVoSettings } from "@/components/settings/MpvVoSettings";
 import { PlaybackControlsSettings } from "@/components/settings/PlaybackControlsSettings";
+import { PlayerUISettings } from "@/components/settings/PlayerUISettings";
 import { ChromecastSettings } from "../../../../../../components/settings/ChromecastSettings";
 
 export default function PlaybackControlsPage() {
@@ -26,6 +27,7 @@ export default function PlaybackControlsPage() {
         <View className='mb-4'>
           <MediaProvider>
             <MediaToggles className='mb-4' />
+            {!Platform.isTV && <PlayerUISettings className='mb-4' />}
             <GestureControls className='mb-4' />
             <PlaybackControlsSettings />
             <MpvBufferSettings />

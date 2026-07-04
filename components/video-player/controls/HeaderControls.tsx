@@ -23,10 +23,6 @@ interface HeaderControlsProps {
   mediaSource?: MediaSourceInfo | null;
   startPictureInPicture?: () => Promise<void>;
   switchOnEpisodeMode: () => void;
-  goToPreviousItem: () => void;
-  goToNextItem: (options: { isAutoPlay?: boolean }) => void;
-  previousItem?: BaseItemDto | null;
-  nextItem?: BaseItemDto | null;
   aspectRatio?: AspectRatio;
   isZoomedToFill?: boolean;
   onZoomToggle?: () => void;
@@ -47,10 +43,6 @@ export const HeaderControls: FC<HeaderControlsProps> = ({
   mediaSource,
   startPictureInPicture,
   switchOnEpisodeMode,
-  goToPreviousItem,
-  goToNextItem,
-  previousItem,
-  nextItem,
   aspectRatio: _aspectRatio = "default",
   isZoomedToFill = false,
   onZoomToggle,
@@ -100,7 +92,8 @@ export const HeaderControls: FC<HeaderControlsProps> = ({
       style={[
         {
           position: "absolute",
-          top: insets.top,
+          // Sits BELOW the custom OSD status bar (clock/battery row).
+          top: insets.top + 38,
           left: insets.left,
           right: insets.right,
           padding: HEADER_LAYOUT.CONTAINER_PADDING,
@@ -116,6 +109,7 @@ export const HeaderControls: FC<HeaderControlsProps> = ({
         {!Platform.isTV && (!offline || !mediaSource?.TranscodingUrl) && (
           <View pointerEvents='auto'>
             <DropdownView
+              variant='menu'
               playbackSpeed={playbackSpeed}
               setPlaybackSpeed={setPlaybackSpeed}
               showTechnicalInfo={showTechnicalInfo}
@@ -169,30 +163,7 @@ export const HeaderControls: FC<HeaderControlsProps> = ({
             <Ionicons name='list' size={ICON_SIZES.HEADER} color='white' />
           </TouchableOpacity>
         )}
-        {previousItem && (
-          <TouchableOpacity
-            onPress={goToPreviousItem}
-            className='aspect-square flex flex-col rounded-xl items-center justify-center p-2'
-          >
-            <Ionicons
-              name='play-skip-back'
-              size={ICON_SIZES.HEADER}
-              color='white'
-            />
-          </TouchableOpacity>
-        )}
-        {nextItem && (
-          <TouchableOpacity
-            onPress={() => goToNextItem({ isAutoPlay: false })}
-            className='aspect-square flex flex-col rounded-xl items-center justify-center p-2'
-          >
-            <Ionicons
-              name='play-skip-forward'
-              size={ICON_SIZES.HEADER}
-              color='white'
-            />
-          </TouchableOpacity>
-        )}
+        {/* Prev/next EPISODE moved to the bottom control cluster (senplayer layout). */}
         {/* MPV Zoom Toggle */}
         <ZoomToggle
           isZoomedToFill={isZoomedToFill}

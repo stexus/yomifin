@@ -5,23 +5,25 @@ import type {
 } from "@jellyfin/sdk/lib/generated-client";
 import { type FC, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Pressable, View } from "react-native";
+import { Platform, Pressable, TouchableOpacity, View } from "react-native";
 import { Slider } from "react-native-awesome-slider";
 import { type SharedValue } from "react-native-reanimated";
 import { ChapterList } from "@/components/chapters/ChapterList";
 import { ChapterTicks } from "@/components/chapters/ChapterTicks";
 import { Text } from "@/components/common/Text";
+import { Loader } from "@/components/Loader";
 import { useControlsSafeAreaInsets } from "@/hooks/useControlsSafeAreaInsets";
 import { useSettings } from "@/utils/atoms/settings";
 import { chapterMarkers, chapterNameAt } from "@/utils/chapters";
+import { formatTimeString } from "@/utils/time";
+import DropdownView from "./dropdown/DropdownView";
 import NextEpisodeCountDownButton from "./NextEpisodeCountDownButton";
 import SkipButton from "./SkipButton";
-import { TimeDisplay } from "./TimeDisplay";
 import { TrickplayBubble } from "./TrickplayBubble";
 
-// Chapter tick height in dp — matches the slider track height for a clean,
-// flush look (no top/bottom overflow).
-const TICK_HEIGHT = 10;
+// Sleek progress bar height (thinner than the old 10px) + chapter tick height.
+const SLIDER_HEIGHT = 6;
+const TICK_HEIGHT = 9;
 
 interface BottomControlsProps {
   item: BaseItemDto;
@@ -40,9 +42,22 @@ interface BottomControlsProps {
   skipIntro: () => void;
   skipCredit: () => void;
   nextItem?: BaseItemDto | null;
+  previousItem?: BaseItemDto | null;
   handleNextEpisodeAutoPlay: () => void;
   handleNextEpisodeManual: () => void;
   handleControlsInteraction: () => void;
+
+  // ---- control cluster (below the bar) ----
+  isPlaying: boolean;
+  isBuffering: boolean;
+  togglePlay: () => void;
+  handleSkipBackward: () => void;
+  handleSkipForward: () => void;
+  showSubtitleNav?: boolean;
+  onPrevSubtitle?: () => void;
+  onNextSubtitle?: () => void;
+  goToPreviousItem: () => void;
+  goToNextItem: (options: { isAutoPlay?: boolean }) => void;
 
   // Slider props
   min: SharedValue<number>;
@@ -77,6 +92,8 @@ interface BottomControlsProps {
   };
 }
 
+const ICON = "white";
+
 export const BottomControls: FC<BottomControlsProps> = ({
   item,
   chapters,
@@ -92,9 +109,20 @@ export const BottomControls: FC<BottomControlsProps> = ({
   skipIntro,
   skipCredit,
   nextItem,
+  previousItem,
   handleNextEpisodeAutoPlay,
   handleNextEpisodeManual,
   handleControlsInteraction,
+  isPlaying,
+  isBuffering,
+  togglePlay,
+  handleSkipBackward,
+  handleSkipForward,
+  showSubtitleNav = false,
+  onPrevSubtitle,
+  onNextSubtitle,
+  goToPreviousItem,
+  goToNextItem,
   min,
   max,
   effectiveProgress,
@@ -113,23 +141,20 @@ export const BottomControls: FC<BottomControlsProps> = ({
   const { t } = useTranslation();
   const insets = useControlsSafeAreaInsets();
   const [chapterListVisible, setChapterListVisible] = useState(false);
+  // Right-hand time label cycles: 0 = total length, 1 = -remaining, 2 = ends-at.
+  const [timeMode, setTimeMode] = useState(0);
 
-  // Only expose chapter UI when there are at least two real markers.
   const chapterMarkerList = useMemo(
     () => chapterMarkers(chapters, durationMs),
     [chapters, durationMs],
   );
   const hasChapters = chapterMarkerList.length > 1;
 
-  // Current chapter name for the always-visible header label (live playback).
   const currentChapterName = useMemo(
     () => (hasChapters ? chapterNameAt(currentTime, chapters) : null),
     [hasChapters, currentTime, chapters],
   );
 
-  // Chapter name at the scrubbed position for the trickplay bubble. `time` is
-  // an {h,m,s} object derived from the slider's dragged value — convert back
-  // to ms for the lookup. Only useful while actively scrubbing.
   const scrubChapterName = useMemo(() => {
     if (!hasChapters) return null;
     const scrubMs =
@@ -137,57 +162,76 @@ export const BottomControls: FC<BottomControlsProps> = ({
     return chapterNameAt(scrubMs, chapters);
   }, [hasChapters, time.hours, time.minutes, time.seconds, chapters]);
 
+  const rightTimeLabel = useMemo(() => {
+    if (timeMode === 1) return `-${formatTimeString(remainingTime, "ms")}`;
+    if (timeMode === 2) {
+      const finish = new Date(Date.now() + remainingTime);
+      return t("player.ends_at", {
+        time: finish.toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        }),
+      });
+    }
+    return formatTimeString(durationMs, "ms");
+  }, [timeMode, remainingTime, durationMs, t]);
+
+  const rewind = settings?.rewindSkipTime ?? 10;
+  const forward = settings?.forwardSkipTime ?? 10;
+
+  // Fixed width for the time columns so the flanking labels can't change width as the
+  // digits roll over (e.g. 9:59 → 10:00). Without this the flex:1 slider re-lays-out
+  // every tick and the bar visibly flickers — most obvious while subtitle-seeking,
+  // which fires rapid position jumps. Sized to the (constant) duration string.
+  const timeColWidth = useMemo(() => {
+    const chars = formatTimeString(durationMs, "ms").length;
+    return Math.max(46, Math.ceil(chars * 8) + 6);
+  }, [durationMs]);
+
   return (
     <View
-      style={[
-        {
-          position: "absolute",
-          right: insets.right,
-          left: insets.left,
-          bottom: Math.max(insets.bottom - 17, 0),
-        },
-      ]}
-      className={"flex flex-col px-2"}
+      style={{
+        position: "absolute",
+        right: insets.right,
+        left: insets.left,
+        bottom: Math.max(insets.bottom - 6, 4),
+      }}
+      className='flex flex-col px-4'
       onTouchStart={handleControlsInteraction}
+      pointerEvents={showControls ? "box-none" : "none"}
     >
+      {/* ---- Row A: subtitle/audio pickers (left) · skip buttons (right) ---- */}
       <View
-        className='shrink flex flex-col justify-center'
-        style={{
-          flexDirection: "row",
-          justifyContent: "space-between",
-        }}
+        className='flex flex-row items-center justify-between'
+        style={{ minHeight: 40 }}
       >
-        <View
-          className='flex flex-col items-start shrink'
-          pointerEvents={showControls ? "box-none" : "none"}
-        >
-          {item?.Type === "Episode" && (
-            <Text className='opacity-50'>
-              {`${item.SeriesName} - ${item.SeasonName} Episode ${item.IndexNumber}`}
-            </Text>
-          )}
-          <Text className='font-bold text-xl'>{item?.Name}</Text>
-          {item?.Type === "Movie" && (
-            <Text className='text-xs opacity-50'>{item?.ProductionYear}</Text>
-          )}
-          {item?.Type === "Audio" && (
-            <Text className='text-xs opacity-50'>{item?.Album}</Text>
-          )}
-          {currentChapterName ? (
-            <Text className='text-xs opacity-70 mt-1' numberOfLines={1}>
-              {currentChapterName}
-            </Text>
-          ) : null}
+        <View className='flex flex-row items-center' pointerEvents='auto'>
+          {!Platform.isTV && <DropdownView variant='subtitles' />}
+          {!Platform.isTV && <DropdownView variant='audio' />}
         </View>
-        <View className='flex flex-row items-center space-x-2 shrink-0'>
+
+        {currentChapterName ? (
+          <Text
+            className='text-xs opacity-70 shrink mx-2'
+            numberOfLines={1}
+            style={{ flex: 1, textAlign: "center" }}
+          >
+            {currentChapterName}
+          </Text>
+        ) : (
+          <View style={{ flex: 1 }} />
+        )}
+
+        <View
+          className='flex flex-row items-center space-x-2 shrink-0'
+          pointerEvents='auto'
+        >
           <SkipButton
             showButton={showSkipButton}
             onPress={skipIntro}
             buttonText='Skip Intro'
           />
-          {/* Smart Skip Credits behavior:
-              - Show "Skip Credits" if there's content after credits OR no next episode
-              - Show "Next Episode" if credits extend to video end AND next episode exists */}
           <SkipButton
             showButton={
               showSkipCreditButton && (hasContentAfterCredits || !nextItem)
@@ -203,8 +247,7 @@ export const BottomControls: FC<BottomControlsProps> = ({
                 show={
                   !nextItem
                     ? false
-                    : // Show during credits if no content after, OR near end of video
-                      (showSkipCreditButton && !hasContentAfterCredits) ||
+                    : (showSkipCreditButton && !hasContentAfterCredits) ||
                       remainingTime < 10000
                 }
                 onFinish={handleNextEpisodeAutoPlay}
@@ -215,73 +258,215 @@ export const BottomControls: FC<BottomControlsProps> = ({
             <Pressable
               onPress={() => setChapterListVisible(true)}
               hitSlop={10}
-              className='justify-center ml-4'
+              className='justify-center ml-2'
               accessibilityRole='button'
               accessibilityLabel={t("chapters.open")}
             >
-              <Ionicons name='bookmarks' size={24} color='white' />
+              <Ionicons name='bookmarks' size={22} color={ICON} />
             </Pressable>
           )}
         </View>
       </View>
+
+      {/* ---- Row B: current time · sleek slider · length (tappable) ---- */}
       <View
-        className={"flex flex-col-reverse rounded-lg items-center my-2"}
-        pointerEvents={showControls ? "box-none" : "none"}
+        className='flex flex-row items-center my-1'
+        pointerEvents='box-none'
       >
-        <View className={"flex flex-col w-full shrink"}>
-          <View
-            style={{
-              height: 10,
-              justifyContent: "center",
-              alignItems: "stretch",
-              // Allow chapter ticks taller than the 10px track to bleed out
-              // top/bottom (RN defaults to overflow: "hidden" on Android).
-              overflow: "visible",
+        <Text
+          className='text-[12px] text-neutral-300 mr-3'
+          numberOfLines={1}
+          style={{
+            fontVariant: ["tabular-nums"],
+            width: timeColWidth,
+            textAlign: "left",
+          }}
+        >
+          {formatTimeString(currentTime, "ms")}
+        </Text>
+        <View
+          style={{
+            flex: 1,
+            height: SLIDER_HEIGHT,
+            justifyContent: "center",
+            overflow: "visible",
+          }}
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+          pointerEvents='auto'
+        >
+          <Slider
+            theme={{
+              maximumTrackTintColor: "rgba(255,255,255,0.2)",
+              minimumTrackTintColor: "#fff",
+              cacheTrackTintColor: "rgba(255,255,255,0.3)",
+              bubbleBackgroundColor: "#fff",
+              bubbleTextColor: "#666",
+              heartbeatColor: "#999",
             }}
-            onTouchStart={handleTouchStart}
-            onTouchEnd={handleTouchEnd}
-          >
-            <Slider
-              theme={{
-                maximumTrackTintColor: "rgba(255,255,255,0.2)",
-                minimumTrackTintColor: "#fff",
-                cacheTrackTintColor: "rgba(255,255,255,0.3)",
-                bubbleBackgroundColor: "#fff",
-                bubbleTextColor: "#666",
-                heartbeatColor: "#999",
-              }}
-              renderThumb={() => null}
-              cache={cacheProgress}
-              onSlidingStart={handleSliderStart}
-              onSlidingComplete={handleSliderComplete}
-              onValueChange={handleSliderChange}
-              containerStyle={{
-                borderRadius: 100,
-              }}
-              renderBubble={() =>
-                (isSliding || showRemoteBubble) && (
-                  <TrickplayBubble
-                    trickPlayUrl={trickPlayUrl}
-                    trickplayInfo={trickplayInfo}
-                    time={time}
-                    chapterName={scrubChapterName}
-                  />
-                )
-              }
-              sliderHeight={10}
-              thumbWidth={0}
-              progress={effectiveProgress}
-              minimumValue={min}
-              maximumValue={max}
-            />
-            <ChapterTicks markers={chapterMarkerList} height={TICK_HEIGHT} />
-          </View>
-          <TimeDisplay
-            currentTime={currentTime}
-            remainingTime={remainingTime}
+            renderThumb={() => null}
+            cache={cacheProgress}
+            onSlidingStart={handleSliderStart}
+            onSlidingComplete={handleSliderComplete}
+            onValueChange={handleSliderChange}
+            containerStyle={{ borderRadius: 100 }}
+            renderBubble={() =>
+              (isSliding || showRemoteBubble) && (
+                <TrickplayBubble
+                  trickPlayUrl={trickPlayUrl}
+                  trickplayInfo={trickplayInfo}
+                  time={time}
+                  chapterName={scrubChapterName}
+                />
+              )
+            }
+            sliderHeight={SLIDER_HEIGHT}
+            thumbWidth={0}
+            progress={effectiveProgress}
+            minimumValue={min}
+            maximumValue={max}
           />
+          <ChapterTicks markers={chapterMarkerList} height={TICK_HEIGHT} />
         </View>
+        <Pressable
+          onPress={() => setTimeMode((m) => (m + 1) % 3)}
+          hitSlop={10}
+          className='ml-3'
+          pointerEvents='auto'
+          // Fixed width so the ticking label can't jitter the slider. The ends-at
+          // mode may be a touch wider — allow it to grow only there (a one-off shift
+          // on an explicit tap, never during playback/seeking).
+          style={{ width: timeMode === 2 ? undefined : timeColWidth }}
+        >
+          <Text
+            className='text-[12px] text-neutral-300'
+            numberOfLines={1}
+            style={{ fontVariant: ["tabular-nums"], textAlign: "right" }}
+          >
+            {rightTimeLabel}
+          </Text>
+        </Pressable>
       </View>
+
+      {/* ---- Row C: control cluster (below the bar) ---- */}
+      {!Platform.isTV && (
+        <View
+          className='flex flex-row items-center justify-center'
+          style={{ gap: 26, paddingVertical: 6 }}
+          pointerEvents='auto'
+        >
+          {previousItem && (
+            <TouchableOpacity onPress={goToPreviousItem} hitSlop={8}>
+              <Ionicons name='play-skip-back' size={26} color={ICON} />
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity onPress={handleSkipBackward} hitSlop={8}>
+            <View style={{ justifyContent: "center", alignItems: "center" }}>
+              <Ionicons
+                name='refresh-outline'
+                size={34}
+                color={ICON}
+                style={{ transform: [{ scaleY: -1 }, { rotate: "180deg" }] }}
+              />
+              <Text
+                style={{
+                  position: "absolute",
+                  color: ICON,
+                  fontSize: 11,
+                  fontWeight: "bold",
+                }}
+              >
+                {rewind}
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          {showSubtitleNav && (
+            <TouchableOpacity
+              onPress={onPrevSubtitle}
+              hitSlop={8}
+              accessibilityLabel='Previous subtitle'
+            >
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <Ionicons name='caret-back' size={18} color={ICON} />
+                <Ionicons
+                  name='chatbox-ellipses-outline'
+                  size={20}
+                  color={ICON}
+                />
+              </View>
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity onPress={togglePlay} hitSlop={10}>
+            {/* Fixed 46×46 box so swapping the play icon for the buffering Loader
+                can't change Row C's height — the whole stack is bottom-anchored, so a
+                height change there pushes the progress bar up/down (flicker). */}
+            <View
+              style={{
+                width: 46,
+                height: 46,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              {!isBuffering ? (
+                <Ionicons
+                  name={isPlaying ? "pause" : "play"}
+                  size={46}
+                  color={ICON}
+                />
+              ) : (
+                <Loader size='large' />
+              )}
+            </View>
+          </TouchableOpacity>
+
+          {showSubtitleNav && (
+            <TouchableOpacity
+              onPress={onNextSubtitle}
+              hitSlop={8}
+              accessibilityLabel='Next subtitle'
+            >
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <Ionicons
+                  name='chatbox-ellipses-outline'
+                  size={20}
+                  color={ICON}
+                />
+                <Ionicons name='caret-forward' size={18} color={ICON} />
+              </View>
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity onPress={handleSkipForward} hitSlop={8}>
+            <View style={{ justifyContent: "center", alignItems: "center" }}>
+              <Ionicons name='refresh-outline' size={34} color={ICON} />
+              <Text
+                style={{
+                  position: "absolute",
+                  color: ICON,
+                  fontSize: 11,
+                  fontWeight: "bold",
+                }}
+              >
+                {forward}
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          {nextItem && (
+            <TouchableOpacity
+              onPress={() => goToNextItem({ isAutoPlay: false })}
+              hitSlop={8}
+            >
+              <Ionicons name='play-skip-forward' size={26} color={ICON} />
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
       <ChapterList
         visible={chapterListVisible}
         chapters={chapters}

@@ -383,6 +383,21 @@ export type Settings = {
   stremioAddonUrls: string[];
   /** Skip the stream picker: auto-play the first playable (debrid) result. */
   stremioAutoPlayFirstStream: boolean;
+  // ===== Player UI (senplayer-style rework) =====
+  /**
+   * Show the persistent OSD status bar (clock/battery/etc) during REGULAR playback
+   * (i.e. while the control pane is hidden). When the control pane is up, the full
+   * status bar always shows regardless of these toggles.
+   */
+  playerStatusBarDuringPlayback: boolean;
+  /** Which items appear in the status bar DURING PLAYBACK (all show when controls up). */
+  playerStatusShowClock: boolean;
+  playerStatusShowDate: boolean;
+  playerStatusShowBattery: boolean;
+  playerStatusShowWifi: boolean;
+  playerStatusShowNetwork: boolean;
+  /** Clock format: 12-hour (true) or 24-hour (false). Follows device locale otherwise. */
+  playerClock12Hour: boolean;
 };
 
 export interface Lockable<T> {
@@ -510,6 +525,14 @@ export const defaultValues: Settings = {
     "https://aiostream.luigivault.com/stremio/e63962d4-c468-4b49-9bed-80581f53bab5/eyJpIjoic09qaW8yaHg1UjQrRUE3bjVISXlXUT09IiwiZSI6IkdzYStSOVY0ejVKdXB4STF2YTUxOURlWStFWjArRElqazVsTno2WE92QkE9IiwidCI6ImEifQ/manifest.json",
   ],
   stremioAutoPlayFirstStream: false,
+  // Player UI (senplayer-style rework): during-playback status bar = clock + battery.
+  playerStatusBarDuringPlayback: true,
+  playerStatusShowClock: true,
+  playerStatusShowDate: false,
+  playerStatusShowBattery: true,
+  playerStatusShowWifi: false,
+  playerStatusShowNetwork: false,
+  playerClock12Hour: true,
 };
 
 const loadSettings = (): Partial<Settings> => {

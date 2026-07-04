@@ -14,6 +14,7 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from "react-native-reanimated";
+import { Loader } from "@/components/Loader";
 import ContinueWatchingOverlay from "@/components/video-player/controls/ContinueWatchingOverlay";
 import useRouter from "@/hooks/useAppRouter";
 import { useCreditSkipper } from "@/hooks/useCreditSkipper";
@@ -28,16 +29,17 @@ import { useSettings } from "@/utils/atoms/settings";
 import { getDefaultPlaySettings } from "@/utils/jellyfin/getDefaultPlaySettings";
 import { msToTicks, ticksToMs } from "@/utils/time";
 import { BottomControls } from "./BottomControls";
-import { CenterControls } from "./CenterControls";
+import { ControlsScrims } from "./ControlsScrims";
 import { CONTROLS_CONSTANTS } from "./constants";
 import { EpisodeList } from "./EpisodeList";
 import { GestureOverlay } from "./GestureOverlay";
 import { HeaderControls } from "./HeaderControls";
-import { useChapterNavigation } from "./hooks/useChapterNavigation";
 import { useRemoteControl } from "./hooks/useRemoteControl";
 import { useVideoNavigation } from "./hooks/useVideoNavigation";
 import { useVideoSlider } from "./hooks/useVideoSlider";
 import { useVideoTime } from "./hooks/useVideoTime";
+import { PlayerStatusBar } from "./PlayerStatusBar";
+import { ScrubProgressBar } from "./ScrubProgressBar";
 import { TechnicalInfoOverlay } from "./TechnicalInfoOverlay";
 import { useControlsTimeout } from "./useControlsTimeout";
 import { PlaybackSpeedScope } from "./utils/playback-speed-settings";
@@ -122,7 +124,10 @@ export const Controls: FC<Props> = ({
   const lightHapticFeedback = useHaptic("light");
 
   const [episodeView, setEpisodeView] = useState(false);
-  const [showAudioSlider, setShowAudioSlider] = useState(false);
+  const [_showAudioSlider, setShowAudioSlider] = useState(false);
+  // True while a drag-anywhere scrub is in flight (pops the minimal bottom bar even
+  // when the control pane is hidden).
+  const [isScrubbing, setIsScrubbing] = useState(false);
 
   const { height: screenHeight, width: screenWidth } = useWindowDimensions();
   const { previousItem, nextItem } = usePlaybackManager({
@@ -177,16 +182,6 @@ export const Controls: FC<Props> = ({
     zIndex: 10,
   }));
 
-  const centerAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: controlsOpacity.value,
-    position: "absolute" as const,
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 5,
-  }));
-
   const bottomAnimatedStyle = useAnimatedStyle(() => ({
     opacity: controlsOpacity.value,
     transform: [{ translateY: bottomTranslateY.value }],
@@ -233,6 +228,7 @@ export const Controls: FC<Props> = ({
   const wasPlayingBeforeScrubRef = useRef(false);
   const handleScrubStart = useCallback(() => {
     wasPlayingBeforeScrubRef.current = isPlaying;
+    setIsScrubbing(true);
     pause();
   }, [isPlaying, pause]);
   const handleScrubPreview = useCallback(
@@ -246,6 +242,7 @@ export const Controls: FC<Props> = ({
       const value = Math.max(0, Math.floor(ms));
       progress.value = value;
       seek(value);
+      setIsScrubbing(false);
       if (wasPlayingBeforeScrubRef.current) play();
     },
     [progress, seek, play],
@@ -258,19 +255,8 @@ export const Controls: FC<Props> = ({
     isSeeking,
   });
 
-  // Chapter navigation hook
-  const {
-    hasChapters,
-    hasPreviousChapter,
-    hasNextChapter,
-    goToPreviousChapter,
-    goToNextChapter,
-  } = useChapterNavigation({
-    chapters: item.Chapters,
-    progress,
-    maxMs,
-    seek,
-  });
+  // Chapter navigation now lives inside BottomControls (chapter-list button + progress
+  // ticks); the old center prev/next-chapter buttons were removed in the UI rework.
 
   const toggleControls = useCallback(() => {
     if (showControls) {
@@ -571,6 +557,31 @@ export const Controls: FC<Props> = ({
               mediaSource={mediaSource}
             />
           )}
+          {/* Subtle top/bottom scrims (no full-screen dim) — fade with the controls. */}
+          <ControlsScrims showControls={showControls} />
+          {/* Custom OSD status bar — mounted independently so it can show a subtle
+              clock/battery during regular playback, and expand when controls are up. */}
+          <PlayerStatusBar
+            item={item}
+            showControls={showControls}
+            getTechnicalInfo={getTechnicalInfo}
+          />
+          {/* Mid-playback buffering spinner (controls hidden). */}
+          {isBuffering && !showControls && (
+            <View style={styles.centerSpinner} pointerEvents='none'>
+              <Loader size='large' />
+            </View>
+          )}
+          {/* Drag-anywhere scrub: pop just the sleek bar when controls are hidden. */}
+          <ScrubProgressBar
+            visible={isScrubbing && !showControls}
+            progress={progress}
+            min={min}
+            max={max}
+            cacheProgress={cacheProgress}
+            chapters={item.Chapters}
+            durationMs={maxMs}
+          />
           <Animated.View
             style={headerAnimatedStyle}
             pointerEvents={showControls ? "auto" : "none"}
@@ -582,10 +593,6 @@ export const Controls: FC<Props> = ({
               mediaSource={mediaSource}
               startPictureInPicture={startPictureInPicture}
               switchOnEpisodeMode={switchOnEpisodeMode}
-              goToPreviousItem={goToPreviousItem}
-              goToNextItem={goToNextItem}
-              previousItem={previousItem}
-              nextItem={nextItem}
               aspectRatio={aspectRatio}
               isZoomedToFill={isZoomedToFill}
               onZoomToggle={onZoomToggle}
@@ -594,29 +601,6 @@ export const Controls: FC<Props> = ({
               showTechnicalInfo={showTechnicalInfo}
               onToggleTechnicalInfo={onToggleTechnicalInfo}
               leftSlot={headerLeftSlot}
-            />
-          </Animated.View>
-          <Animated.View
-            style={centerAnimatedStyle}
-            pointerEvents={showControls ? "box-none" : "none"}
-          >
-            <CenterControls
-              showControls={showControls}
-              isPlaying={isPlaying}
-              isBuffering={isBuffering}
-              showAudioSlider={showAudioSlider}
-              setShowAudioSlider={setShowAudioSlider}
-              togglePlay={togglePlay}
-              handleSkipBackward={handleSkipBackward}
-              handleSkipForward={handleSkipForward}
-              showSubtitleNav={showSubtitleNav}
-              onPrevSubtitle={onPrevSubtitle}
-              onNextSubtitle={onNextSubtitle}
-              hasChapters={hasChapters}
-              hasPreviousChapter={hasPreviousChapter}
-              hasNextChapter={hasNextChapter}
-              goToPreviousChapter={goToPreviousChapter}
-              goToNextChapter={goToNextChapter}
             />
           </Animated.View>
           <Animated.View
@@ -638,9 +622,20 @@ export const Controls: FC<Props> = ({
               skipIntro={skipIntro}
               skipCredit={skipCredit}
               nextItem={nextItem}
+              previousItem={previousItem}
               handleNextEpisodeAutoPlay={handleNextEpisodeAutoPlay}
               handleNextEpisodeManual={handleNextEpisodeManual}
               handleControlsInteraction={handleControlsInteraction}
+              isPlaying={isPlaying}
+              isBuffering={isBuffering}
+              togglePlay={togglePlay}
+              handleSkipBackward={handleSkipBackward}
+              handleSkipForward={handleSkipForward}
+              showSubtitleNav={showSubtitleNav}
+              onPrevSubtitle={onPrevSubtitle}
+              onNextSubtitle={onNextSubtitle}
+              goToPreviousItem={goToPreviousItem}
+              goToNextItem={goToNextItem}
               min={min}
               max={max}
               effectiveProgress={effectiveProgress}
@@ -672,5 +667,15 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
+  },
+  centerSpinner: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 6,
   },
 });
