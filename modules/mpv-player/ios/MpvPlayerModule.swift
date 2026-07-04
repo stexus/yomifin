@@ -228,10 +228,12 @@ public class MpvPlayerModule: Module {
 
       // Seam version history: 1 = plain window recognizer (could be killed by UIKit
       // recognizer-prevention when RNGH's double-tap activated); 2 = delegate allows
-      // simultaneous recognition. Bump on every behavior change so the Metro probe
-      // can prove which binary is on-device.
+      // simultaneous recognition; 3 = window recognizer REMOVED — all taps (single/
+      // double/two-finger) live in the dedicated YomifinGestureSurface view
+      // (modules/gesture-surface) and onTwoFingerTap here never fires. Bump on every
+      // behavior change so the Metro probe can prove which binary is on-device.
       AsyncFunction("twoFingerTapSeamVersion") { (_: MpvPlayerView) -> Int in
-        return 2
+        return 3
       }
 
       // captureScreenshot(view, path, sourceUrl, pos) -> Bool : frame at `pos` (no subs/

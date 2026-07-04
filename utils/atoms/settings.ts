@@ -359,6 +359,12 @@ export type Settings = {
   yomifinDoubleTapSeconds: number;
   /** Two-finger tap anywhere on the video toggles play/pause. */
   yomifinTwoFingerTapPause: boolean;
+  /**
+   * Drag anywhere on the video to scrub, Infuse-style (horizontal pan maps the
+   * full screen width to the full duration; trickplay preview when available).
+   * Off restores the legacy horizontal flick-to-skip (enableHorizontalSwipeSkip).
+   */
+  yomifinDragSeekEnabled: boolean;
   /** Tappable subtitle overlay: text size (pt). */
   yomifinSubtitleFontSize: number;
   /** Tappable subtitle overlay: text outline/shadow strength. */
@@ -490,6 +496,7 @@ export const defaultValues: Settings = {
   yomifinDictionaryLanguages: {},
   yomifinDoubleTapSeconds: 10,
   yomifinTwoFingerTapPause: true,
+  yomifinDragSeekEnabled: true,
   yomifinSubtitleFontSize: 32,
   yomifinSubtitleOutline: "normal",
   yomifinSubtitleBottomOffset: 64,

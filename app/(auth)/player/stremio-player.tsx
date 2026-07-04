@@ -17,6 +17,13 @@
  * session reporting) — this is a separate, self-contained route taking
  * { url, title, query, episode, subtitleUrls } params. Controls are minimal on
  * purpose; icons mirror direct-player's (Ionicons), shrunk.
+ *
+ * Post-MVP polish (FEATURES stremio item): full gesture parity via the shared
+ * GestureOverlay (single/double/two-finger taps on the native gesture surface,
+ * drag-anywhere-to-seek, volume/brightness, controls dim — replacing the old bare
+ * Pressable toggle layer, which could never coexist with RNGH anyway), a playback
+ * speed cycler, and local watch-state/resume (MMKV, keyed on title+episode — the
+ * debrid URL changes per resolve; utils/stremio/watchState.ts).
  */
 import { Ionicons } from "@expo/vector-icons";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
@@ -28,9 +35,13 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
+import { useSharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { GestureOverlay } from "@/components/video-player/controls/GestureOverlay";
+import { suppressTaps } from "@/components/video-player/controls/tapSuppression";
 import OnlineSubtitlesModal, {
   type LoadedOnlineSubtitle,
 } from "@/components/yomifin/OnlineSubtitlesModal";
@@ -50,6 +61,11 @@ import {
   yomifinCueRangeAtom,
   yomifinCuesAtom,
 } from "@/utils/atoms/yomifinCueStore";
+import {
+  loadStremioWatchState,
+  saveStremioWatchState,
+  stremioWatchKey,
+} from "@/utils/stremio/watchState";
 import {
   type CaptureContext,
   captureCardMedia,
@@ -131,6 +147,15 @@ export default function StremioPlayerPage() {
   const [subTracks, setSubTracks] = useState<MpvSubtitleTrack[]>([]);
   const [selectedSubId, setSelectedSubId] = useState<number>(-1);
   const [showSubMenu, setShowSubMenu] = useState(false);
+  // LEGACY binaries only: bumped per window-seam two-finger tap (feedback bubble).
+  const [twoFingerNonce, setTwoFingerNonce] = useState(0);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+
+  // Gesture layer shared values (ms, like the Jellyfin player's Controls).
+  const progressSV = useSharedValue(0);
+  const maxSV = useSharedValue(0);
+  const isSeekingSV = useSharedValue(false);
 
   // ── yomifin wiring (mirrors direct-player, minus Jellyfin) ────────────────
   const [subtitleText, setSubtitleText] = useState("");
@@ -153,6 +178,24 @@ export default function StremioPlayerPage() {
   const referenceCuesRef = useRef<SubtitleCue[]>([]);
 
   const mediaId = useMemo(() => `stremio_${fnv1a(url ?? "")}`, [url]);
+
+  // Watch-state / resume: keyed on content identity (title+episode), not the
+  // per-resolve debrid URL. Read once per mount for the start position.
+  const watchKey = useMemo(
+    () => stremioWatchKey(query || title, episode),
+    [query, title, episode],
+  );
+  const [resumePositionSec] = useState(() => {
+    if (!watchKey) return 0;
+    const state = loadStremioWatchState(watchKey);
+    if (state && state.positionSec > 0) {
+      console.log(`[STREMIO] resuming at ${state.positionSec}s (${watchKey})`);
+      return state.positionSec;
+    }
+    return 0;
+  });
+  const lastWatchSaveRef = useRef(0);
+  const durationRef = useRef(0);
 
   useEffect(() => {
     activateKeepAwakeAsync();
@@ -202,7 +245,7 @@ export default function StremioPlayerPage() {
     const source: MpvVideoSource = {
       url,
       autoplay: true,
-      startPosition: 0,
+      startPosition: resumePositionSec,
       cacheConfig: {
         enabled: settings.mpvCacheEnabled,
         cacheSeconds: settings.mpvCacheSeconds,
@@ -216,6 +259,7 @@ export default function StremioPlayerPage() {
   }, [
     url,
     externalSubUrls,
+    resumePositionSec,
     settings.mpvCacheEnabled,
     settings.mpvCacheSeconds,
     settings.mpvDemuxerMaxBytes,
@@ -332,6 +376,7 @@ export default function StremioPlayerPage() {
     (e: { nativeEvent: MpvOnProgressEventPayload }) => {
       const { position, duration } = e.nativeEvent;
       positionRef.current = position;
+      durationRef.current = duration ?? 0;
       setIsBuffering(false);
       setPositionSec((prev) =>
         Math.abs(prev - position) >= 1 ? position : prev,
@@ -339,8 +384,17 @@ export default function StremioPlayerPage() {
       setDurationSec((prev) =>
         Math.abs(prev - (duration ?? 0)) >= 1 ? (duration ?? 0) : prev,
       );
+      // Gesture layer shared values (don't fight an in-flight scrub).
+      if (!isSeekingSV.value) progressSV.value = position * 1000;
+      maxSV.value = (duration ?? 0) * 1000;
+      // Watch-state save, throttled to ~10s of wall time.
+      const now = Date.now();
+      if (watchKey && now - lastWatchSaveRef.current >= 10_000) {
+        lastWatchSaveRef.current = now;
+        saveStremioWatchState(watchKey, position, duration ?? 0);
+      }
     },
-    [],
+    [watchKey, progressSV, maxSV, isSeekingSV],
   );
 
   const onPlaybackStateChange = useCallback(
@@ -369,6 +423,15 @@ export default function StremioPlayerPage() {
 
   const seekBy = useCallback((delta: number) => {
     videoRef.current?.seekBy?.(delta);
+  }, []);
+
+  const cycleSpeed = useCallback(() => {
+    const speeds = [1, 1.25, 1.5, 2, 0.75];
+    setPlaybackSpeed((prev) => {
+      const next = speeds[(speeds.indexOf(prev) + 1) % speeds.length];
+      videoRef.current?.setSpeed(next).catch(() => {});
+      return next;
+    });
   }, []);
 
   // Pause-on-lookup (same contract as direct-player).
@@ -412,13 +475,48 @@ export default function StremioPlayerPage() {
     [mediaId, url],
   );
 
-  // Stop cleanly when leaving the screen.
+  // Drag-anywhere-to-seek lifecycle (GestureOverlay pan → worklet; these run at
+  // the edges only). Same contract as direct-player: pause during, seek + resume.
+  const wasPlayingBeforeScrubRef = useRef(false);
+  const handleScrubStart = useCallback(() => {
+    wasPlayingBeforeScrubRef.current = isPlayingRef.current;
+    if (isPlayingRef.current) {
+      setIsPlaying(false);
+      videoRef.current?.pause();
+    }
+  }, []);
+  const handleScrubEnd = useCallback((ms: number) => {
+    const sec = Math.max(0, ms / 1000);
+    videoRef.current?.seekTo?.(sec);
+    positionRef.current = sec;
+    setPositionSec(sec);
+    if (wasPlayingBeforeScrubRef.current) {
+      setIsPlaying(true);
+      videoRef.current?.play();
+    }
+  }, []);
+
+  const handleSeekRelative = useCallback(
+    (seconds: number) => {
+      seekBy(seconds);
+    },
+    [seekBy],
+  );
+
+  // Stop cleanly when leaving the screen (+ final watch-state save).
   useEffect(() => {
     const sub = navigation.addListener("beforeRemove", () => {
+      if (watchKey) {
+        saveStremioWatchState(
+          watchKey,
+          positionRef.current,
+          durationRef.current,
+        );
+      }
       videoRef.current?.pause();
     });
     return sub;
-  }, [navigation]);
+  }, [navigation, watchKey]);
 
   const [seekBarWidth, setSeekBarWidth] = useState(1);
 
@@ -444,9 +542,13 @@ export default function StremioPlayerPage() {
         onProgress={onProgress}
         onSubtitleText={onSubtitleText}
         onPlaybackStateChange={onPlaybackStateChange}
+        // LEGACY (pre-v3 binaries only): window-level two-finger seam. On v3
+        // binaries this never fires — the GestureOverlay's native surface owns it.
         onTwoFingerTap={() => {
           if (!(settings.yomifinTwoFingerTapPause ?? true)) return;
+          suppressTaps();
           togglePlay();
+          setTwoFingerNonce((n) => n + 1);
         }}
         onTracksReady={refreshTracks}
         onError={(e) => {
@@ -455,10 +557,26 @@ export default function StremioPlayerPage() {
         }}
       />
 
-      {/* Controls toggle layer (below the yomifin overlay/popup z-indices). */}
-      <Pressable
-        style={StyleSheet.absoluteFill}
-        onPress={() => setShowControls((s) => !s)}
+      {/* Gesture layer (below the yomifin overlay/popup z-indices, below the control
+          bars): taps via the native gesture surface, drag-to-seek / volume /
+          brightness via the RNGH worklet pan, controls dim included. Replaces the
+          old bare Pressable — RN responders and RNGH must never mix here. */}
+      <GestureOverlay
+        screenWidth={screenWidth}
+        screenHeight={screenHeight}
+        showControls={showControls}
+        isPlaying={isPlaying}
+        onToggleControls={() => setShowControls((s) => !s)}
+        twoFingerNonce={twoFingerNonce}
+        onSeekRelative={handleSeekRelative}
+        onSkipForward={() => seekBy(forwardTime)}
+        onSkipBackward={() => seekBy(-rewindTime)}
+        onTogglePlay={togglePlay}
+        progress={progressSV}
+        max={maxSV}
+        isSeeking={isSeekingSV}
+        onScrubStart={handleScrubStart}
+        onScrubEnd={handleScrubEnd}
       />
 
       {isBuffering && !error ? (
@@ -495,6 +613,16 @@ export default function StremioPlayerPage() {
             <Text style={styles.title} numberOfLines={1}>
               {title || "Stremio stream"}
             </Text>
+            <Pressable
+              style={styles.roundButton}
+              onPress={cycleSpeed}
+              hitSlop={12}
+              accessibilityLabel='Playback speed'
+            >
+              <Text style={styles.speedText}>
+                {playbackSpeed === 1 ? "1×" : `${playbackSpeed}×`}
+              </Text>
+            </Pressable>
             <Pressable
               style={styles.roundButton}
               onPress={() => {
@@ -745,6 +873,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   title: { flex: 1, color: "#fff", fontSize: 15, fontWeight: "600" },
+  speedText: { color: "#fff", fontSize: 13, fontWeight: "700" },
   roundButton: {
     backgroundColor: "rgba(0,0,0,0.55)",
     borderRadius: 20,

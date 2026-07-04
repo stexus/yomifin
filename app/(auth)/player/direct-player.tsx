@@ -696,16 +696,16 @@ export default function DirectPlayerPage() {
       ?.twoFingerTapSeamVersion?.()
       .then((v) => {
         console.log(
-          v >= 2
-            ? `[GESTURE] native two-finger seam: v${v} (binary is current)`
-            : v === 1
-              ? "[GESTURE] native two-finger seam: v1 — STALE binary (v2 adds the anti-prevention delegate). Run `just local` and verify the install actually replaced the app."
-              : "[GESTURE] native two-finger seam: MISSING — this binary predates it. Run `just local` (or `just remote`) and reinstall.",
+          v >= 3
+            ? `[GESTURE] mpv gesture seam: v${v} (current — taps unified in the native gesture surface; window recognizer gone)`
+            : v >= 1
+              ? `[GESTURE] mpv gesture seam: v${v} — STALE binary (v3 moves all taps into the YomifinGestureSurface view). Legacy window-seam + RNGH-tap fallback is in effect; run \`just local\` and verify the install actually replaced the app.`
+              : "[GESTURE] mpv gesture seam: MISSING — this binary predates it. Run `just local` (or `just remote`) and reinstall.",
         );
       })
       .catch(() =>
         console.log(
-          "[GESTURE] native two-finger seam: MISSING — this binary predates it. Run `just local` (or `just remote`) and reinstall.",
+          "[GESTURE] mpv gesture seam: MISSING — this binary predates it. Run `just local` (or `just remote`) and reinstall.",
         ),
       );
   }, [isVideoLoadedForProbe]);
@@ -1658,12 +1658,14 @@ export default function DirectPlayerPage() {
                 nowPlayingMetadata={nowPlayingMetadata}
                 onProgress={onProgress}
                 onSubtitleText={onSubtitleText}
-                // YOMIFIN: native window-level two-finger tap (UIKit recognizer; RNGH
-                // can't recognize multi-touch taps). Suppress the JS tap recognizers
-                // so the same tap can't also toggle controls / seek.
+                // LEGACY (pre-v3 binaries only): window-level two-finger seam. On v3
+                // binaries this never fires — the tap lives in the GestureOverlay's
+                // native gesture surface, which handles the toggle itself.
                 onTwoFingerTap={() => {
                   if (!(settings.yomifinTwoFingerTapPause ?? true)) return;
-                  console.log("[GESTURE] native two-finger tap → toggle play");
+                  console.log(
+                    "[GESTURE] two-finger tap (legacy window seam) → toggle play",
+                  );
                   suppressTaps();
                   togglePlay();
                   setTwoFingerNonce((n) => n + 1);

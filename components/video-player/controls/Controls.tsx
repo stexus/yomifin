@@ -4,7 +4,7 @@ import type {
   MediaSourceInfo,
 } from "@jellyfin/sdk/lib/generated-client";
 import { useLocalSearchParams } from "expo-router";
-import { type FC, useCallback, useEffect, useState } from "react";
+import { type FC, useCallback, useEffect, useRef, useState } from "react";
 import { StyleSheet, useWindowDimensions, View } from "react-native";
 import Animated, {
   Easing,
@@ -26,7 +26,7 @@ import { DownloadedItem } from "@/providers/Downloads/types";
 import { useOfflineMode } from "@/providers/OfflineModeProvider";
 import { useSettings } from "@/utils/atoms/settings";
 import { getDefaultPlaySettings } from "@/utils/jellyfin/getDefaultPlaySettings";
-import { ticksToMs } from "@/utils/time";
+import { msToTicks, ticksToMs } from "@/utils/time";
 import { BottomControls } from "./BottomControls";
 import { CenterControls } from "./CenterControls";
 import { CONTROLS_CONSTANTS } from "./constants";
@@ -225,6 +225,30 @@ export const Controls: FC<Props> = ({
       else handleSeekBackward(-seconds);
     },
     [handleSeekForward, handleSeekBackward],
+  );
+
+  // Drag-anywhere-to-seek (GestureOverlay's worklet pan drives progress/scrubMs on
+  // the UI thread; these JS callbacks only run at the lifecycle edges + a throttled
+  // preview). Same contract as the slider: pause during, seek + resume on release.
+  const wasPlayingBeforeScrubRef = useRef(false);
+  const handleScrubStart = useCallback(() => {
+    wasPlayingBeforeScrubRef.current = isPlaying;
+    pause();
+  }, [isPlaying, pause]);
+  const handleScrubPreview = useCallback(
+    (ms: number) => {
+      calculateTrickplayUrl(msToTicks(ms));
+    },
+    [calculateTrickplayUrl],
+  );
+  const handleScrubEnd = useCallback(
+    (ms: number) => {
+      const value = Math.max(0, Math.floor(ms));
+      progress.value = value;
+      seek(value);
+      if (wasPlayingBeforeScrubRef.current) play();
+    },
+    [progress, seek, play],
   );
 
   // Time management hook
@@ -526,6 +550,15 @@ export const Controls: FC<Props> = ({
             onSeekRelative={handleSeekRelative}
             onSkipForward={handleSkipForward}
             onSkipBackward={handleSkipBackward}
+            onTogglePlay={togglePlay}
+            progress={progress}
+            max={max}
+            isSeeking={isSeeking}
+            onScrubStart={handleScrubStart}
+            onScrubPreview={handleScrubPreview}
+            onScrubEnd={handleScrubEnd}
+            trickPlayUrl={trickPlayUrl}
+            trickplayInfo={trickplayInfo}
           />
           {/* Technical Info Overlay - rendered outside animated views to stay visible */}
           {getTechnicalInfo && (

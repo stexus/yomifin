@@ -8,6 +8,7 @@
  *   - controlsDimOpacity:   how much the video dims when the controls are up.
  *   - yomifinDoubleTapSeconds: double-tap L/R seek amount (0 = off).
  *   - yomifinTwoFingerTapPause: two-finger tap toggles play/pause.
+ *   - yomifinDragSeekEnabled: drag anywhere on the video to scrub (Infuse-style).
  *   - yomifinMaxResults:     lookup entry (≈ popup pane) cap, Yomitan default 32.
  *   - yomifinSubtitleFontSize / yomifinSubtitleOutline / yomifinSubtitleBottomOffset:
  *     tappable subtitle overlay styling (runtime, no rebuild).
@@ -227,6 +228,17 @@ export default function ReaderSettingsPage() {
             onValueChange={(v) =>
               updateSettings({ yomifinTwoFingerTapPause: v })
             }
+          />
+        </Row>
+
+        {/* Drag-anywhere seek */}
+        <Row
+          title='Drag anywhere to seek'
+          subtitle='Horizontal drag on the video scrubs like the seek bar, with a trickplay preview when available. Off restores flick-to-skip.'
+        >
+          <Switch
+            value={settings.yomifinDragSeekEnabled ?? true}
+            onValueChange={(v) => updateSettings({ yomifinDragSeekEnabled: v })}
           />
         </Row>
 
