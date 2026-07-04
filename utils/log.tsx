@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { atomWithStorage, createJSONStorage } from "jotai/utils";
 import type React from "react";
-import { createContext, useContext } from "react";
 import { storage } from "./mmkv";
 
 export type LogLevel = "INFO" | "WARN" | "ERROR" | "DEBUG";
@@ -19,25 +18,6 @@ const mmkvStorage = createJSONStorage(() => ({
   removeItem: (key: string) => storage.remove(key),
 }));
 const logsAtom = atomWithStorage("logs", [], mmkvStorage);
-
-const LogContext = createContext<ReturnType<typeof useLogProvider> | null>(
-  null,
-);
-const _DownloadContext = createContext<ReturnType<
-  typeof useLogProvider
-> | null>(null);
-
-function useLogProvider() {
-  const { data: logs } = useQuery({
-    queryKey: ["logs"],
-    queryFn: async () => readFromLog(),
-    refetchInterval: 1000,
-  });
-
-  return {
-    logs,
-  };
-}
 
 export const writeToLog = (level: LogLevel, message: string, data?: any) => {
   const newEntry: LogEntry = {
@@ -72,18 +52,28 @@ export const readFromLog = (): LogEntry[] => {
   return logs ? JSON.parse(logs) : [];
 };
 
+/**
+ * Live view of the persisted log ring buffer. The 1s poll runs ONLY while a
+ * component using this hook is mounted (i.e. the Logs settings screen) — it used
+ * to run app-wide via a root provider, doing an MMKV read + JSON.parse every
+ * second for the whole app lifetime even though nothing but this screen reads it.
+ */
 export function useLog() {
-  const context = useContext(LogContext);
-  if (context === null) {
-    throw new Error("useLog must be used within a LogProvider");
-  }
-  return context;
+  const { data: logs } = useQuery({
+    queryKey: ["logs"],
+    queryFn: async () => readFromLog(),
+    refetchInterval: 1000,
+  });
+
+  return { logs };
 }
 
+/**
+ * Kept as a passthrough so the root layout's tree is unchanged. Polling now lives
+ * in `useLog()` (see above), scoped to where the logs are actually shown.
+ */
 export function LogProvider({ children }: { children: React.ReactNode }) {
-  const provider = useLogProvider();
-
-  return <LogContext.Provider value={provider}>{children}</LogContext.Provider>;
+  return <>{children}</>;
 }
 
 export default logsAtom;

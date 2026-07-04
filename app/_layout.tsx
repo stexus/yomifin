@@ -217,10 +217,17 @@ onlineManager.setEventListener((setOnline) => {
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 0, // Always stale - triggers background refetch on mount
+      // Was 0 ("always stale") which refetched on EVERY screen mount — navigating
+      // into item pages / libraries / settings fired redundant network requests
+      // and flashed the `isFetching` spinners, making navigation feel sluggish.
+      // The WebSocketProvider already invalidates the affected query keys when the
+      // server reports library / user-data changes, so freshness is push-driven;
+      // a short window here keeps navigation snappy (cache renders instantly, no
+      // refetch) without going stale.
+      staleTime: 1000 * 60, // 60s
       gcTime: 1000 * 60 * 60 * 24, // 24 hours - keep in cache for offline
       networkMode: "offlineFirst", // Return cache first, refetch if online
-      refetchOnMount: true, // Refetch when component mounts
+      refetchOnMount: true, // Refetch when component mounts (only if stale)
       refetchOnReconnect: true, // Refetch when network reconnects
       refetchOnWindowFocus: false, // Not needed for mobile
       retry: (failureCount) => {
