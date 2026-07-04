@@ -211,17 +211,7 @@ export const BottomControls: FC<BottomControlsProps> = ({
           {!Platform.isTV && <DropdownView variant='audio' />}
         </View>
 
-        {currentChapterName ? (
-          <Text
-            className='text-xs opacity-70 shrink mx-2'
-            numberOfLines={1}
-            style={{ flex: 1, textAlign: "center" }}
-          >
-            {currentChapterName}
-          </Text>
-        ) : (
-          <View style={{ flex: 1 }} />
-        )}
+        <View style={{ flex: 1 }} />
 
         <View
           className='flex flex-row items-center space-x-2 shrink-0'
@@ -262,7 +252,7 @@ export const BottomControls: FC<BottomControlsProps> = ({
               accessibilityRole='button'
               accessibilityLabel={t("chapters.open")}
             >
-              <Ionicons name='bookmarks' size={22} color={ICON} />
+              <Ionicons name='bookmarks' size={19} color={ICON} />
             </Pressable>
           )}
         </View>
@@ -273,17 +263,33 @@ export const BottomControls: FC<BottomControlsProps> = ({
         className='flex flex-row items-center my-1'
         pointerEvents='box-none'
       >
-        <Text
-          className='text-[12px] text-neutral-300 mr-3'
-          numberOfLines={1}
-          style={{
-            fontVariant: ["tabular-nums"],
-            width: timeColWidth,
-            textAlign: "left",
-          }}
-        >
-          {formatTimeString(currentTime, "ms")}
-        </Text>
+        {/* Left column: current time, with the chapter name floated ABSOLUTELY below
+            it so it never adds height to this row (the whole stack is bottom-anchored,
+            so any added height would shove the bar + Row A icons up into the video). */}
+        <View style={{ width: timeColWidth, marginRight: 12 }}>
+          <Text
+            className='text-[12px] text-neutral-300'
+            numberOfLines={1}
+            style={{ fontVariant: ["tabular-nums"], textAlign: "left" }}
+          >
+            {formatTimeString(currentTime, "ms")}
+          </Text>
+          {currentChapterName ? (
+            <Text
+              className='text-[11px] text-neutral-400'
+              numberOfLines={1}
+              style={{
+                position: "absolute",
+                top: "100%",
+                left: 0,
+                width: 180,
+                marginTop: 1,
+              }}
+            >
+              {currentChapterName}
+            </Text>
+          ) : null}
+        </View>
         <View
           style={{
             flex: 1,

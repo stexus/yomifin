@@ -300,13 +300,16 @@ const DropdownView = ({
       : variant === "audio"
         ? "volume-high"
         : "ellipsis-horizontal";
+  // Bottom-row pickers (subtitles/audio) run a touch smaller than the top ⋯ so they
+  // don't visually bleed up into the video above the progress bar.
+  const triggerSize = variant === "menu" ? 24 : 20;
   const trigger = useMemo(
     () => (
       <View className='aspect-square flex flex-col rounded-xl items-center justify-center p-2'>
-        <Ionicons name={triggerIcon} size={24} color={"white"} />
+        <Ionicons name={triggerIcon} size={triggerSize} color={"white"} />
       </View>
     ),
-    [triggerIcon],
+    [triggerIcon, triggerSize],
   );
 
   // Hide on TV platforms
