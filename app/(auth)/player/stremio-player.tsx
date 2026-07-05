@@ -25,13 +25,11 @@
  * speed cycler, and local watch-state/resume (MMKV, keyed on title+episode — the
  * debrid URL changes per resolve; utils/stremio/watchState.ts).
  */
-import { Ionicons } from "@expo/vector-icons";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { useLocalSearchParams, useNavigation } from "expo-router";
 import { useSetAtom } from "jotai";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Pressable,
   StyleSheet,
   Text,
@@ -39,7 +37,7 @@ import {
   View,
 } from "react-native";
 import { useSharedValue } from "react-native-reanimated";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import StremioPlayerControls from "@/components/stremio/StremioPlayerControls";
 import { GestureOverlay } from "@/components/video-player/controls/GestureOverlay";
 import { suppressTaps } from "@/components/video-player/controls/tapSuppression";
 import OnlineSubtitlesModal, {
@@ -49,6 +47,7 @@ import ProfilePill from "@/components/yomifin/ProfilePill";
 import YomifinErrorBoundary from "@/components/yomifin/YomifinErrorBoundary";
 import YomifinLookupLayer from "@/components/yomifin/YomifinLookupLayer";
 import {
+  type MpvAudioTrack,
   type MpvOnPlaybackStateChangePayload,
   type MpvOnProgressEventPayload,
   MpvPlayerView,
@@ -97,20 +96,9 @@ function isTextSubCodec(codec?: string): boolean {
   return !BITMAP_SUB_CODECS.has(codec.toLowerCase());
 }
 
-function fmtTime(seconds: number): string {
-  const s = Math.max(0, Math.floor(seconds));
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  return h > 0
-    ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`
-    : `${m}:${String(sec).padStart(2, "0")}`;
-}
-
 export default function StremioPlayerPage() {
   const videoRef = useRef<MpvPlayerViewRef>(null);
   const navigation = useNavigation();
-  const insets = useSafeAreaInsets();
   const { settings } = useSettings();
 
   const { url, title, query, episode, anilistId, subtitleUrls } =
@@ -146,15 +134,19 @@ export default function StremioPlayerPage() {
   const [error, setError] = useState<string | null>(null);
   const [subTracks, setSubTracks] = useState<MpvSubtitleTrack[]>([]);
   const [selectedSubId, setSelectedSubId] = useState<number>(-1);
-  const [showSubMenu, setShowSubMenu] = useState(false);
+  const [audioTracks, setAudioTracks] = useState<MpvAudioTrack[]>([]);
+  const [selectedAudioId, setSelectedAudioId] = useState<number>(-1);
   // LEGACY binaries only: bumped per window-seam two-finger tap (feedback bubble).
   const [twoFingerNonce, setTwoFingerNonce] = useState(0);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [isScrubbing, setIsScrubbing] = useState(false);
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
 
-  // Gesture layer shared values (ms, like the Jellyfin player's Controls).
+  // Gesture layer / slider shared values (ms, like the Jellyfin player's Controls).
   const progressSV = useSharedValue(0);
   const maxSV = useSharedValue(0);
+  const minSV = useSharedValue(0);
+  const cacheProgressSV = useSharedValue(0);
   const isSeekingSV = useSharedValue(false);
 
   // ── yomifin wiring (mirrors direct-player, minus Jellyfin) ────────────────
@@ -288,12 +280,37 @@ export default function StremioPlayerPage() {
     } catch (e) {
       console.warn(`[STREMIO] track refresh failed: ${e}`);
     }
+    try {
+      const audio = (await v.getAudioTracks?.()) ?? [];
+      setAudioTracks(audio);
+      const selAudio = audio.find((t) => t.selected);
+      setSelectedAudioId(selAudio?.id ?? -1);
+      console.log(
+        "[STREMIO] audio tracks:",
+        audio.map(
+          (t) =>
+            `#${t.id} ${t.lang ?? "?"} "${t.title ?? ""}" ${t.selected ? "*SEL" : ""} ${t.channels ?? "?"}ch`,
+        ),
+      );
+    } catch (e) {
+      console.warn(`[STREMIO] audio track refresh failed: ${e}`);
+    }
+  }, []);
+
+  const selectAudioTrack = useCallback(async (trackId: number) => {
+    const v = videoRef.current;
+    if (!v) return;
+    setSelectedAudioId(trackId);
+    try {
+      await v.setAudioTrack?.(trackId);
+    } catch (e) {
+      console.warn(`[STREMIO] audio track select failed: ${e}`);
+    }
   }, []);
 
   const selectSubTrack = useCallback(
     async (trackId: number) => {
       const v = videoRef.current;
-      setShowSubMenu(false);
       if (!v) return;
       // Picking a track dismisses any active online sub (stays loaded in mpv's
       // list but deselected) and zeroes the sync delay — same as direct-player.
@@ -425,13 +442,9 @@ export default function StremioPlayerPage() {
     videoRef.current?.seekBy?.(delta);
   }, []);
 
-  const cycleSpeed = useCallback(() => {
-    const speeds = [1, 1.25, 1.5, 2, 0.75];
-    setPlaybackSpeed((prev) => {
-      const next = speeds[(speeds.indexOf(prev) + 1) % speeds.length];
-      videoRef.current?.setSpeed(next).catch(() => {});
-      return next;
-    });
+  const setSpeed = useCallback((next: number) => {
+    setPlaybackSpeed(next);
+    videoRef.current?.setSpeed(next).catch(() => {});
   }, []);
 
   // Pause-on-lookup (same contract as direct-player).
@@ -475,11 +488,38 @@ export default function StremioPlayerPage() {
     [mediaId, url],
   );
 
+  // Interactive slider: pause during, seek + resume on release (like the Jellyfin
+  // bottom slider). awesome-slider writes progressSV live; onProgress is guarded.
+  const wasPlayingBeforeSliderRef = useRef(false);
+  const handleSliderStart = useCallback(() => {
+    isSeekingSV.value = true;
+    wasPlayingBeforeSliderRef.current = isPlayingRef.current;
+    if (isPlayingRef.current) {
+      setIsPlaying(false);
+      videoRef.current?.pause();
+    }
+  }, [isSeekingSV]);
+  const handleSliderComplete = useCallback(
+    (ms: number) => {
+      const sec = Math.max(0, ms / 1000);
+      videoRef.current?.seekTo?.(sec);
+      positionRef.current = sec;
+      setPositionSec(sec);
+      isSeekingSV.value = false;
+      if (wasPlayingBeforeSliderRef.current) {
+        setIsPlaying(true);
+        videoRef.current?.play();
+      }
+    },
+    [isSeekingSV],
+  );
+
   // Drag-anywhere-to-seek lifecycle (GestureOverlay pan → worklet; these run at
   // the edges only). Same contract as direct-player: pause during, seek + resume.
   const wasPlayingBeforeScrubRef = useRef(false);
   const handleScrubStart = useCallback(() => {
     wasPlayingBeforeScrubRef.current = isPlayingRef.current;
+    setIsScrubbing(true);
     if (isPlayingRef.current) {
       setIsPlaying(false);
       videoRef.current?.pause();
@@ -490,6 +530,7 @@ export default function StremioPlayerPage() {
     videoRef.current?.seekTo?.(sec);
     positionRef.current = sec;
     setPositionSec(sec);
+    setIsScrubbing(false);
     if (wasPlayingBeforeScrubRef.current) {
       setIsPlaying(true);
       videoRef.current?.play();
@@ -517,8 +558,6 @@ export default function StremioPlayerPage() {
     });
     return sub;
   }, [navigation, watchKey]);
-
-  const [seekBarWidth, setSeekBarWidth] = useState(1);
 
   const rewindTime = settings.rewindSkipTime ?? 10;
   const forwardTime = settings.forwardSkipTime ?? 30;
@@ -559,8 +598,8 @@ export default function StremioPlayerPage() {
 
       {/* Gesture layer (below the yomifin overlay/popup z-indices, below the control
           bars): taps via the native gesture surface, drag-to-seek / volume /
-          brightness via the RNGH worklet pan, controls dim included. Replaces the
-          old bare Pressable — RN responders and RNGH must never mix here. */}
+          brightness via the RNGH worklet pan. No dim — matches the reworked Jellyfin
+          player (ControlsScrims instead). Replaces the old bare Pressable. */}
       <GestureOverlay
         screenWidth={screenWidth}
         screenHeight={screenHeight}
@@ -577,228 +616,64 @@ export default function StremioPlayerPage() {
         isSeeking={isSeekingSV}
         onScrubStart={handleScrubStart}
         onScrubEnd={handleScrubEnd}
-        dimWhenControlsShown
       />
 
-      {isBuffering && !error ? (
-        <View pointerEvents='none' style={styles.centerOverlay}>
-          <ActivityIndicator size='large' color='#fff' />
-        </View>
-      ) : null}
+      {/* Unified senplayer-style control pane (matches the Jellyfin player). */}
+      <StremioPlayerControls
+        showControls={showControls}
+        isPlaying={isPlaying}
+        isBuffering={isBuffering && !error}
+        title={title || "Stremio stream"}
+        positionSec={positionSec}
+        durationSec={durationSec}
+        progress={progressSV}
+        max={maxSV}
+        min={minSV}
+        cacheProgress={cacheProgressSV}
+        isScrubbing={isScrubbing}
+        onClose={() => navigation.goBack()}
+        onTogglePlay={togglePlay}
+        onSkipBackward={() => seekBy(-rewindTime)}
+        onSkipForward={() => seekBy(forwardTime)}
+        rewindSeconds={rewindTime}
+        forwardSeconds={forwardTime}
+        onSliderStart={handleSliderStart}
+        onSliderComplete={handleSliderComplete}
+        playbackSpeed={playbackSpeed}
+        onSetSpeed={setSpeed}
+        subTracks={subTracks}
+        selectedSubId={selectedSubId}
+        externalSubActive={externalSub !== null}
+        externalSubName={externalSub?.name ?? null}
+        isTextSubCodec={isTextSubCodec}
+        onSelectSubtitle={selectSubTrack}
+        onOnlineSubtitles={() => setOnlineSubsVisible(true)}
+        jimakuEnabled={Boolean(settings.yomifinJimakuApiKey)}
+        showSubtitleNav={showSubtitleNav}
+        onPrevSubtitle={() => videoRef.current?.subSeek?.(-1)}
+        onNextSubtitle={() => videoRef.current?.subSeek?.(1)}
+        audioTracks={audioTracks}
+        selectedAudioId={selectedAudioId}
+        onSelectAudio={selectAudioTrack}
+        getTechnicalInfo={() =>
+          videoRef.current?.getTechnicalInfo?.() ?? Promise.resolve({})
+        }
+        profilePill={
+          <ProfilePill
+            profileKey={
+              query || title ? `stremio:${query || title}` : undefined
+            }
+            languageHint={null}
+          />
+        }
+      />
+
       {error ? (
         <View style={styles.centerOverlay}>
           <Text style={styles.errorText}>{error}</Text>
           <Pressable style={styles.button} onPress={() => navigation.goBack()}>
             <Text style={styles.buttonText}>Back</Text>
           </Pressable>
-        </View>
-      ) : null}
-
-      {showControls ? (
-        <>
-          {/* Top bar */}
-          <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
-            <Pressable
-              style={styles.roundButton}
-              onPress={() => navigation.goBack()}
-              hitSlop={12}
-            >
-              <Ionicons name='close' size={22} color='white' />
-            </Pressable>
-            <ProfilePill
-              profileKey={
-                query || title ? `stremio:${query || title}` : undefined
-              }
-              languageHint={null}
-            />
-            <Text style={styles.title} numberOfLines={1}>
-              {title || "Stremio stream"}
-            </Text>
-            <Pressable
-              style={styles.roundButton}
-              onPress={cycleSpeed}
-              hitSlop={12}
-              accessibilityLabel='Playback speed'
-            >
-              <Text style={styles.speedText}>
-                {playbackSpeed === 1 ? "1×" : `${playbackSpeed}×`}
-              </Text>
-            </Pressable>
-            <Pressable
-              style={styles.roundButton}
-              onPress={() => {
-                refreshTracks();
-                setShowSubMenu((s) => !s);
-              }}
-              hitSlop={12}
-            >
-              <Ionicons
-                name='chatbox-ellipses-outline'
-                size={22}
-                color='white'
-              />
-            </Pressable>
-          </View>
-
-          {/* Bottom bar */}
-          <View
-            style={[styles.bottomBar, { paddingBottom: insets.bottom + 12 }]}
-          >
-            <View style={styles.transportRow}>
-              {showSubtitleNav ? (
-                <Pressable
-                  onPress={() => videoRef.current?.subSeek?.(-1)}
-                  hitSlop={10}
-                  accessibilityLabel='Previous subtitle'
-                >
-                  <View style={styles.subNavPair}>
-                    <Ionicons name='caret-back' size={18} color='white' />
-                    <Ionicons
-                      name='chatbox-ellipses-outline'
-                      size={16}
-                      color='white'
-                    />
-                  </View>
-                </Pressable>
-              ) : null}
-              <Pressable onPress={() => seekBy(-rewindTime)} hitSlop={10}>
-                <View style={styles.skipWrap}>
-                  <Ionicons
-                    name='refresh-outline'
-                    size={34}
-                    color='white'
-                    style={{
-                      transform: [{ scaleY: -1 }, { rotate: "180deg" }],
-                    }}
-                  />
-                  <Text style={styles.skipText}>{rewindTime}</Text>
-                </View>
-              </Pressable>
-              <Pressable onPress={togglePlay} hitSlop={14}>
-                <Ionicons
-                  name={isPlaying ? "pause" : "play"}
-                  size={40}
-                  color='white'
-                />
-              </Pressable>
-              <Pressable onPress={() => seekBy(forwardTime)} hitSlop={10}>
-                <View style={styles.skipWrap}>
-                  <Ionicons name='refresh-outline' size={34} color='white' />
-                  <Text style={styles.skipText}>{forwardTime}</Text>
-                </View>
-              </Pressable>
-              {showSubtitleNav ? (
-                <Pressable
-                  onPress={() => videoRef.current?.subSeek?.(1)}
-                  hitSlop={10}
-                  accessibilityLabel='Next subtitle'
-                >
-                  <View style={styles.subNavPair}>
-                    <Ionicons
-                      name='chatbox-ellipses-outline'
-                      size={16}
-                      color='white'
-                    />
-                    <Ionicons name='caret-forward' size={18} color='white' />
-                  </View>
-                </Pressable>
-              ) : null}
-            </View>
-            <View style={styles.seekRow}>
-              <Text style={styles.timeText}>{fmtTime(positionSec)}</Text>
-              <Pressable
-                style={styles.seekBar}
-                onLayout={(e) => setSeekBarWidth(e.nativeEvent.layout.width)}
-                onPress={(e) => {
-                  if (durationSec <= 0) return;
-                  const frac = Math.min(
-                    1,
-                    Math.max(0, e.nativeEvent.locationX / seekBarWidth),
-                  );
-                  videoRef.current?.seekTo?.(frac * durationSec);
-                }}
-              >
-                <View style={styles.seekTrack}>
-                  <View
-                    style={[
-                      styles.seekFill,
-                      {
-                        width: `${
-                          durationSec > 0
-                            ? Math.min(100, (positionSec / durationSec) * 100)
-                            : 0
-                        }%`,
-                      },
-                    ]}
-                  />
-                </View>
-              </Pressable>
-              <Text style={styles.timeText}>{fmtTime(durationSec)}</Text>
-            </View>
-          </View>
-        </>
-      ) : null}
-
-      {/* Subtitle track menu */}
-      {showSubMenu ? (
-        <View style={[styles.subMenu, { top: insets.top + 56 }]}>
-          <Pressable
-            style={styles.subMenuRow}
-            onPress={() => selectSubTrack(-1)}
-          >
-            <Text
-              style={[
-                styles.subMenuText,
-                selectedSubId === -1 && !externalSub && styles.subMenuSelected,
-              ]}
-            >
-              Subtitles off
-            </Text>
-          </Pressable>
-          {subTracks.map((t) => (
-            <Pressable
-              key={t.id}
-              style={styles.subMenuRow}
-              onPress={() => selectSubTrack(t.id)}
-            >
-              <Text
-                style={[
-                  styles.subMenuText,
-                  selectedSubId === t.id &&
-                    !externalSub &&
-                    styles.subMenuSelected,
-                ]}
-                numberOfLines={1}
-              >
-                #{t.id} {t.lang ?? "?"} {t.title ?? ""}{" "}
-                {isTextSubCodec(t.codec) ? "" : "(bitmap)"}
-              </Text>
-            </Pressable>
-          ))}
-          {subTracks.length === 0 ? (
-            <Text style={styles.subMenuText}>No subtitle tracks</Text>
-          ) : null}
-          {settings.yomifinJimakuApiKey ? (
-            <Pressable
-              style={[styles.subMenuRow, styles.subMenuDivider]}
-              onPress={() => {
-                setShowSubMenu(false);
-                setOnlineSubsVisible(true);
-              }}
-            >
-              <Text
-                style={[
-                  styles.subMenuText,
-                  externalSub && styles.subMenuSelected,
-                ]}
-                numberOfLines={1}
-              >
-                {externalSub
-                  ? `Online: ${externalSub.name}`
-                  : "Online subtitles (jimaku)…"}
-              </Text>
-            </Pressable>
-          ) : null}
         </View>
       ) : null}
 
@@ -863,26 +738,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     margin: 16,
   },
-  topBar: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    gap: 12,
-  },
-  title: { flex: 1, color: "#fff", fontSize: 15, fontWeight: "600" },
-  speedText: { color: "#fff", fontSize: 13, fontWeight: "700" },
-  roundButton: {
-    backgroundColor: "rgba(0,0,0,0.55)",
-    borderRadius: 20,
-    width: 40,
-    height: 40,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   button: {
     backgroundColor: "rgba(255,255,255,0.15)",
     borderRadius: 10,
@@ -890,65 +745,4 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   buttonText: { color: "#fff", fontSize: 15 },
-  bottomBar: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    paddingHorizontal: 20,
-  },
-  transportRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 30,
-    marginBottom: 8,
-  },
-  subNavPair: { flexDirection: "row", alignItems: "center" },
-  skipWrap: {
-    position: "relative",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  skipText: {
-    position: "absolute",
-    color: "white",
-    fontSize: 10,
-    fontWeight: "bold",
-    bottom: 7,
-  },
-  seekRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  timeText: {
-    color: "#ddd",
-    fontSize: 12,
-    fontVariant: ["tabular-nums"],
-    minWidth: 44,
-    textAlign: "center",
-  },
-  seekBar: { flex: 1, paddingVertical: 10 },
-  seekTrack: {
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "rgba(255,255,255,0.25)",
-    overflow: "hidden",
-  },
-  seekFill: { height: 4, backgroundColor: "#a855f7" },
-  subMenu: {
-    position: "absolute",
-    right: 16,
-    backgroundColor: "rgba(20,20,20,0.95)",
-    borderRadius: 12,
-    paddingVertical: 6,
-    paddingHorizontal: 4,
-    maxWidth: 320,
-  },
-  subMenuRow: { paddingVertical: 8, paddingHorizontal: 12 },
-  subMenuDivider: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#444",
-    marginTop: 4,
-    paddingTop: 10,
-  },
-  subMenuText: { color: "#ddd", fontSize: 14 },
-  subMenuSelected: { color: "#a855f7", fontWeight: "700" },
 });
