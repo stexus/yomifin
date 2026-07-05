@@ -18,6 +18,8 @@ import { File, Paths } from "expo-file-system";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Keyboard,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -82,6 +84,25 @@ export default function OnlineSubtitlesModal({
 }: Props) {
   const { settings } = useSettings();
   const apiKey = settings.yomifinJimakuApiKey ?? "";
+
+  // The card is vertically centered, so an on-screen keyboard would cover the search
+  // field. Pad the panel bottom by the keyboard height so the card re-centers in the
+  // space above the keyboard and what you're typing stays visible.
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  useEffect(() => {
+    const showEvt =
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvt =
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const show = Keyboard.addListener(showEvt, (e) =>
+      setKeyboardHeight(e.endCoordinates?.height ?? 0),
+    );
+    const hide = Keyboard.addListener(hideEvt, () => setKeyboardHeight(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
 
   const [query, setQuery] = useState(defaultQuery);
   const [episodeStr, setEpisodeStr] = useState(
@@ -199,7 +220,10 @@ export default function OnlineSubtitlesModal({
   };
 
   return (
-    <View style={styles.panel} pointerEvents='box-none'>
+    <View
+      style={[styles.panel, { paddingBottom: keyboardHeight }]}
+      pointerEvents='box-none'
+    >
       <View style={styles.card}>
         <View style={styles.headerRow}>
           <Text style={styles.headerText}>Online subtitles — jimaku.cc</Text>

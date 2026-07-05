@@ -502,11 +502,13 @@ export const Controls: FC<Props> = ({
 
   const { handleControlsInteraction } = useControlsTimeout({
     showControls,
-    isSliding: isSliding || isRemoteSliding,
+    // Don't auto-hide mid-scrub (slider or remote) or while the episode list is up.
+    isSliding: isSliding || isRemoteSliding || isScrubbing,
     episodeView,
     onHideControls: hideControls,
-    timeout: CONTROLS_CONSTANTS.TIMEOUT,
-    disabled: true,
+    // Auto-dismiss the control pane ~5s after it's shown / last interacted with.
+    timeout: 5000,
+    disabled: false,
   });
 
   const switchOnEpisodeMode = useCallback(() => {
