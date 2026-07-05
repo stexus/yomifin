@@ -38,7 +38,12 @@ import SeriesPoster from "@/components/posters/SeriesPoster";
 import { DiscoverFilters } from "@/components/search/DiscoverFilters";
 import { LoadingSkeleton } from "@/components/search/LoadingSkeleton";
 import { SearchItemWrapper } from "@/components/search/SearchItemWrapper";
+import {
+  type SearchScope,
+  SearchScopeSelector,
+} from "@/components/search/SearchScopeSelector";
 import { SearchTabButtons } from "@/components/search/SearchTabButtons";
+import { StremioSearchResults } from "@/components/search/StremioSearchResults";
 import { TVSearchPage } from "@/components/search/TVSearchPage";
 import useRouter from "@/hooks/useAppRouter";
 import { useJellyseerr } from "@/hooks/useJellyseerr";
@@ -54,6 +59,7 @@ import type {
   TvResult,
 } from "@/utils/jellyseerr/server/models/Search";
 import { createStreamystatsApi } from "@/utils/streamystats";
+import { useStremioSearch } from "@/utils/stremio/useStremioSearch";
 
 type SearchType = "Library" | "Discover";
 
@@ -106,8 +112,18 @@ export default function SearchPage() {
 
   const [api] = useAtom(apiAtom);
 
-  const { settings } = useSettings();
+  const { settings, updateSettings } = useSettings();
   const { jellyseerrApi } = useJellyseerr();
+
+  // Unified search scope (Jellyfin / Stremio / Both), persisted in settings.
+  const scope: SearchScope = settings?.searchScope ?? "both";
+  const setScope = useCallback(
+    (s: SearchScope) => updateSettings({ searchScope: s }),
+    [updateSettings],
+  );
+  const jellyfinScope = scope === "jellyfin" || scope === "both";
+  const stremioScope = scope === "stremio" || scope === "both";
+  const bothScopes = scope === "both";
   const [jellyseerrOrderBy, setJellyseerrOrderBy] =
     useState<JellyseerrSearchSort>(
       JellyseerrSearchSort[
@@ -337,7 +353,8 @@ export default function SearchPage() {
         types: ["Movie"],
         signal: abortControllerRef.current?.signal,
       }),
-    enabled: searchType === "Library" && debouncedSearch.length > 0,
+    enabled:
+      jellyfinScope && searchType === "Library" && debouncedSearch.length > 0,
   });
 
   const { data: series, isFetching: l2 } = useQuery({
@@ -348,7 +365,8 @@ export default function SearchPage() {
         types: ["Series"],
         signal: abortControllerRef.current?.signal,
       }),
-    enabled: searchType === "Library" && debouncedSearch.length > 0,
+    enabled:
+      jellyfinScope && searchType === "Library" && debouncedSearch.length > 0,
   });
 
   const { data: episodes, isFetching: l3 } = useQuery({
@@ -359,7 +377,8 @@ export default function SearchPage() {
         types: ["Episode"],
         signal: abortControllerRef.current?.signal,
       }),
-    enabled: searchType === "Library" && debouncedSearch.length > 0,
+    enabled:
+      jellyfinScope && searchType === "Library" && debouncedSearch.length > 0,
   });
 
   const { data: collections, isFetching: l7 } = useQuery({
@@ -370,7 +389,8 @@ export default function SearchPage() {
         types: ["BoxSet"],
         signal: abortControllerRef.current?.signal,
       }),
-    enabled: searchType === "Library" && debouncedSearch.length > 0,
+    enabled:
+      jellyfinScope && searchType === "Library" && debouncedSearch.length > 0,
   });
 
   const { data: actors, isFetching: l8 } = useQuery({
@@ -381,7 +401,8 @@ export default function SearchPage() {
         types: ["Person"],
         signal: abortControllerRef.current?.signal,
       }),
-    enabled: searchType === "Library" && debouncedSearch.length > 0,
+    enabled:
+      jellyfinScope && searchType === "Library" && debouncedSearch.length > 0,
   });
 
   // Music search queries - always use Jellyfin since Streamystats doesn't support music
@@ -393,7 +414,8 @@ export default function SearchPage() {
         types: ["MusicArtist"],
         signal: abortControllerRef.current?.signal,
       }),
-    enabled: searchType === "Library" && debouncedSearch.length > 0,
+    enabled:
+      jellyfinScope && searchType === "Library" && debouncedSearch.length > 0,
   });
 
   const { data: albums, isFetching: l10 } = useQuery({
@@ -404,7 +426,8 @@ export default function SearchPage() {
         types: ["MusicAlbum"],
         signal: abortControllerRef.current?.signal,
       }),
-    enabled: searchType === "Library" && debouncedSearch.length > 0,
+    enabled:
+      jellyfinScope && searchType === "Library" && debouncedSearch.length > 0,
   });
 
   const { data: songs, isFetching: l11 } = useQuery({
@@ -415,7 +438,8 @@ export default function SearchPage() {
         types: ["Audio"],
         signal: abortControllerRef.current?.signal,
       }),
-    enabled: searchType === "Library" && debouncedSearch.length > 0,
+    enabled:
+      jellyfinScope && searchType === "Library" && debouncedSearch.length > 0,
   });
 
   const { data: playlists, isFetching: l12 } = useQuery({
@@ -426,36 +450,67 @@ export default function SearchPage() {
         types: ["Playlist"],
         signal: abortControllerRef.current?.signal,
       }),
-    enabled: searchType === "Library" && debouncedSearch.length > 0,
+    enabled:
+      jellyfinScope && searchType === "Library" && debouncedSearch.length > 0,
   });
 
+  // Stremio search (movie/series across every configured addon's search catalog).
+  const stremio = useStremioSearch(
+    debouncedSearch,
+    searchType === "Library" && stremioScope,
+  );
+
+  const jellyfinHasResults = useMemo(
+    () =>
+      !!(
+        movies?.length ||
+        episodes?.length ||
+        series?.length ||
+        collections?.length ||
+        actors?.length ||
+        artists?.length ||
+        albums?.length ||
+        songs?.length ||
+        playlists?.length
+      ),
+    [
+      episodes,
+      movies,
+      series,
+      collections,
+      actors,
+      artists,
+      albums,
+      songs,
+      playlists,
+    ],
+  );
+
   const noResults = useMemo(() => {
-    return !(
-      movies?.length ||
-      episodes?.length ||
-      series?.length ||
-      collections?.length ||
-      actors?.length ||
-      artists?.length ||
-      albums?.length ||
-      songs?.length ||
-      playlists?.length
-    );
-  }, [
-    episodes,
-    movies,
-    series,
-    collections,
-    actors,
-    artists,
-    albums,
-    songs,
-    playlists,
-  ]);
+    const jf = jellyfinScope && jellyfinHasResults;
+    const st = stremioScope && stremio.hits.length > 0;
+    return !jf && !st;
+  }, [jellyfinScope, jellyfinHasResults, stremioScope, stremio.hits.length]);
 
   const loading = useMemo(() => {
-    return l1 || l2 || l3 || l7 || l8 || l9 || l10 || l11 || l12;
-  }, [l1, l2, l3, l7, l8, l9, l10, l11, l12]);
+    const jfLoading =
+      jellyfinScope && (l1 || l2 || l3 || l7 || l8 || l9 || l10 || l11 || l12);
+    const stLoading = stremioScope && stremio.loading;
+    return jfLoading || stLoading;
+  }, [
+    jellyfinScope,
+    stremioScope,
+    stremio.loading,
+    l1,
+    l2,
+    l3,
+    l7,
+    l8,
+    l9,
+    l10,
+    l11,
+    l12,
+  ]);
 
   // TV item press handler
   const handleItemPress = useCallback(
@@ -645,6 +700,11 @@ export default function SearchPage() {
         className='flex flex-col'
         style={{ paddingTop: Platform.OS === "android" ? 10 : 0 }}
       >
+        {searchType === "Library" ? (
+          <View className='px-4 mb-2'>
+            <SearchScopeSelector scope={scope} onChange={setScope} />
+          </View>
+        ) : null}
         {jellyseerrApi && (
           <View className='pl-4 pr-4 flex flex-row'>
             <SearchTabButtons
@@ -674,255 +734,281 @@ export default function SearchPage() {
         </View>
 
         {searchType === "Library" ? (
-          <View className={l1 || l2 ? "opacity-0" : "opacity-100"}>
-            <SearchItemWrapper
-              header={t("search.movies")}
-              items={movies}
-              renderItem={(item: BaseItemDto) => (
-                <TouchableItemRouter
-                  key={item.Id}
-                  className='flex flex-col w-28 mr-2'
-                  item={item}
-                >
-                  <MoviePoster item={item} key={item.Id} />
-                  <Text numberOfLines={2} className='mt-2'>
-                    {item.Name}
-                  </Text>
-                  <Text className='opacity-50 text-xs'>
-                    {item.ProductionYear}
-                  </Text>
-                </TouchableItemRouter>
-              )}
-            />
-            <SearchItemWrapper
-              items={series}
-              header={t("search.series")}
-              renderItem={(item: BaseItemDto) => (
-                <TouchableItemRouter
-                  key={item.Id}
-                  item={item}
-                  className='flex flex-col w-28 mr-2'
-                >
-                  <SeriesPoster item={item} key={item.Id} />
-                  <Text numberOfLines={2} className='mt-2'>
-                    {item.Name}
-                  </Text>
-                  <Text className='opacity-50 text-xs'>
-                    {item.ProductionYear}
-                  </Text>
-                </TouchableItemRouter>
-              )}
-            />
-            <SearchItemWrapper
-              items={episodes}
-              header={t("search.episodes")}
-              renderItem={(item: BaseItemDto) => (
-                <TouchableItemRouter
-                  item={item}
-                  key={item.Id}
-                  className='flex flex-col w-44 mr-2'
-                >
-                  <ContinueWatchingPoster item={item} />
-                  <ItemCardText item={item} />
-                </TouchableItemRouter>
-              )}
-            />
-            <SearchItemWrapper
-              items={collections}
-              header={t("search.collections")}
-              renderItem={(item: BaseItemDto) => (
-                <TouchableItemRouter
-                  key={item.Id}
-                  item={item}
-                  className='flex flex-col w-28 mr-2'
-                >
-                  <MoviePoster item={item} key={item.Id} />
-                  <Text numberOfLines={2} className='mt-2'>
-                    {item.Name}
-                  </Text>
-                </TouchableItemRouter>
-              )}
-            />
-            <SearchItemWrapper
-              items={actors}
-              header={t("search.actors")}
-              renderItem={(item: BaseItemDto) => (
-                <TouchableItemRouter
-                  item={item}
-                  key={item.Id}
-                  className='flex flex-col w-28 mr-2'
-                >
-                  <MoviePoster item={item} />
-                  <ItemCardText item={item} />
-                </TouchableItemRouter>
-              )}
-            />
-            {/* Music search results */}
-            <SearchItemWrapper
-              items={artists}
-              header={t("search.artists")}
-              renderItem={(item: BaseItemDto) => {
-                const imageUrl = getPrimaryImageUrl({ api, item });
-                return (
+          <View>
+            {bothScopes && jellyfinHasResults ? (
+              <Text className='font-bold text-2xl px-4 mt-2 mb-1 text-sky-400'>
+                Jellyfin
+              </Text>
+            ) : null}
+            <View
+              className={l1 || l2 ? "opacity-0" : "opacity-100"}
+              style={{ display: jellyfinScope ? "flex" : "none" }}
+            >
+              <SearchItemWrapper
+                header={t("search.movies")}
+                items={movies}
+                renderItem={(item: BaseItemDto) => (
                   <TouchableItemRouter
-                    item={item}
-                    key={item.Id}
-                    className='flex flex-col w-24 mr-2 items-center'
-                  >
-                    <View
-                      style={{
-                        width: 80,
-                        height: 80,
-                        borderRadius: 40,
-                        overflow: "hidden",
-                        backgroundColor: "#1a1a1a",
-                      }}
-                    >
-                      {imageUrl ? (
-                        <Image
-                          source={{ uri: imageUrl }}
-                          style={{ width: "100%", height: "100%" }}
-                          contentFit='cover'
-                        />
-                      ) : (
-                        <View className='flex-1 items-center justify-center bg-neutral-800'>
-                          <Text className='text-xl'>👤</Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text numberOfLines={2} className='mt-2 text-center'>
-                      {item.Name}
-                    </Text>
-                  </TouchableItemRouter>
-                );
-              }}
-            />
-            <SearchItemWrapper
-              items={albums}
-              header={t("search.albums")}
-              renderItem={(item: BaseItemDto) => {
-                const imageUrl = getPrimaryImageUrl({ api, item });
-                return (
-                  <TouchableItemRouter
-                    item={item}
                     key={item.Id}
                     className='flex flex-col w-28 mr-2'
-                  >
-                    <View
-                      style={{
-                        width: 112,
-                        height: 112,
-                        borderRadius: 8,
-                        overflow: "hidden",
-                        backgroundColor: "#1a1a1a",
-                      }}
-                    >
-                      {imageUrl ? (
-                        <Image
-                          source={{ uri: imageUrl }}
-                          style={{ width: "100%", height: "100%" }}
-                          contentFit='cover'
-                        />
-                      ) : (
-                        <View className='flex-1 items-center justify-center bg-neutral-800'>
-                          <Text className='text-4xl'>🎵</Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text numberOfLines={2} className='mt-2'>
-                      {item.Name}
-                    </Text>
-                    <Text className='opacity-50 text-xs' numberOfLines={1}>
-                      {item.AlbumArtist || item.Artists?.join(", ")}
-                    </Text>
-                  </TouchableItemRouter>
-                );
-              }}
-            />
-            <SearchItemWrapper
-              items={songs}
-              header={t("search.songs")}
-              renderItem={(item: BaseItemDto) => {
-                const imageUrl = getPrimaryImageUrl({ api, item });
-                return (
-                  <TouchableItemRouter
                     item={item}
-                    key={item.Id}
-                    className='flex flex-col w-28 mr-2'
                   >
-                    <View
-                      style={{
-                        width: 112,
-                        height: 112,
-                        borderRadius: 8,
-                        overflow: "hidden",
-                        backgroundColor: "#1a1a1a",
-                      }}
-                    >
-                      {imageUrl ? (
-                        <Image
-                          source={{ uri: imageUrl }}
-                          style={{ width: "100%", height: "100%" }}
-                          contentFit='cover'
-                        />
-                      ) : (
-                        <View className='flex-1 items-center justify-center bg-neutral-800'>
-                          <Text className='text-4xl'>🎵</Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text numberOfLines={2} className='mt-2'>
-                      {item.Name}
-                    </Text>
-                    <Text className='opacity-50 text-xs' numberOfLines={1}>
-                      {item.Artists?.join(", ") || item.AlbumArtist}
-                    </Text>
-                  </TouchableItemRouter>
-                );
-              }}
-            />
-            <SearchItemWrapper
-              items={playlists}
-              header={t("search.playlists")}
-              renderItem={(item: BaseItemDto) => {
-                const imageUrl = getPrimaryImageUrl({ api, item });
-                return (
-                  <TouchableItemRouter
-                    item={item}
-                    key={item.Id}
-                    className='flex flex-col w-28 mr-2'
-                  >
-                    <View
-                      style={{
-                        width: 112,
-                        height: 112,
-                        borderRadius: 8,
-                        overflow: "hidden",
-                        backgroundColor: "#1a1a1a",
-                      }}
-                    >
-                      {imageUrl ? (
-                        <Image
-                          source={{ uri: imageUrl }}
-                          style={{ width: "100%", height: "100%" }}
-                          contentFit='cover'
-                        />
-                      ) : (
-                        <View className='flex-1 items-center justify-center bg-neutral-800'>
-                          <Text className='text-4xl'>🎶</Text>
-                        </View>
-                      )}
-                    </View>
+                    <MoviePoster item={item} key={item.Id} />
                     <Text numberOfLines={2} className='mt-2'>
                       {item.Name}
                     </Text>
                     <Text className='opacity-50 text-xs'>
-                      {item.ChildCount} tracks
+                      {item.ProductionYear}
                     </Text>
                   </TouchableItemRouter>
-                );
-              }}
-            />
+                )}
+              />
+              <SearchItemWrapper
+                items={series}
+                header={t("search.series")}
+                renderItem={(item: BaseItemDto) => (
+                  <TouchableItemRouter
+                    key={item.Id}
+                    item={item}
+                    className='flex flex-col w-28 mr-2'
+                  >
+                    <SeriesPoster item={item} key={item.Id} />
+                    <Text numberOfLines={2} className='mt-2'>
+                      {item.Name}
+                    </Text>
+                    <Text className='opacity-50 text-xs'>
+                      {item.ProductionYear}
+                    </Text>
+                  </TouchableItemRouter>
+                )}
+              />
+              <SearchItemWrapper
+                items={episodes}
+                header={t("search.episodes")}
+                renderItem={(item: BaseItemDto) => (
+                  <TouchableItemRouter
+                    item={item}
+                    key={item.Id}
+                    className='flex flex-col w-44 mr-2'
+                  >
+                    <ContinueWatchingPoster item={item} />
+                    <ItemCardText item={item} />
+                  </TouchableItemRouter>
+                )}
+              />
+              <SearchItemWrapper
+                items={collections}
+                header={t("search.collections")}
+                renderItem={(item: BaseItemDto) => (
+                  <TouchableItemRouter
+                    key={item.Id}
+                    item={item}
+                    className='flex flex-col w-28 mr-2'
+                  >
+                    <MoviePoster item={item} key={item.Id} />
+                    <Text numberOfLines={2} className='mt-2'>
+                      {item.Name}
+                    </Text>
+                  </TouchableItemRouter>
+                )}
+              />
+              <SearchItemWrapper
+                items={actors}
+                header={t("search.actors")}
+                renderItem={(item: BaseItemDto) => (
+                  <TouchableItemRouter
+                    item={item}
+                    key={item.Id}
+                    className='flex flex-col w-28 mr-2'
+                  >
+                    <MoviePoster item={item} />
+                    <ItemCardText item={item} />
+                  </TouchableItemRouter>
+                )}
+              />
+              {/* Music search results */}
+              <SearchItemWrapper
+                items={artists}
+                header={t("search.artists")}
+                renderItem={(item: BaseItemDto) => {
+                  const imageUrl = getPrimaryImageUrl({ api, item });
+                  return (
+                    <TouchableItemRouter
+                      item={item}
+                      key={item.Id}
+                      className='flex flex-col w-24 mr-2 items-center'
+                    >
+                      <View
+                        style={{
+                          width: 80,
+                          height: 80,
+                          borderRadius: 40,
+                          overflow: "hidden",
+                          backgroundColor: "#1a1a1a",
+                        }}
+                      >
+                        {imageUrl ? (
+                          <Image
+                            source={{ uri: imageUrl }}
+                            style={{ width: "100%", height: "100%" }}
+                            contentFit='cover'
+                          />
+                        ) : (
+                          <View className='flex-1 items-center justify-center bg-neutral-800'>
+                            <Text className='text-xl'>👤</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text numberOfLines={2} className='mt-2 text-center'>
+                        {item.Name}
+                      </Text>
+                    </TouchableItemRouter>
+                  );
+                }}
+              />
+              <SearchItemWrapper
+                items={albums}
+                header={t("search.albums")}
+                renderItem={(item: BaseItemDto) => {
+                  const imageUrl = getPrimaryImageUrl({ api, item });
+                  return (
+                    <TouchableItemRouter
+                      item={item}
+                      key={item.Id}
+                      className='flex flex-col w-28 mr-2'
+                    >
+                      <View
+                        style={{
+                          width: 112,
+                          height: 112,
+                          borderRadius: 8,
+                          overflow: "hidden",
+                          backgroundColor: "#1a1a1a",
+                        }}
+                      >
+                        {imageUrl ? (
+                          <Image
+                            source={{ uri: imageUrl }}
+                            style={{ width: "100%", height: "100%" }}
+                            contentFit='cover'
+                          />
+                        ) : (
+                          <View className='flex-1 items-center justify-center bg-neutral-800'>
+                            <Text className='text-4xl'>🎵</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text numberOfLines={2} className='mt-2'>
+                        {item.Name}
+                      </Text>
+                      <Text className='opacity-50 text-xs' numberOfLines={1}>
+                        {item.AlbumArtist || item.Artists?.join(", ")}
+                      </Text>
+                    </TouchableItemRouter>
+                  );
+                }}
+              />
+              <SearchItemWrapper
+                items={songs}
+                header={t("search.songs")}
+                renderItem={(item: BaseItemDto) => {
+                  const imageUrl = getPrimaryImageUrl({ api, item });
+                  return (
+                    <TouchableItemRouter
+                      item={item}
+                      key={item.Id}
+                      className='flex flex-col w-28 mr-2'
+                    >
+                      <View
+                        style={{
+                          width: 112,
+                          height: 112,
+                          borderRadius: 8,
+                          overflow: "hidden",
+                          backgroundColor: "#1a1a1a",
+                        }}
+                      >
+                        {imageUrl ? (
+                          <Image
+                            source={{ uri: imageUrl }}
+                            style={{ width: "100%", height: "100%" }}
+                            contentFit='cover'
+                          />
+                        ) : (
+                          <View className='flex-1 items-center justify-center bg-neutral-800'>
+                            <Text className='text-4xl'>🎵</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text numberOfLines={2} className='mt-2'>
+                        {item.Name}
+                      </Text>
+                      <Text className='opacity-50 text-xs' numberOfLines={1}>
+                        {item.Artists?.join(", ") || item.AlbumArtist}
+                      </Text>
+                    </TouchableItemRouter>
+                  );
+                }}
+              />
+              <SearchItemWrapper
+                items={playlists}
+                header={t("search.playlists")}
+                renderItem={(item: BaseItemDto) => {
+                  const imageUrl = getPrimaryImageUrl({ api, item });
+                  return (
+                    <TouchableItemRouter
+                      item={item}
+                      key={item.Id}
+                      className='flex flex-col w-28 mr-2'
+                    >
+                      <View
+                        style={{
+                          width: 112,
+                          height: 112,
+                          borderRadius: 8,
+                          overflow: "hidden",
+                          backgroundColor: "#1a1a1a",
+                        }}
+                      >
+                        {imageUrl ? (
+                          <Image
+                            source={{ uri: imageUrl }}
+                            style={{ width: "100%", height: "100%" }}
+                            contentFit='cover'
+                          />
+                        ) : (
+                          <View className='flex-1 items-center justify-center bg-neutral-800'>
+                            <Text className='text-4xl'>🎶</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text numberOfLines={2} className='mt-2'>
+                        {item.Name}
+                      </Text>
+                      <Text className='opacity-50 text-xs'>
+                        {item.ChildCount} tracks
+                      </Text>
+                    </TouchableItemRouter>
+                  );
+                }}
+              />
+            </View>
+            {stremioScope ? (
+              <View>
+                {bothScopes && stremio.hits.length > 0 ? (
+                  <Text className='font-bold text-2xl px-4 mt-3 mb-1 text-purple-400'>
+                    Stremio
+                  </Text>
+                ) : null}
+                <StremioSearchResults
+                  hits={stremio.hits}
+                  loading={stremio.loading}
+                  unavailable={
+                    stremio.unavailable && debouncedSearch.length > 0
+                  }
+                />
+              </View>
+            ) : null}
           </View>
         ) : (
           <JellyserrIndexPage

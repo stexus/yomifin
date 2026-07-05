@@ -383,6 +383,11 @@ export type Settings = {
   stremioAddonUrls: string[];
   /** Skip the stream picker: auto-play the first playable (debrid) result. */
   stremioAutoPlayFirstStream: boolean;
+  /**
+   * Which sources the unified search screen queries. "both" runs Jellyfin AND
+   * Stremio (source badges disambiguate the results).
+   */
+  searchScope: "jellyfin" | "stremio" | "both";
   // ===== Player UI (senplayer-style rework) =====
   /**
    * Show the persistent OSD status bar (clock/battery/etc) during REGULAR playback
@@ -525,6 +530,7 @@ export const defaultValues: Settings = {
     "https://aiostream.luigivault.com/stremio/e63962d4-c468-4b49-9bed-80581f53bab5/eyJpIjoic09qaW8yaHg1UjQrRUE3bjVISXlXUT09IiwiZSI6IkdzYStSOVY0ejVKdXB4STF2YTUxOURlWStFWjArRElqazVsTno2WE92QkE9IiwidCI6ImEifQ/manifest.json",
   ],
   stremioAutoPlayFirstStream: false,
+  searchScope: "both",
   // Player UI (senplayer-style rework): during-playback status bar = clock + battery.
   playerStatusBarDuringPlayback: true,
   playerStatusShowClock: true,

@@ -16,6 +16,8 @@ import {
   playableStreams,
   resourceUrl,
   type StremioManifest,
+  searchAddons,
+  searchableCatalogs,
   sortVideos,
   streamLabel,
   videoLabel,
@@ -243,6 +245,104 @@ await test("streamLabel flattens newlines; videoLabel + sortVideos", () => {
   assert.deepEqual(
     sorted.map((v) => v.id),
     ["a", "b", "sp"],
+  );
+});
+
+await test("searchableCatalogs finds search-extra catalogs, narrows by type", () => {
+  // META_ADDON: only the anime "search-only" catalog accepts search.
+  assert.deepEqual(
+    searchableCatalogs(META_ADDON).map((c) => c.id),
+    ["search-only"],
+  );
+  // Narrowed to series → none match.
+  assert.deepEqual(
+    searchableCatalogs(META_ADDON, ["series"]).map((c) => c.id),
+    [],
+  );
+  // extraSupported form.
+  const m: StremioManifest = {
+    id: "x",
+    name: "X",
+    resources: ["catalog"],
+    types: ["movie"],
+    catalogs: [
+      { type: "movie", id: "s", name: "S", extraSupported: ["search", "skip"] },
+      { type: "movie", id: "n", name: "N" },
+    ],
+  };
+  assert.deepEqual(
+    searchableCatalogs(m, ["movie"]).map((c) => c.id),
+    ["s"],
+  );
+});
+
+await test("searchAddons queries search catalogs, merges + dedupes by id", async () => {
+  const A: StremioManifest = {
+    id: "a",
+    name: "AddonA",
+    resources: ["catalog"],
+    types: ["movie", "series"],
+    catalogs: [
+      { type: "movie", id: "m", extraSupported: ["search"] },
+      { type: "series", id: "s", extraSupported: ["search"] },
+    ],
+  };
+  const B: StremioManifest = {
+    id: "b",
+    name: "AddonB",
+    resources: ["catalog"],
+    types: ["movie"],
+    catalogs: [{ type: "movie", id: "m", extraSupported: ["search"] }],
+  };
+  const addons = [
+    { manifestUrl: "https://a.com/manifest.json", manifest: A },
+    { manifestUrl: "https://b.com/manifest.json", manifest: B },
+  ];
+  const q = "naruto";
+  const enc = encodeURIComponent(q);
+  const hits = await searchAddons(
+    addons,
+    q,
+    ["movie", "series"],
+    fakeFetch({
+      [`https://a.com/catalog/movie/m/search=${enc}.json`]: {
+        metas: [{ id: "tt1", type: "movie", name: "Naruto Movie" }],
+      },
+      [`https://a.com/catalog/series/s/search=${enc}.json`]: {
+        metas: [{ id: "tt2", type: "series", name: "Naruto" }],
+      },
+      // B returns tt1 again (dup) + a new one.
+      [`https://b.com/catalog/movie/m/search=${enc}.json`]: {
+        metas: [
+          { id: "tt1", type: "movie", name: "Naruto Movie (dup)" },
+          { id: "tt3", type: "movie", name: "Naruto Movie 2" },
+        ],
+      },
+    }),
+  );
+  // tt1 deduped to AddonA (first); tt2, tt3 present.
+  assert.deepEqual(
+    hits.map((h) => h.meta.id),
+    ["tt1", "tt2", "tt3"],
+  );
+  assert.equal(hits[0].addonName, "AddonA");
+  assert.equal(hits[2].addonName, "AddonB");
+});
+
+await test("searchAddons: blank query short-circuits, bad catalog swallowed", async () => {
+  const A: StremioManifest = {
+    id: "a",
+    name: "AddonA",
+    resources: ["catalog"],
+    types: ["movie"],
+    catalogs: [{ type: "movie", id: "m", extraSupported: ["search"] }],
+  };
+  const addons = [{ manifestUrl: "https://a.com/manifest.json", manifest: A }];
+  assert.deepEqual(await searchAddons(addons, "   "), []);
+  // Catalog 404s → swallowed, empty result (no throw).
+  assert.deepEqual(
+    await searchAddons(addons, "x", ["movie"], fakeFetch({})),
+    [],
   );
 });
 

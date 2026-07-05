@@ -212,6 +212,27 @@ export function browsableCatalogs(
   });
 }
 
+/** Does a catalog accept a `search` extra (required OR optional)? */
+function catalogSupportsSearch(c: StremioCatalogRef): boolean {
+  if ((c.extra ?? []).some((e) => e.name === "search")) return true;
+  if ((c.extraSupported ?? []).includes("search")) return true;
+  if ((c.extraRequired ?? []).includes("search")) return true;
+  return false;
+}
+
+/**
+ * Catalogs that accept a `search` extra, optionally narrowed to a set of types
+ * (e.g. `["movie", "series"]`). Used by the unified search screen.
+ */
+export function searchableCatalogs(
+  manifest: StremioManifest,
+  types?: string[],
+): StremioCatalogRef[] {
+  return (manifest.catalogs ?? []).filter(
+    (c) => catalogSupportsSearch(c) && (!types || types.includes(c.type)),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Fetching
 // ---------------------------------------------------------------------------
@@ -313,6 +334,66 @@ export async function fetchMetaFromAddons(
     }
   }
   return null;
+}
+
+/** A search hit annotated with the addon + catalog that produced it. */
+export interface StremioSearchHit {
+  meta: StremioMetaPreview;
+  addonName: string;
+  manifestUrl: string;
+}
+
+/**
+ * Run `search` against every searchable catalog of every addon (optionally
+ * narrowed to `types`, e.g. movie/series), merged and deduped by id. Failures
+ * per-catalog are swallowed (logged) so one bad addon can't blank the results.
+ */
+export async function searchAddons(
+  addons: LoadedAddon[],
+  query: string,
+  types?: string[],
+  fetchFn: FetchLike = fetch as unknown as FetchLike,
+): Promise<StremioSearchHit[]> {
+  const q = query.trim();
+  if (!q) return [];
+  const perAddon = await Promise.all(
+    addons.map(async (a): Promise<StremioSearchHit[]> => {
+      const cats = searchableCatalogs(a.manifest, types);
+      const perCatalog = await Promise.all(
+        cats.map(async (c): Promise<StremioSearchHit[]> => {
+          try {
+            const metas = await fetchCatalog(
+              a.manifestUrl,
+              c.type,
+              c.id,
+              { search: q },
+              fetchFn,
+            );
+            return metas.map((meta) => ({
+              meta,
+              addonName: a.manifest.name,
+              manifestUrl: a.manifestUrl,
+            }));
+          } catch (e) {
+            console.warn(
+              `[STREMIO] search ${c.type}/${c.id} on ${a.manifest.name} failed: ${(e as Error).message}`,
+            );
+            return [];
+          }
+        }),
+      );
+      return perCatalog.flat();
+    }),
+  );
+  // Dedupe by meta id, keeping the first (highest-priority addon) occurrence.
+  const seen = new Set<string>();
+  const out: StremioSearchHit[] = [];
+  for (const hit of perAddon.flat()) {
+    if (seen.has(hit.meta.id)) continue;
+    seen.add(hit.meta.id);
+    out.push(hit);
+  }
+  return out;
 }
 
 /** Streams from ALL addons that claim stream support, concatenated in list order. */

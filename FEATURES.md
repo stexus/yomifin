@@ -70,6 +70,7 @@ deck/model/templates for BOTH profiles). Remove rows from this note as verified.
 
 | Feature | Where | Notes |
 | --- | --- | --- |
+| Unified search (Jellyfin + Stremio) | `utils/stremio/client.ts` (`searchableCatalogs`/`searchAddons` +`client.test.ts`), `utils/stremio/useStremioSearch.ts`, `components/search/{SearchScopeSelector,StremioSearchResults}.tsx`, `app/(auth)/(tabs)/(search)/index.tsx`, `Settings.searchScope` (default `both`) | JS-only → `just dev`. Scope segmented control **Jellyfin · Stremio · Both** at the top of the Library search view (persisted in settings); Jellyfin queries gated on the scope, Stremio search = `search=` extra across every configured addon's searchable movie/series catalog (merged + deduped by id, per-catalog failures swallowed). Provenance is explicit: bold `Jellyfin`/`Stremio` group headers when Both is active + a per-poster Stremio `SourceBadge`. Stremio hits route into the existing `(stremio)/meta` flow (debrid streams + yomifin player). GATES: search a title present only in Stremio → shows under a Stremio shelf, tap → meta → stream → player; scope switch persists; Jellyfin-only + Both unregressed; "no results" copy correct per-scope. NOTE: also de-noises the old Jellyfin-only search (episodes no longer dominate — movies/series lead). NOT YET: AniList discovery tab (backlog §11 — design agreed: AniList GraphQL browse + arm.haglund.dev/Fribb id-map → kitsu/imdb → existing stream+player; gated on an aiometadata `anilist:` meta probe) |
 | Lookup knob: max results | `lookup.ts` `maxResults` (default 32 = Yomitan), Settings → Reader, threaded via `loadInstalledDictionary` opts | trims the entry TAIL after sorting (headline/order untouched); pinned in `lookup.test.ts`; remaining parity knobs (maxScanLength, preprocessor toggles) parked under Small |
 | Profiles (JA/ZH bundles) | `utils/yomifin/profiles.ts` (+test), settings keys `yomifinActiveProfile`/`yomifinProfiles`, Settings → Dictionaries/Anki profile switcher, `direct-player.tsx` `yomifinLanguageHint` | { language, dictionary set, Anki config } per profile; NO-MIGRATION design: legacy `yomifinDictionaryConfig`/`yomifinAnkiConfig` keys ARE the JA profile's fallback storage until first profile-aware edit shadows them; player auto-selects profile from subtitle-track language (then audio), manual choice is the fallback; effective profile threads popup → `getAnkiConfig(profileId)` → `addAnkiCard`. Follow-ups (same pending batch): in-player profile PILL (`ProfilePill.tsx`, rendered IN the controls top bars — next to the ⋯ dropdown via `Controls`/`HeaderControls` `headerLeftSlot`/`leftSlot` in direct-player, beside the ✕ button in stremio-player — so it shows/fades exactly with the controls; shows `JA/ZH · auto`, tap = switch remembered per-title via `yomifinProfileOverrides` keyed SeriesId/ItemId or `stremio:<name>`, long-press = back to auto; precedence override > track hint > manual default, pinned in profiles.test.ts); per-profile DICTIONARY VISIBILITY (`yomifinDictionaryLanguages` title→profile map, unmapped = ja so zero migration; lookups and Settings → Dictionaries list only the active profile's dicts, `→ ZH`/`→ JA` chip moves a row across, imports auto-assign to the importing profile, `{single-glossary:…}` picker filtered too) |
 | Chinese parity (st↔ts folding) | `yomitan/chinese-text-preprocessors.js` (OURS, `chinese-simple2traditional` dep — MIT, char-level, no `\p{}`), registered in `language-descriptors.js`; zh cases in `lookup.test.ts` | closes LOOKUP_FIDELITY §4 divergence: 汉语 finds 漢語-stored entries and vice versa; zh = exact + longest-match, no deinflection; `language` threads from the active profile. NOTE: `assets/dictionaries/CC-CEDICT.zip` is the TERM dictionary to import — the `…Hanzi….zip` variant is kanji-bank-only (importer reads `term_bank_*` → would import 0 terms) |
@@ -93,8 +94,8 @@ In rough order of expected want:
   Trigger: actually missing a control during real use — keep a list. (Gestures,
   controls-dim, playback speed, and watch-state/resume shipped WITHOUT it — the
   shared `GestureOverlay` needed no extraction.)
-- Catalog `search` / `genre` extras (client already builds the extra segment;
-  UI only) + a Stremio search surface.
+- Catalog `genre` extras (client already builds the extra segment; UI only).
+  (`search` shipped — see the unified-search row in Shipped.)
 - `/subtitles/` resource resolution (both installed addons serve it) as another
   subtitle source next to jimaku + `stream.subtitles`.
 - Embedded-sub gate never explicitly verified: tappable overlay on a stream's
@@ -123,6 +124,57 @@ degrade gracefully.
 ### 7. Ability to send sync command to ankiconnect
 ### 8. AirPlay to TV
 ### 9. Stremio progress tracking synced with new jellyfin+stremio web interface
+### 10. Stremio search function — ✅ SHIPPED (pending device verification; see Shipped)
+### 11. AniList anime discovery tab (design agreed; probe DONE 2026-07-04)
+Full AniList browsing via the public GraphQL API (no key), play via the existing
+Stremio debrid + yomifin pipeline. FEASIBLE — bridge proven live end-to-end.
+PROBE: aiometadata advertises `anilist:` but `meta/*/anilist:<id>` returns null
+(NOT directly resolvable). Working bridge: `arm.haglund.dev/api/v2/ids?source=
+anilist&id=<n>` → {imdb, kitsu, myanimelist, thetvdb, themoviedb, +season hints},
+no key; confirmed anilist 154587 (Frieren) → tt22248376 → aiostream → 16 debrid
+streams. Cache in MMKV; Fribb `anime-list-full.json` = static fallback. SURPRISE:
+aiometadata already exposes MAL anime catalogs (`mal.top_anime`, `mal.seasons`,
+`mal.airing`, `mal.most_popular`, `mal.genres`, `mal.studios`, decades, upcoming,
+schedule) returning tt/kitsu ids — already rendering as shelves in the Stremio tab
+(uncurated). Search catalogs: `search.{movie,series}` (tt/tvdb) +
+`search.anime_{series,movie}` (types anime.series/anime.movie → kitsu); unified
+search's SEARCH_TYPES misses the anime ones — add if anime search quality matters.
+PLAYBACK ID DECISION (probed live 2026-07-04):
+- kitsu-FIRST. aiostream resolves `kitsu:<id>:<episode>` (SINGLE number, no season
+  — `kitsu:46474:1` → 20 streams; `:1:1` → 0). kitsu, like AniList, splits every
+  cour into its own entry numbered from 1, so AniList episode N → `kitsu:<id>:N`
+  is aligned BY CONSTRUCTION and keeps playback SCOPED to the exact cour browsed.
+- imdb (`tt`) is FALLBACK ONLY: aiometadata imdb meta is rich but TVDB-numbered
+  and COLLAPSES the franchise (Frieren `tt22248376` → 66 videos incl. S0 specials).
+  Driving imdb ids with AniList numbers BREAKS multi-cour shows — on the fallback
+  use the addon's own tvdb videos + arm `thetvdb-season`, NOT AniList numbers.
+- kitsu META is null on both addons → on the kitsu path the EPISODE LIST comes from
+  AniList (`episodes` count, `airingSchedule`, `streamingEpisodes{title,thumbnail}`
+  where present); SAFE because kitsu-aligned. Residual edge (device-verify): recap/
+  .5 eps or kitsu/AniList cour-boundary mismatches can be off by one.
+
+DESIGN (additive; player + stremio-player untouched): `utils/anilist/{client,
+mapping}.ts` (pure, bun-tested) + NEW `app/(auth)/(tabs)/(anime)/` tab. Shelves
+(index): Trending / Popular This Season / Top 100 / All-Time. Browse(grid):
+combined season+year (Fall 2025, Spring 2026…), `genre_in`, `tag_in` (Isekai/
+Romcom — AniList's TAG system, the real win), `format_in`, `sort`, infinite scroll
+(Page pagination — proved total 5000 / 625 pages on one filter). Detail: AniList-
+rich header (cover/banner, score, tags, relations, RECOMMENDATIONS = “infinite
+discovery”) + episode list → `kitsu:<id>:<n>` → existing `fetchStreamsFromAddons`
+→ existing stremio-player. jimaku gets the RAW anilist id. Map anilist→{kitsu,imdb,
+tvdb-season} via `arm.haglund.dev`, MMKV-cached (`anilist-idmap`); Fribb
+`anime-list-full.json` static fallback.
+
+UI AESTHETIC (explicit user ask): BEAUTIFUL, modeled on AniList's own look (cover-
+forward cards, banner-backed detail hero, colored score pills, tag chips, genre-
+tinted accents) but MOBILE-OPTIMIZED for iPad. Designer discretion — make it feel
+like a first-class AniList app, not a Stremio catalog grid.
+
+OPEN DECISIONS (my defaults unless told otherwise): AniList is rate-throttled
+(~30 req/min) → cache shelves module-level + MMKV, debounce search, gentle paging;
+`isAdult` filtered OUT by default; title language = setting, default romaji;
+NEW `(anime)` tab (not folded into Stremio); AniList account/list sync OUT of v1.
+### 12. remove hard coded manifest from code for addons
 
 
 
