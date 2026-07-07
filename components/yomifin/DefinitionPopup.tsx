@@ -47,7 +47,13 @@ import { ScrollView } from "react-native-gesture-handler";
 import Animated, { FadeInLeft, FadeInRight } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
-import { addAnkiCard, flattenGloss } from "@/utils/yomifin/anki";
+import {
+  type AnkiDuplicateStatus,
+  addAnkiCard,
+  type CardData,
+  checkAnkiDuplicate,
+  flattenGloss,
+} from "@/utils/yomifin/anki";
 import { getAnkiConfig } from "@/utils/yomifin/ankiConfig";
 import type { CapturedMedia, MediaWant } from "@/utils/yomifin/ankiMedia";
 import {
@@ -147,6 +153,12 @@ export default function DefinitionPopup({
   const [selection, setSelection] = useState<PopupSelection>(null);
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState(false);
+  // Live "already in your deck?" probe against AnkiConnect (canAddNotes). Lets the
+  // user see a duplicate before pressing add; "checking" while in flight, "unknown"
+  // when the server is unreachable/misconfigured (no nagging).
+  const [dupStatus, setDupStatus] = useState<
+    AnkiDuplicateStatus | "checking" | "idle"
+  >("idle");
   // Manual trim fallback (✎): user-edited selection text. Overrides `selection` for
   // {popup-selection-text} — the universal escape hatch for layouts the sense
   // heuristics can't segment, or for arbitrary trims.
@@ -206,6 +218,7 @@ export default function DefinitionPopup({
     setAdded(false);
     setCustomText(null);
     setEditing(false);
+    setDupStatus("idle");
   }, [result]);
 
   const select = (next: PopupSelection) => {
@@ -242,6 +255,53 @@ export default function DefinitionPopup({
   const hasCueStore = cues.length > 0 && cueRange !== null;
   const displaySentence = hasCueStore ? rangeText(cues, cueRange) : sentence;
   const cueSpan = hasCueStore ? rangeLength(cueRange) : 1;
+
+  // Card payload for the duplicate probe (no media — the first/dup-detection field
+  // is never {picture}/{sentence-audio}, so we skip the expensive capture here).
+  const dupCardData = useMemo<CardData>(
+    () => ({
+      result,
+      activeIndex: safeIndex,
+      sentence: displaySentence,
+      selection,
+      customSelectionText: customText ?? undefined,
+      cloze,
+      documentTitle,
+      profileId,
+    }),
+    [
+      result,
+      safeIndex,
+      displaySentence,
+      selection,
+      customText,
+      cloze,
+      documentTitle,
+      profileId,
+    ],
+  );
+
+  // Poll AnkiConnect whenever the card payload changes (debounced — the first field
+  // usually only tracks the pane, but selection/✎ edits can feed it too). "unknown"
+  // on any failure keeps the UI quiet when the server is off.
+  useEffect(() => {
+    if (!entry || added) return;
+    let cancelled = false;
+    setDupStatus("checking");
+    const timer = setTimeout(() => {
+      checkAnkiDuplicate(dupCardData)
+        .then((s) => {
+          if (!cancelled) setDupStatus(s);
+        })
+        .catch(() => {
+          if (!cancelled) setDupStatus("unknown");
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [entry, added, dupCardData]);
 
   // Phase 8: sense-level selection per glossary item of the active pane. Two tiers
   // (see senses.ts): STRUCTURAL paths (JMdict <li> senses) and, only when those are
@@ -295,7 +355,7 @@ export default function DefinitionPopup({
     };
   }, []);
 
-  const handleAddCard = async () => {
+  const handleAddCard = async (force = false) => {
     if (adding || added) return;
     setAdding(true);
     // Let the spinner PAINT before any heavy work starts (device feedback: the
@@ -363,6 +423,7 @@ export default function DefinitionPopup({
         media,
         wordAudio,
         profileId,
+        forceDuplicate: force,
       });
       if (mountedRef.current) setAdded(true);
       toast.success("Card added to Anki");
@@ -374,6 +435,7 @@ export default function DefinitionPopup({
   };
   // Fixed-size box: ~1/3 of the screen wide, spanning almost the full height between
   // the safe-area insets. It never moves/resizes with content — it scrolls internally.
+  const dupDetected = !added && dupStatus === "duplicate";
   const cardWidth = Math.max(340, Math.round(screenWidth / 3));
   const sideStyle =
     position === "left"
@@ -749,6 +811,11 @@ export default function DefinitionPopup({
                 <View />
               )}
               <View style={styles.footerRight}>
+                {!added && dupStatus === "checking" ? (
+                  <ActivityIndicator size='small' color={t.reading} />
+                ) : dupDetected ? (
+                  <Text style={styles.dupBadge}>● in deck</Text>
+                ) : null}
                 <Pressable
                   style={styles.editBtn}
                   onPress={() => openEditor()}
@@ -757,8 +824,12 @@ export default function DefinitionPopup({
                   <Text style={styles.editBtnText}>✎</Text>
                 </Pressable>
                 <Pressable
-                  style={[styles.addBtn, added && styles.addBtnDone]}
-                  onPress={handleAddCard}
+                  style={[
+                    styles.addBtn,
+                    added && styles.addBtnDone,
+                    dupDetected && styles.addBtnDup,
+                  ]}
+                  onPress={() => handleAddCard(dupDetected)}
                   disabled={adding || added}
                   hitSlop={6}
                 >
@@ -766,7 +837,11 @@ export default function DefinitionPopup({
                     <ActivityIndicator size='small' color={t.accentText} />
                   ) : (
                     <Text style={styles.addBtnText}>
-                      {added ? "✓ Added" : "+ Anki card"}
+                      {added
+                        ? "✓ Added"
+                        : dupDetected
+                          ? "＋ Add anyway"
+                          : "+ Anki card"}
                     </Text>
                   )}
                 </Pressable>
@@ -1060,6 +1135,9 @@ function makeStyles(t: PopupTheme) {
       alignItems: "center",
     },
     addBtnDone: { backgroundColor: "#3a7a3a" },
+    // Duplicate override: amber "Add anyway" to signal it's a deliberate re-add.
+    addBtnDup: { backgroundColor: "#c98a2b" },
     addBtnText: { color: t.accentText, fontSize: 15, fontWeight: "600" },
+    dupBadge: { color: "#e0a13a", fontSize: 13, fontWeight: "700" },
   });
 }

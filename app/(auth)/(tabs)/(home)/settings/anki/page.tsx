@@ -32,6 +32,7 @@ import {
   fetchDeckNames,
   fetchModelFieldNames,
   fetchModelNames,
+  syncAnki,
 } from "@/utils/yomifin/anki";
 import {
   type AnkiConfig,
@@ -96,6 +97,7 @@ export default function AnkiSettingsPage() {
   );
   const [connecting, setConnecting] = useState(false);
   const [connected, setConnected] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [decks, setDecks] = useState<string[]>([]);
   const [models, setModels] = useState<string[]>([]);
   const [loadingFields, setLoadingFields] = useState(false);
@@ -152,6 +154,18 @@ export default function AnkiSettingsPage() {
     },
     [profileId, updateSettings],
   );
+
+  const sync = useCallback(async () => {
+    setSyncing(true);
+    try {
+      await syncAnki(config.url);
+      toast.success("Anki sync started");
+    } catch (e) {
+      toast.error((e as Error).message || "Sync failed");
+    } finally {
+      setSyncing(false);
+    }
+  }, [config.url]);
 
   const connect = useCallback(async () => {
     setConnecting(true);
@@ -362,7 +376,22 @@ export default function AnkiSettingsPage() {
                 </Text>
               )}
             </Pressable>
+            <Pressable
+              style={[styles.button, styles.buttonSecondary]}
+              onPress={sync}
+              disabled={syncing}
+            >
+              {syncing ? (
+                <ActivityIndicator size='small' color='#6cb6ff' />
+              ) : (
+                <Text style={styles.buttonSecondaryText}>Sync</Text>
+              )}
+            </Pressable>
           </View>
+          <Text style={styles.subtitle}>
+            Sync pushes the whole collection to AnkiWeb (same as pressing sync
+            in Anki) — profile-agnostic, uses the URL above.
+          </Text>
         </View>
 
         {/* Deck */}
@@ -747,6 +776,14 @@ const styles = {
     minWidth: 90,
   },
   buttonText: { color: "#001", fontWeight: "700" as const, fontSize: 14 },
+  buttonSecondary: {
+    backgroundColor: "rgba(108,182,255,0.12)",
+  },
+  buttonSecondaryText: {
+    color: "#6cb6ff",
+    fontWeight: "700" as const,
+    fontSize: 14,
+  },
   chipWrap: {
     flexDirection: "row" as const,
     flexWrap: "wrap" as const,

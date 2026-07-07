@@ -96,6 +96,16 @@ export function fetchModelFieldNames(
   return ankiInvoke<string[]>(url, "modelFieldNames", { modelName });
 }
 
+/**
+ * Trigger a full AnkiConnect → AnkiWeb sync of the whole collection. Unlike the
+ * card config this is profile-agnostic (any configured URL syncs everything), so
+ * callers just pass a URL. The sync can take a while server-side, so give it the
+ * longer upload budget rather than the 4s control timeout.
+ */
+export function syncAnki(url: string): Promise<void> {
+  return ankiInvoke<void>(url, "sync", {}, ANKI_UPLOAD_TIMEOUT_MS);
+}
+
 // --- Card assembly ----------------------------------------------------------------
 
 export { scToText }; // re-export (moved to structuredContent.ts in Phase 8)
@@ -207,6 +217,13 @@ export interface CardData {
    * the manually-active profile.
    */
   profileId?: ProfileId;
+  /**
+   * One-off override: add the note even if Anki reports it as a duplicate of the
+   * first field in the target deck (the popup's "Add anyway" path — lets a new
+   * reading through on an existing expression). Independent of the persisted
+   * AnkiConfig.allowDuplicate setting.
+   */
+  forceDuplicate?: boolean;
 }
 
 /**
@@ -269,6 +286,11 @@ export function buildMarkerContext(
   };
 }
 
+/** The note-type field Anki checks duplicates against (the first configured one). */
+export function firstFieldName(config: AnkiConfig): string {
+  return Object.keys(config.fieldTemplates)[0] ?? "";
+}
+
 /** Render every configured field template through the marker engine. */
 export function buildFields(
   config: AnkiConfig,
@@ -312,6 +334,82 @@ async function storeMedia(
 }
 
 /**
+ * Assemble the AnkiConnect note object (fields + deck-scoped duplicate options).
+ * Shared by addAnkiCard and the duplicate probe so both agree on exactly what Anki
+ * will see (same fields, same duplicateScope). `forceAllowDuplicate` overrides the
+ * persisted setting for the "Add anyway" one-off.
+ */
+function buildNote(
+  config: AnkiConfig,
+  data: CardData,
+  forceAllowDuplicate?: boolean,
+) {
+  return {
+    deckName: config.deckName,
+    modelName: config.modelName,
+    fields: buildFields(config, data),
+    tags: config.tags,
+    options: {
+      allowDuplicate: forceAllowDuplicate ?? config.allowDuplicate,
+      // Scope duplicate detection to the TARGET DECK only. Anki's default scope is the
+      // whole collection (any note of this model), which falsely flags a word as a
+      // "duplicate" when it exists in some OTHER deck (e.g. an old mining deck) but not
+      // in this one. Deck scope matches user intent: "is this card already in my deck?"
+      duplicateScope: "deck",
+      duplicateScopeOptions: {
+        deckName: config.deckName,
+        checkChildren: false,
+        checkAllModels: false,
+      },
+    },
+  };
+}
+
+export type AnkiDuplicateStatus = "unique" | "duplicate" | "unknown";
+
+/**
+ * Ask Anki (without adding anything) whether this card would collide with an
+ * existing note's FIRST FIELD in the target deck — the popup's live duplicate
+ * indicator. Uses `canAddNotesWithErrorDetail` (exact addNote semantics incl. HTML
+ * stripping) with allowDuplicate FORCED off so a dup is actually surfaced; falls
+ * back to the older `canAddNotes` boolean action, and returns "unknown" when the
+ * server is unreachable, misconfigured, or the first field renders empty (nothing
+ * meaningful to check). Never throws.
+ */
+export async function checkAnkiDuplicate(
+  data: CardData,
+): Promise<AnkiDuplicateStatus> {
+  const config = getAnkiConfig(data.profileId);
+  if (!config.url || !config.deckName || !config.modelName) return "unknown";
+  const fields = buildFields(config, data);
+  const first = fields[firstFieldName(config)] ?? "";
+  if (!first.trim()) return "unknown";
+  const note = buildNote(config, data, false);
+  try {
+    const res = await ankiInvoke<
+      Array<{ canAdd: boolean; error?: string | null }>
+    >(config.url, "canAddNotesWithErrorDetail", { notes: [note] });
+    const r = res?.[0];
+    if (!r) return "unknown";
+    if (r.canAdd) return "unique";
+    return (r.error ?? "").toLowerCase().includes("duplicate")
+      ? "duplicate"
+      : "unique";
+  } catch {
+    // Older AnkiConnect: no canAddNotesWithErrorDetail. canAddNotes returns bare
+    // booleans; false (with a non-empty first field, already guarded) is a dup.
+    try {
+      const res = await ankiInvoke<boolean[]>(config.url, "canAddNotes", {
+        notes: [note],
+      });
+      return res?.[0] === false ? "duplicate" : "unique";
+    } catch {
+      return "unknown";
+    }
+  }
+}
+
+/**
  * Add one card to Anki. Resolves with the new note id on success; rejects with a
  * user-facing message (duplicate, missing deck/model, unreachable) on failure.
  */
@@ -336,26 +434,8 @@ export async function addAnkiCard(data: CardData): Promise<number> {
   } catch (e) {
     console.warn("[YOMIFIN ANKI] storeMediaFile failed:", e);
   }
-  const fields = buildFields(config, data);
-  const note = {
-    deckName: config.deckName,
-    modelName: config.modelName,
-    fields,
-    tags: config.tags,
-    options: {
-      allowDuplicate: config.allowDuplicate,
-      // Scope duplicate detection to the TARGET DECK only. Anki's default scope is the
-      // whole collection (any note of this model), which falsely flags a word as a
-      // "duplicate" when it exists in some OTHER deck (e.g. an old mining deck) but not
-      // in this one. Deck scope matches user intent: "is this card already in my deck?"
-      duplicateScope: "deck",
-      duplicateScopeOptions: {
-        deckName: config.deckName,
-        checkChildren: false,
-        checkAllModels: false,
-      },
-    },
-  };
+  const note = buildNote(config, data, data.forceDuplicate);
+  const fields = note.fields;
   console.log(
     `[YOMIFIN ANKI] addNote deck="${config.deckName}" model="${config.modelName}" ` +
       `fields=[${Object.keys(fields).join(",")}] media={audio:${!!m?.audioFilename},image:${!!m?.imageFilename},word:${!!data.wordAudio}} ` +

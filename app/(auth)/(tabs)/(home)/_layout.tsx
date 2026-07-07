@@ -1,10 +1,14 @@
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { Stack } from "expo-router";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Platform, View } from "react-native";
+import { ActivityIndicator, Platform, View } from "react-native";
 import { Pressable } from "react-native-gesture-handler";
+import { toast } from "sonner-native";
 import { nestedTabPageScreenOptions } from "@/components/stacks/NestedTabPageStack";
 import useRouter from "@/hooks/useAppRouter";
+import { syncAnki } from "@/utils/yomifin/anki";
+import { getAnkiConfig } from "@/utils/yomifin/ankiConfig";
 
 const Chromecast = Platform.isTV ? null : require("@/components/Chromecast");
 
@@ -34,6 +38,7 @@ export default function IndexLayout() {
                 <>
                   <Chromecast.Chromecast background='transparent' />
                   {user?.Policy?.IsAdministrator && <SessionsButton />}
+                  <AnkiSyncButton />
                   <SettingsButton />
                 </>
               )}
@@ -293,6 +298,46 @@ export default function IndexLayout() {
     </Stack>
   );
 }
+
+// Pushes the whole Anki collection to AnkiWeb (AnkiConnect "sync"). Uses the
+// active profile's AnkiConnect URL; sync is collection-wide so profile doesn't
+// really matter beyond which URL is configured.
+const AnkiSyncButton = () => {
+  const [syncing, setSyncing] = useState(false);
+
+  const onPress = async () => {
+    if (syncing) return;
+    const url = getAnkiConfig().url;
+    if (!url) {
+      toast.error("Set an AnkiConnect URL in Settings → Anki first");
+      return;
+    }
+    setSyncing(true);
+    try {
+      await syncAnki(url);
+      toast.success("Anki sync started");
+    } catch (e) {
+      toast.error((e as Error).message || "Anki sync failed");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  return (
+    <Pressable
+      onPress={onPress}
+      className='mr-4'
+      hitSlop={8}
+      disabled={syncing}
+    >
+      {syncing ? (
+        <ActivityIndicator size='small' color='white' />
+      ) : (
+        <Ionicons name='cloud-upload-outline' color='white' size={24} />
+      )}
+    </Pressable>
+  );
+};
 
 const SettingsButton = () => {
   const router = useRouter();
