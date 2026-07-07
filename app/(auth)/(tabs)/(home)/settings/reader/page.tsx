@@ -244,6 +244,28 @@ export default function ReaderSettingsPage() {
           />
         </View>
 
+        {/* AniList title language (Anime discovery tab) */}
+        <View style={{ gap: 8 }}>
+          <Text style={styles.title}>Anime title language</Text>
+          <Text style={styles.subtitle}>
+            Which title to show in the AniList discovery tab. jimaku search
+            always uses the romaji/native title regardless.
+          </Text>
+          <Segmented
+            options={[
+              { label: "Romaji", value: "romaji" },
+              { label: "English", value: "english" },
+              { label: "Native", value: "native" },
+            ]}
+            value={settings.anilistTitleLanguage ?? "romaji"}
+            onChange={(v) =>
+              updateSettings({
+                anilistTitleLanguage: v as "romaji" | "english" | "native",
+              })
+            }
+          />
+        </View>
+
         {/* Two-finger tap */}
         <Row
           title='Two-finger tap: play/pause'

@@ -232,6 +232,17 @@ export default function TabLayout() {
           }}
         />
         <NativeTabs.Screen
+          name='(anime)'
+          options={{
+            title: "Anime",
+            tabBarItemHidden: Platform.isTV,
+            tabBarIcon:
+              Platform.OS === "android"
+                ? (_e) => require("@/assets/icons/list.star.png")
+                : (_e) => ({ sfSymbol: "sparkles" }),
+          }}
+        />
+        <NativeTabs.Screen
           name='(custom-links)'
           options={{
             title: t("tabs.custom_links"),

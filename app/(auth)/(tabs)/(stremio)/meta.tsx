@@ -16,6 +16,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Text } from "@/components/common/Text";
+import EpisodeThumbnail from "@/components/media/EpisodeThumbnail";
 import useRouter from "@/hooks/useAppRouter";
 import { useSettings } from "@/utils/atoms/settings";
 import {
@@ -196,7 +197,7 @@ export default function StremioMetaPage() {
               {videos.map((v: StremioVideo) => (
                 <Pressable
                   key={v.id}
-                  className='bg-neutral-900 rounded-xl px-4 py-3 mb-2'
+                  className='flex-row items-center bg-neutral-900 rounded-xl p-2 mb-2'
                   onPress={() =>
                     openStreams(
                       v.id,
@@ -205,15 +206,23 @@ export default function StremioMetaPage() {
                     )
                   }
                 >
-                  <Text className='text-white text-sm'>{videoLabel(v)}</Text>
-                  {v.overview ? (
-                    <Text
-                      className='text-neutral-500 text-xs mt-1'
-                      numberOfLines={2}
-                    >
-                      {v.overview}
+                  <EpisodeThumbnail
+                    thumbnail={v.thumbnail}
+                    episodeNumber={v.episode ?? v.number ?? 0}
+                  />
+                  <View className='flex-1 ml-3'>
+                    <Text className='text-white text-sm' numberOfLines={2}>
+                      {videoLabel(v)}
                     </Text>
-                  ) : null}
+                    {v.overview ? (
+                      <Text
+                        className='text-neutral-500 text-xs mt-1'
+                        numberOfLines={2}
+                      >
+                        {v.overview}
+                      </Text>
+                    ) : null}
+                  </View>
                 </Pressable>
               ))}
             </View>

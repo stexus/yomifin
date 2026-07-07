@@ -75,8 +75,16 @@ echo "── [16/17] stremio addon client (urls / capability / aggregation) ─�
 bun utils/stremio/client.test.ts
 
 echo
-echo "── [17/17] anki settings export/import (transfer schema) ───────────"
+echo "── [17/19] anki settings export/import (transfer schema) ───────────"
 bun utils/yomifin/ankiSettingsTransfer.test.ts
+
+echo
+echo "── [18/19] anilist discovery client (queries / display helpers) ────"
+bun utils/anilist/client.test.ts
+
+echo
+echo "── [19/19] anilist → kitsu/imdb playback bridge (arm mapping) ──────"
+bun utils/anilist/mapping.test.ts
 
 echo
 echo "── [optional] subSync ↔ real alass cross-check (skips if not installed) ─"

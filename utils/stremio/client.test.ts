@@ -6,6 +6,7 @@ import { strict as assert } from "node:assert";
 import {
   addonBaseUrl,
   browsableCatalogs,
+  episodeThumbnailMap,
   type FetchLike,
   fetchCatalog,
   fetchManifest,
@@ -246,6 +247,36 @@ await test("streamLabel flattens newlines; videoLabel + sortVideos", () => {
     sorted.map((v) => v.id),
     ["a", "b", "sp"],
   );
+});
+
+await test("episodeThumbnailMap keys by episode number, season-scoped", () => {
+  const videos = [
+    { id: "s0e1", season: 0, episode: 1, thumbnail: "sp1" },
+    { id: "s1e1", season: 1, episode: 1, thumbnail: "t1" },
+    { id: "s1e2", season: 1, episode: 2, thumbnail: "t2" },
+    { id: "s2e1", season: 2, episode: 1, thumbnail: "u1" },
+  ];
+  // Scoped to season 1 → only S1 stills, keyed by episode.
+  const s1 = episodeThumbnailMap(videos, 1);
+  assert.equal(s1.get(1), "t1");
+  assert.equal(s1.get(2), "t2");
+  assert.equal(s1.size, 2); // S0/S2 excluded
+  // Scoped to season 2 → E1 is the S2 still, not the S1 one.
+  assert.equal(episodeThumbnailMap(videos, 2).get(1), "u1");
+});
+
+await test("episodeThumbnailMap ignores a season filter that isn't present", () => {
+  // arm season 5 doesn't exist in the data → degrade to all-videos, not empty.
+  const videos = [
+    { id: "a", season: 1, episode: 1, thumbnail: "t1" },
+    { id: "b", number: 2, thumbnail: "t2" }, // no season, uses `number`
+  ];
+  const m = episodeThumbnailMap(videos, 5);
+  assert.equal(m.get(1), "t1");
+  assert.equal(m.get(2), "t2");
+  // Videos without a thumbnail are skipped.
+  assert.equal(episodeThumbnailMap([{ id: "x", episode: 1 }]).size, 0);
+  assert.equal(episodeThumbnailMap(undefined).size, 0);
 });
 
 await test("searchableCatalogs finds search-extra catalogs, narrows by type", () => {

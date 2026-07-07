@@ -461,6 +461,35 @@ export function videoLabel(v: StremioVideo): string {
   return [se, name].filter(Boolean).join(" · ") || v.id;
 }
 
+/**
+ * Map episode NUMBER → thumbnail URL from a meta's videos, optionally scoped to
+ * one season. The season filter is applied ONLY when that season actually exists
+ * in the data (so an arm-provided TVDB season that doesn't line up degrades to
+ * an all-videos map instead of an empty one). First thumbnail for a number wins.
+ *
+ * Used to render per-episode stills in BOTH the Stremio meta screen and (via the
+ * arm imdb bridge) as the AniList detail thumbnail fallback — best-effort, since
+ * TVDB numbering can diverge from AniList cours (thumbnails only, never playback).
+ */
+export function episodeThumbnailMap(
+  videos: StremioVideo[] | undefined,
+  season?: number,
+): Map<number, string> {
+  const all = videos ?? [];
+  const scopeSeason =
+    season !== undefined && all.some((v) => v.season === season)
+      ? season
+      : undefined;
+  const map = new Map<number, string>();
+  for (const v of all) {
+    if (scopeSeason !== undefined && v.season !== scopeSeason) continue;
+    const ep = v.episode ?? v.number;
+    if (ep === undefined || ep === null || !v.thumbnail) continue;
+    if (!map.has(ep)) map.set(ep, v.thumbnail);
+  }
+  return map;
+}
+
 /** Sort videos by (season, episode); specials (season 0) last. */
 export function sortVideos(videos: StremioVideo[]): StremioVideo[] {
   return [...videos].sort((a, b) => {

@@ -388,6 +388,11 @@ export type Settings = {
    * Stremio (source badges disambiguate the results).
    */
   searchScope: "jellyfin" | "stremio" | "both";
+  /**
+   * AniList discovery tab (utils/anilist/): which title language to display.
+   * jimaku search always uses romaji/native regardless (see jimakuTitle).
+   */
+  anilistTitleLanguage: "romaji" | "english" | "native";
   // ===== Player UI (senplayer-style rework) =====
   /**
    * Show the persistent OSD status bar (clock/battery/etc) during REGULAR playback
@@ -531,6 +536,7 @@ export const defaultValues: Settings = {
   ],
   stremioAutoPlayFirstStream: false,
   searchScope: "both",
+  anilistTitleLanguage: "romaji",
   // Player UI (senplayer-style rework): during-playback status bar = clock + battery.
   playerStatusBarDuringPlayback: true,
   playerStatusShowClock: true,

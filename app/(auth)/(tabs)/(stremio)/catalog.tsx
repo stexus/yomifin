@@ -16,7 +16,9 @@ import { Text } from "@/components/common/Text";
 import useRouter from "@/hooks/useAppRouter";
 import { fetchCatalog, type StremioMetaPreview } from "@/utils/stremio/client";
 
-const COLUMNS = 3;
+const H_PAD = 16;
+const GAP = 8;
+const TARGET_POSTER = 130;
 
 export default function StremioCatalogPage() {
   const router = useRouter();
@@ -66,7 +68,13 @@ export default function StremioCatalogPage() {
     loadPage(0);
   }, [loadPage]);
 
-  const posterW = (width - 16 * 2 - 8 * (COLUMNS - 1)) / COLUMNS;
+  // Columns scale with width (target ~130px) so the iPad shows a dense, consistent
+  // grid instead of a few oversized posters.
+  const columns = Math.max(
+    3,
+    Math.floor((width - H_PAD * 2 + GAP) / (TARGET_POSTER + GAP)),
+  );
+  const posterW = (width - H_PAD * 2 - GAP * (columns - 1)) / columns;
   const posterH = posterW * 1.5;
 
   return (
@@ -82,15 +90,16 @@ export default function StremioCatalogPage() {
         </View>
       ) : (
         <FlatList
+          key={columns}
           data={metas}
-          numColumns={COLUMNS}
+          numColumns={columns}
           keyExtractor={(m) => m.id}
           contentContainerStyle={{
             paddingTop: insets.top + 56,
             paddingBottom: insets.bottom + 96,
-            paddingHorizontal: 16,
+            paddingHorizontal: H_PAD,
           }}
-          columnWrapperStyle={{ gap: 8 }}
+          columnWrapperStyle={{ gap: GAP }}
           onEndReachedThreshold={1.5}
           onEndReached={() => {
             if (!endReached && metas.length > 0) loadPage(metas.length);
