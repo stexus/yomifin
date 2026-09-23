@@ -11,80 +11,80 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-echo "── [1/15] deinflector smoke ────────────────────────────────────────"
+echo "── [1/19] deinflector smoke ────────────────────────────────────────"
 ./scripts/yomifin-deinflect-smoke.sh
 
 echo
-echo "── [2/15] lookup integration (loader + DB + Translator + API) ──────"
+echo "── [2/19] lookup integration (loader + DB + Translator + API) ──────"
 bun utils/yomifin/lookup.test.ts
 
 echo
-echo "── [3/15] structured-content renderer + HTML serializer ──────────────────────"
+echo "── [3/19] structured-content renderer + HTML serializer ──────────────────────"
 bun utils/yomifin/structuredContent.test.ts
 
 echo
-echo "── [4/15] sqlite backend (parity with in-memory + optional real db) "
+echo "── [4/19] sqlite backend (parity with in-memory + optional real db) "
 bun utils/yomifin/SqliteDictionaryDatabase.test.ts
 
 echo
-echo "── [5/15] dictionary importer (idempotent + parity) ────────────────"
+echo "── [5/19] dictionary importer (idempotent + parity) ────────────────"
 bun utils/yomifin/importDictionary.test.ts
 
 echo
-echo "── [6/15] dictionary config reconciler + popup selection model ─────"
+echo "── [6/19] dictionary config reconciler + popup selection model ─────"
 bun utils/yomifin/dictionaryConfig.test.ts
 
 echo
-echo "── [7/15] marker engine (Phase 8 field templates) ──────────────────"
+echo "── [7/19] marker engine (Phase 8 field templates) ──────────────────"
 bun utils/yomifin/markers.test.ts
 
 echo
-echo "── [8/15] sense-level selection (paths + flatten) ──────────────────"
+echo "── [8/19] sense-level selection (paths + flatten) ──────────────────"
 bun utils/yomifin/senses.test.ts
 
 echo
-echo "── [9/15] cue store range logic (multi-sentence cards) ─────────────"
+echo "── [9/19] cue store range logic (multi-sentence cards) ─────────────"
 bun utils/yomifin/cues.test.ts
 
 echo
-echo "── [10/15] word-audio sources + field seeding ──────────────────────"
+echo "── [10/19] word-audio sources + field seeding ──────────────────────"
 bun utils/yomifin/wordAudio.test.ts
 
 echo
-echo "── [11/15] content-derived media keys (dedup / batch mining) ────────"
+echo "── [11/19] content-derived media keys (dedup / batch mining) ────────"
 bun utils/yomifin/mediaKey.test.ts
 
 echo
-echo "── [12/15] profiles (JA/ZH bundles) ────────────────────────────────"
+echo "── [12/19] profiles (JA/ZH bundles) ────────────────────────────────"
 bun utils/yomifin/profiles.test.ts
 
 echo
-echo "── [13/15] subtitle formats (ASS/VTT/SRT dispatch) ──────────────────"
+echo "── [13/19] subtitle formats (ASS/VTT/SRT dispatch) ──────────────────"
 bun utils/yomifin/subtitleParse.test.ts
 
 echo
-echo "── [14/15] subtitle sync estimation (offset correlation) ───────────"
+echo "── [14/19] subtitle sync estimation (offset correlation) ───────────"
 bun utils/yomifin/subSync.test.ts
 
 echo
-echo "── [15/16] jimaku.cc client (request shape / errors) ───────────────"
+echo "── [15/19] jimaku.cc client (request shape / errors) ───────────────"
 bun utils/yomifin/jimaku.test.ts
 
 echo
-echo "── [16/17] stremio addon client (urls / capability / aggregation) ──"
-bun utils/stremio/client.test.ts
-
-echo
-echo "── [17/19] anki settings export/import (transfer schema) ───────────"
+echo "── [16/19] anki settings export/import (transfer schema) ───────────"
 bun utils/yomifin/ankiSettingsTransfer.test.ts
 
 echo
-echo "── [18/19] anilist discovery client (queries / display helpers) ────"
-bun utils/anilist/client.test.ts
+echo "── [17/19] yozora api client (urls / auth / error codes) ───────────────"
+bun utils/yozora/api.test.ts
 
 echo
-echo "── [19/19] anilist → kitsu/imdb playback bridge (arm mapping) ──────"
-bun utils/anilist/mapping.test.ts
+echo "── [18/19] yozora display helpers ───────────────────────────────────────────"
+bun utils/yozora/display.test.ts
+
+echo
+echo "── [19/19] yozora filter models ──────────────────────────────────────────────"
+bun utils/yozora/filters.test.ts
 
 echo
 echo "── [optional] subSync ↔ real alass cross-check (skips if not installed) ─"

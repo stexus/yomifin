@@ -105,6 +105,11 @@ function SettingsMobile() {
               title='Anki'
             />
             <ListItem
+              onPress={() => router.push("/settings/yozora/page")}
+              showArrow
+              title='Yozora'
+            />
+            <ListItem
               onPress={() => router.push("/settings/music/page")}
               showArrow
               title={t("home.settings.music.title")}

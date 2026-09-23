@@ -22,7 +22,7 @@ import {
 } from "@/utils/yomifin/profiles";
 
 interface Props {
-  /** Stable per-title key (Jellyfin SeriesId/ItemId, `stremio:<name>`). */
+  /** Stable per-title key (Jellyfin SeriesId/ItemId, `yozora:<name>`). */
   profileKey?: string;
   /** Track-language auto-selection hint (same value the lookup layer gets). */
   languageHint?: ProfileId | null;

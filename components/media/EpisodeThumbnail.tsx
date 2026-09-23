@@ -1,7 +1,7 @@
 /*
- * Shared episode thumbnail used by the Stremio meta screen AND the AniList detail
- * screen: renders a still if one is available, else a clean cover-tinted "EP n"
- * placeholder (recent/upcoming anime often have no still from any source).
+ * Shared episode thumbnail (Yozora detail episode rows): renders a still if one
+ * is available, else a clean cover-tinted "EP n" placeholder (recent/upcoming
+ * anime often have no still from any source).
  */
 import { Image } from "expo-image";
 import { View } from "react-native";

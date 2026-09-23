@@ -85,7 +85,6 @@ function buildEnabledDictionaryMap(
 }
 
 export class YomifinDictionary {
-  // biome-ignore lint/suspicious/noExplicitAny: vendored Translator is untyped JS
   private _translator: any;
   private _language: string;
   private _enabledDictionaryMap: Map<string, unknown>;
@@ -146,7 +145,6 @@ export class YomifinDictionary {
       // ordering. We do NOT filter: Yomitan itself returns shorter prefixes too.
       // The maxResults cap (Yomitan parity knob) trims the tail AFTER sorting, so
       // the headline pane and its order are unaffected.
-      // biome-ignore lint/suspicious/noExplicitAny: mapping the vendored result shape
       entries: (dictionaryEntries as any[])
         .slice(0, this._maxResults)
         .map(mapEntry),
@@ -154,7 +152,6 @@ export class YomifinDictionary {
   }
 }
 
-// biome-ignore lint/suspicious/noExplicitAny: vendored TermDictionaryEntry shape
 function mapEntry(entry: any): LookupEntry {
   const headword = entry.headwords?.[0] ?? {};
   // Each inflectionRuleChainCandidate is a chain of {name}; take the first candidate.
@@ -162,7 +159,6 @@ function mapEntry(entry: any): LookupEntry {
     entry.inflectionRuleChainCandidates?.[0]?.inflectionRules?.map(
       (r: { name: string }) => r.name,
     ) ?? [];
-  // biome-ignore lint/suspicious/noExplicitAny: vendored definition shape
   const definitions: DefinitionGroup[] = (entry.definitions ?? []).map(
     (d: any) => ({
       dictionary: d.dictionary,

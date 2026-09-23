@@ -1,8 +1,8 @@
 # justfile — Yomifin / Streamyfin dev recipes
 #
 # Wraps the workflows documented in YOMIFIN_CONTEXT.md (Dev environment & build).
-# Everything runs inside the Nix dev shell (`nix develop`) so the toolchain
-# (bun, node, cocoapods, jdk) is reproducible on any Apple Silicon Mac.
+# Recipes use the tools on PATH. Optionally enter `nix develop` first for the
+# reproducible toolchain (bun, node, cocoapods, jdk) on Apple Silicon Macs.
 #
 # Usage:
 #   just              # list recipes

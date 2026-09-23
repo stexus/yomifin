@@ -42,7 +42,7 @@ export default function Layout() {
           }}
         />
         <Stack.Screen
-          name='stremio-player'
+          name='yozora-player'
           options={{
             headerShown: false,
             autoHideHomeIndicator: true,

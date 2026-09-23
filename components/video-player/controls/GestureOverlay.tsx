@@ -94,9 +94,8 @@ interface Props {
   /** Two-finger tap → play/pause (native gesture-surface path). */
   onTogglePlay?: () => void;
   /**
-   * Legacy full-screen dim behind the controls. The reworked Jellyfin player uses
-   * ControlsScrims instead (no dim), so it leaves this false; the minimal Stremio
-   * player opts in to keep its previous look.
+   * Legacy full-screen dim behind the controls. Both players now use
+   * ControlsScrims instead (no dim) and leave this false; kept for opt-in reuse.
    */
   dimWhenControlsShown?: boolean;
   // ---- drag-anywhere-to-seek (all optional; absent = flick-skip only) ----
@@ -645,9 +644,9 @@ export const GestureOverlay = ({
 
   return (
     <>
-      {/* Single gesture surface for BOTH control states. Reworked Jellyfin UI passes
-          no dim (ControlsScrims draws subtle top/bottom gradients while controls are
-          up); the Stremio player opts into the legacy dim via dimWhenControlsShown.
+      {/* Single gesture surface for BOTH control states. Both players pass no dim
+          (ControlsScrims draws subtle top/bottom gradients while controls are up);
+          dimWhenControlsShown remains as a legacy opt-in.
           CRITICAL: keep it `transparent`, NEVER `opacity: 0` — UIKit hit-testing
           ignores views with alpha ≤ 0.01, which would make the whole gesture layer
           untouchable (this happened on device). */}

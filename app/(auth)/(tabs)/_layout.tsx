@@ -221,25 +221,14 @@ export default function TabLayout() {
           }}
         />
         <NativeTabs.Screen
-          name='(stremio)'
+          name='(yozora)'
           options={{
-            title: "Stremio",
-            tabBarItemHidden: Platform.isTV,
-            tabBarIcon:
-              Platform.OS === "android"
-                ? (_e) => require("@/assets/icons/link.png")
-                : (_e) => ({ sfSymbol: "play.rectangle.on.rectangle.fill" }),
-          }}
-        />
-        <NativeTabs.Screen
-          name='(anime)'
-          options={{
-            title: "Anime",
+            title: "Yozora",
             tabBarItemHidden: Platform.isTV,
             tabBarIcon:
               Platform.OS === "android"
                 ? (_e) => require("@/assets/icons/list.star.png")
-                : (_e) => ({ sfSymbol: "sparkles" }),
+                : (_e) => ({ sfSymbol: "moon.stars" }),
           }}
         />
         <NativeTabs.Screen

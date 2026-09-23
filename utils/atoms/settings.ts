@@ -335,7 +335,7 @@ export type Settings = {
   yomifinMaxResults: number;
   /**
    * Per-title manual profile overrides (in-player pill), keyed by the player's
-   * stable key (Jellyfin SeriesId/ItemId, Stremio series name). Wins over the
+   * stable key (Jellyfin SeriesId/ItemId, `yozora:<name>`). Wins over the
    * track-language auto-selection; long-press the pill clears back to auto.
    */
   yomifinProfileOverrides: Record<
@@ -376,21 +376,24 @@ export type Settings = {
   /** jimaku.cc API key for online subtitle search (empty = feature hidden). */
   yomifinJimakuApiKey: string;
   /**
-   * Stremio addon manifest URLs (…/manifest.json), in priority order. Drives the
-   * Stremio tab (catalogs/meta/streams via utils/stremio/client.ts). Debrid-style
-   * addons only — torrent (infoHash) streams are filtered out.
-   */
-  stremioAddonUrls: string[];
-  /** Skip the stream picker: auto-play the first playable (debrid) result. */
-  stremioAutoPlayFirstStream: boolean;
-  /**
    * Which sources the unified search screen queries. "both" runs Jellyfin AND
-   * Stremio (source badges disambiguate the results).
+   * Yozora (source badges disambiguate the results). NB: pre-migration installs
+   * may have "stremio" stored — mapped to "yozora" at the read site.
    */
-  searchScope: "jellyfin" | "stremio" | "both";
+  searchScope: "jellyfin" | "yozora" | "both";
+  // ===== Yozora backend (self-hosted debrid streaming; see utils/yozora/) =====
+  // NB: credentials (serverUrl/token/username/deviceId) are dedicated MMKV keys
+  // in utils/yozora/session.ts, NOT Settings — the Settings bag is plugin-
+  // overridable and JSON-serialized wholesale; secrets don't belong here
+  // (same convention as the Jellyfin token in JellyfinProvider).
+  /** Device label shown in Yozora's device list (AUTH-5). */
+  yozoraDeviceName: string;
+  /** Skip the source picker: POST /resolve auto-pick (best CACHED candidate, RES-12). */
+  yozoraAutoPlay: boolean;
   /**
-   * AniList discovery tab (utils/anilist/): which title language to display.
+   * Yozora tab: which anime title language to display (TitleSummary.titles).
    * jimaku search always uses romaji/native regardless (see jimakuTitle).
+   * (Key name is historical — predates the AniList→Yozora migration.)
    */
   anilistTitleLanguage: "romaji" | "english" | "native";
   // ===== Player UI (senplayer-style rework) =====
@@ -529,13 +532,10 @@ export const defaultValues: Settings = {
   yomifinSubtitleWeight: 500,
   yomifinSubtitleBottomOffset: 64,
   yomifinJimakuApiKey: "",
-  // Stremio (personal fork: pre-wired addons; edit in the Stremio tab)
-  stremioAddonUrls: [
-    "https://aiometadata.luigivault.com/stremio/7f4fca2a-d930-44c3-a357-29d663fb1bf3/manifest.json",
-    "https://aiostream.luigivault.com/stremio/e63962d4-c468-4b49-9bed-80581f53bab5/eyJpIjoic09qaW8yaHg1UjQrRUE3bjVISXlXUT09IiwiZSI6IkdzYStSOVY0ejVKdXB4STF2YTUxOURlWStFWjArRElqazVsTno2WE92QkE9IiwidCI6ImEifQ/manifest.json",
-  ],
-  stremioAutoPlayFirstStream: false,
   searchScope: "both",
+  // Yozora backend prefs — credentials live in utils/yozora/session.ts (MMKV).
+  yozoraDeviceName: "Yomifin iPad",
+  yozoraAutoPlay: false,
   anilistTitleLanguage: "romaji",
   // Player UI (senplayer-style rework): during-playback status bar = clock + battery.
   playerStatusBarDuringPlayback: true,

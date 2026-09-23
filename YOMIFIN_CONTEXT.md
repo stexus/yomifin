@@ -3,7 +3,7 @@
 Yomifin is a **personal iPad language-immersion player** built as a fork of
 Streamyfin (React Native / Expo Jellyfin client with a libmpv playback core).
 It adds **tappable subtitles → Yomitan-style dictionary lookup → one-press Anki
-cards with on-device audio + image**, for Japanese (Chinese later). Single user,
+cards with on-device audio + image**, for Japanese and Chinese (Chinese device gates remain in the tracker). Single user,
 sideloaded, no App Store concerns.
 
 - **What to build next / feature backlog:** `FEATURES.md` (the tracker — point a
@@ -44,9 +44,8 @@ Key principles (violating these has bitten us before):
 - **Everything rendered over the video sits inside `YomifinErrorBoundary`** so a
   popup crash can never freeze the app root (this happened; it took down the UI).
 - **Run `./scripts/yomifin-test.sh` after any change under `utils/yomifin/`**
-  (11-ish bun suites: deinflection, lookup, structured content, sqlite parity,
-  importer, config, markers, senses, cues, word audio). Add a test case when you
-  add lookup/marker behavior. `bun run typecheck` + `bun run lint` must stay clean.
+  (19 stages covering the language layer and the Yozora API/display/filter helpers). Add a test case when you
+  add lookup/marker behavior. `bun run typecheck` + `bun run check` must stay clean; `bun run lint` applies fixes.
 - **Exit criteria are device gates.** JS-side tests are necessary, not sufficient;
   a feature is done when demonstrated on the physical iPad.
 
@@ -97,12 +96,26 @@ Key principles (violating these has bitten us before):
 | Language layer (pure, tested) | `utils/yomifin/` |
 | Vendored Yomitan core (don't edit; see VENDOR.md) | `utils/yomifin/yomitan/` |
 | Cue store atoms | `utils/atoms/yomifinCueStore.ts` |
+| Yozora on-demand client (tab · sections · player · pure API/session) | `utils/yozora/`, `components/yozora/`, `app/(auth)/(tabs)/(yozora)/`, `app/(auth)/player/yozora-player.tsx`, Settings → Yozora; plan: `docs/yomifin/archive/YOZORA_MIGRATION_PLAN.md` |
 | Settings keys (`yomifin*`, `controlsDimOpacity`) | `utils/atoms/settings.ts` |
 | Settings screens: Dictionaries / Anki / Reader | `app/(auth)/(tabs)/(home)/settings/{dictionaries,anki,reader}/` |
 | Native mpv seams (subtitle text, sub-seek, capture) | `modules/mpv-player/` (`MpvPlayerView.swift`, `MPVLayerRenderer.swift`, module + TS ref) |
 | Native outlined subtitle text (TextKit stroke + char-index tap) | `modules/outlined-text/` (falls back to JS stacked copies on stale binary/non-iOS) |
 | Offline dictionary .db builder | `scripts/build-dictionary-db.ts` |
 | Regression guards | `./scripts/yomifin-test.sh` |
+
+## Yozora integration status
+
+The Yozora client replaces the old Anime/Stremio routes and direct addon clients.
+All resolution, metadata and progress go through `/api/v1`; types/constants in
+`utils/yozora/types.ts` are hand-maintained. `session.ts` stores credentials in
+separate `yozora.*` MMKV keys, while settings hold only preferences. The player
+receives canonical title/episode identity plus a resolved URL and resume time;
+it sends progress ticks and can re-resolve an expired URL. Both players share
+the lookup layer and optional-server `OnlineSubtitlesModal`.
+
+See `FEATURES.md` for pending device gates and the unimplemented detail-page
+parity pass. The archived migration plan is historical, not a second tracker.
 
 ## Native seams (mpv module) worth knowing
 
@@ -142,8 +155,9 @@ pod is absent from `ios/Podfile.lock`).
 
 ## Dev environment & build (hard-won facts)
 
-Toolchain is Nix (`flake.nix`): run everything via `nix develop` (or direnv). The
-`justfile` wraps all workflows — `just setup` (fresh Mac), `just local` (build+
+A reproducible toolchain is available through Nix (`flake.nix`, `nix develop`
+or direnv). The `justfile` uses tools on PATH directly (it no longer enters Nix);
+`remote-build.sh` enters Nix when needed. The `justfile` wraps all workflows — `just setup` (fresh Mac), `just local` (build+
 deploy to iPad), `just remote` (from SSH into the Mac build box), `just dev`
 (Metro), `just yomifin-test`. Remote loop: Linux desktop → SSH → headless Mac mini
 (`massimo@10.0.0.99`) → WiFi → iPad, via `./scripts/remote-build.sh`.

@@ -1,5 +1,5 @@
 /*
- * Online subtitles panel (jimaku.cc) + sync controls.
+ * Online subtitles panel (jimaku.cc + optional server source) + sync controls.
  *
  * A side panel (video stays visible — you can SEE the sync while nudging) that:
  *   1. searches jimaku entries (AniList id from the Jellyfin item when available,
@@ -11,8 +11,15 @@
  *   4. once a sub is active, shows the sync section: auto-estimate (subSync.ts against
  *      the item's own text track) + manual ±nudges over mpv `sub-delay`.
  *
+ * SERVER SOURCE (Yozora, migration plan Phase 5): callers may inject a
+ * `serverSubs` source — a listing of server-cached OpenSubtitles/jimaku rows for
+ * the playing title/episode (SUB-1) rendered ABOVE the jimaku search, plus a
+ * one-tap "Sync on server" (SUB-6 alass re-time; beats the local estimator and
+ * works with no reference track) shown for server-loaded subs. direct-player
+ * passes nothing → jimaku-only behavior, unchanged.
+ *
  * Everything network/FS lives here; the pure clients (jimaku.ts, subtitleParse.ts,
- * subSync.ts) stay RN-free. Mounted inside a YomifinErrorBoundary by direct-player.
+ * subSync.ts) stay RN-free. Mounted inside a YomifinErrorBoundary by the players.
  */
 import { File, Paths } from "expo-file-system";
 import { useEffect, useState } from "react";
@@ -45,6 +52,30 @@ export interface LoadedOnlineSubtitle {
   name: string;
   /** Parsed plain-text cues in the FILE's timeline ([] if unparseable). */
   cues: SubtitleCue[];
+  /** Yozora subtitle id when the file came from the server source (enables
+   *  "Sync on server"); undefined for jimaku-direct files. */
+  serverId?: number;
+}
+
+/** One server-cached subtitle row (Yozora SUB-1; provider may also be the
+ *  derived "sync"/"embedded"). */
+export interface ServerSubtitleRow {
+  id: number;
+  provider: string;
+  lang: string;
+  name: string;
+}
+
+/** Injectable server-subtitles source (see header comment). */
+export interface ServerSubtitleSource {
+  /** Section label, e.g. "Yozora server". */
+  label: string;
+  /** List rows for the playing title/episode; `q` = manual free-text search. */
+  list: (q?: string) => Promise<ServerSubtitleRow[]>;
+  /** Download a row's raw subtitle text. */
+  download: (row: ServerSubtitleRow) => Promise<string>;
+  /** SUB-6 server-side alass re-time; returns the synced row to load. */
+  sync?: (id: number) => Promise<ServerSubtitleRow>;
 }
 
 interface Props {
@@ -65,6 +96,10 @@ interface Props {
   /** Runs the offset estimate against the item's own track AND applies it. */
   onAutoSync: () => OffsetEstimate | null;
   onSubtitleLoaded: (sub: LoadedOnlineSubtitle) => void | Promise<void>;
+  /** Optional server-cached subtitle source (Yozora). */
+  serverSubs?: ServerSubtitleSource | null;
+  /** Server id of the ACTIVE sub when it came from serverSubs (sync target). */
+  activeServerId?: number | null;
 }
 
 const NUDGES_MS = [-500, -100, +100, +500];
@@ -81,6 +116,8 @@ export default function OnlineSubtitlesModal({
   onDelayChange,
   onAutoSync,
   onSubtitleLoaded,
+  serverSubs,
+  activeServerId,
 }: Props) {
   const { settings } = useSettings();
   const apiKey = settings.yomifinJimakuApiKey ?? "";
@@ -115,6 +152,13 @@ export default function OnlineSubtitlesModal({
   const [error, setError] = useState<string | null>(null);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
+  // Server source state (rows auto-listed on first open).
+  const [serverRows, setServerRows] = useState<ServerSubtitleRow[] | null>(
+    null,
+  );
+  const [serverQ, setServerQ] = useState("");
+  const [serverError, setServerError] = useState<string | null>(null);
+
   // New item (query/episode prefills changed) → reset the browse state.
   useEffect(() => {
     setQuery(defaultQuery);
@@ -124,7 +168,30 @@ export default function OnlineSubtitlesModal({
     setFiles(null);
     setError(null);
     setSyncMsg(null);
+    setServerRows(null);
+    setServerQ("");
+    setServerError(null);
   }, [defaultQuery, defaultEpisode]);
+
+  // Auto-list the server rows the first time the panel opens for this item.
+  useEffect(() => {
+    if (!visible || !serverSubs || serverRows !== null) return;
+    let cancelled = false;
+    serverSubs
+      .list()
+      .then((rows) => {
+        if (!cancelled) setServerRows(rows);
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setServerRows([]);
+          setServerError((e as Error).message);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, serverSubs, serverRows]);
 
   if (!visible) return null;
 
@@ -205,6 +272,79 @@ export default function OnlineSubtitlesModal({
     }
   };
 
+  // ── Server source (Yozora) ────────────────────────────────────────────
+
+  const runServerList = async (q?: string) => {
+    if (!serverSubs) return;
+    setBusy(true);
+    setServerError(null);
+    try {
+      setServerRows(await serverSubs.list(q));
+    } catch (e) {
+      setServerRows([]);
+      setServerError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const loadServerRow = async (row: ServerSubtitleRow) => {
+    if (!serverSubs) return false;
+    setBusy(true);
+    setServerError(null);
+    setSyncMsg(null);
+    try {
+      const text = await serverSubs.download(row);
+      const safe = `yomifin_sub_srv${row.id}_${row.name.replace(/[^\w.-]+/g, "_")}`;
+      const f = new File(Paths.cache, safe);
+      try {
+        if (f.exists) f.delete();
+      } catch {}
+      f.write(text);
+      const cues = parseSubtitleText(text, row.name);
+      console.log(
+        `[YOMIFIN SUBS] server sub #${row.id} "${row.name}" → ${cues.length} cues`,
+      );
+      await onSubtitleLoaded({
+        path: f.uri,
+        name: row.name,
+        cues,
+        serverId: row.id,
+      });
+      if (cues.length === 0) {
+        setServerError(
+          "Loaded into the player, but the cue parse found nothing — multi-sentence cards/sync are off for this file.",
+        );
+      }
+      return true;
+    } catch (e) {
+      setServerError((e as Error).message);
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // SUB-6: one-tap server-side alass re-time of the ACTIVE server-loaded sub,
+  // then load the returned synced copy (delay resets via onSubtitleLoaded).
+  const runServerSync = async () => {
+    if (!serverSubs?.sync || activeServerId == null) return;
+    setBusy(true);
+    setSyncMsg("Syncing on server (alass)… this can take a minute.");
+    try {
+      const synced = await serverSubs.sync(activeServerId);
+      const loaded = await loadServerRow(synced);
+      setSyncMsg(
+        loaded ? "Server-synced copy loaded (delay reset to 0)." : null,
+      );
+    } catch (e) {
+      setSyncMsg(null);
+      setServerError(`Server sync failed: ${(e as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const runAutoSync = () => {
     setSyncMsg(null);
     const est = onAutoSync();
@@ -226,13 +366,15 @@ export default function OnlineSubtitlesModal({
     >
       <View style={styles.card}>
         <View style={styles.headerRow}>
-          <Text style={styles.headerText}>Online subtitles — jimaku.cc</Text>
+          <Text style={styles.headerText}>
+            {serverSubs ? "Online subtitles" : "Online subtitles — jimaku.cc"}
+          </Text>
           <Pressable onPress={onClose} hitSlop={8}>
             <Text style={styles.closeText}>✕</Text>
           </Pressable>
         </View>
 
-        {!apiKey ? (
+        {!apiKey && !serverSubs ? (
           <Text style={styles.hint}>
             Set your jimaku.cc API key in Settings → Reader to search online
             subtitles.
@@ -251,6 +393,15 @@ export default function OnlineSubtitlesModal({
                   {activeCueCount > 0 ? `  ·  ${activeCueCount} cues` : ""}
                 </Text>
                 <View style={styles.syncRow}>
+                  {serverSubs?.sync && activeServerId != null ? (
+                    <Pressable
+                      style={[styles.syncButton, styles.serverSyncButton]}
+                      onPress={runServerSync}
+                      disabled={busy}
+                    >
+                      <Text style={styles.syncButtonText}>Sync on server</Text>
+                    </Pressable>
+                  ) : null}
                   <Pressable
                     style={styles.syncButton}
                     onPress={runAutoSync}
@@ -289,9 +440,74 @@ export default function OnlineSubtitlesModal({
               </View>
             ) : null}
 
-            {/* Search */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Search</Text>
+            {/* Server-cached subtitles (Yozora SUB-1) */}
+            {serverSubs ? (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>{serverSubs.label}</Text>
+                <View style={styles.searchRow}>
+                  <TextInput
+                    style={[styles.input, { flex: 1 }]}
+                    value={serverQ}
+                    onChangeText={setServerQ}
+                    placeholder='Manual search (optional)…'
+                    placeholderTextColor='#666'
+                    autoCapitalize='none'
+                    autoCorrect={false}
+                    onSubmitEditing={() =>
+                      runServerList(serverQ.trim() || undefined)
+                    }
+                  />
+                  <Pressable
+                    style={styles.syncButton}
+                    onPress={() => runServerList(serverQ.trim() || undefined)}
+                    disabled={busy}
+                  >
+                    <Text style={styles.syncButtonText}>Search</Text>
+                  </Pressable>
+                </View>
+                {serverRows === null ? (
+                  <View style={styles.busyRow}>
+                    <ActivityIndicator size='small' color='#fff' />
+                  </View>
+                ) : serverRows.length === 0 && !serverError ? (
+                  <Text style={styles.hint}>
+                    No server-cached subtitles for this episode — try a manual
+                    search or jimaku below.
+                  </Text>
+                ) : null}
+                {serverError ? (
+                  <Text style={styles.errorText}>{serverError}</Text>
+                ) : null}
+                {(serverRows ?? []).map((row) => (
+                  <Pressable
+                    key={row.id}
+                    style={styles.rowItem}
+                    onPress={() => loadServerRow(row)}
+                    disabled={busy}
+                  >
+                    <Text style={styles.rowTitle} numberOfLines={1}>
+                      {row.name}
+                    </Text>
+                    <Text style={styles.rowSub} numberOfLines={1}>
+                      {row.provider} · {row.lang}
+                      {activeServerId === row.id ? "  ·  active" : ""}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
+
+            {/* jimaku search (needs the API key) */}
+            {!apiKey ? (
+              <Text style={styles.hint}>
+                Set your jimaku.cc API key in Settings → Reader to also search
+                jimaku directly.
+              </Text>
+            ) : null}
+            <View style={[styles.section, !apiKey && { display: "none" }]}>
+              <Text style={styles.sectionTitle}>
+                {serverSubs ? "jimaku.cc search" : "Search"}
+              </Text>
               <View style={styles.searchRow}>
                 <TextInput
                   style={[styles.input, { flex: 1 }]}
@@ -504,6 +720,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,
+  },
+  serverSyncButton: {
+    backgroundColor: "#6d28d9",
   },
   syncButtonText: { color: "#fff", fontSize: 13, fontWeight: "700" },
   nudgeRow: {

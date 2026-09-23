@@ -13,3 +13,4 @@ as they were at the time; do not follow them into current work.
 | `IMPLEMENTATION_PLAN_ARCHIVE.md` | Detail for phases –1 through 3 |
 | `PHASE0_SEAMS.md` | The overlay-spike report + Streamyfin player seam map |
 | `PHASE2_YOMITAN.md` | The Yomitan core extraction map (what was vendored and why) |
+| `YOZORA_MIGRATION_PLAN.md` | Completed Anime/Stremio → Yozora migration plan; remaining device gates and follow-ups live in FEATURES.md |

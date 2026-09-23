@@ -95,7 +95,6 @@ interface BottomControlsProps {
 const ICON = "white";
 
 export const BottomControls: FC<BottomControlsProps> = ({
-  item,
   chapters,
   durationMs,
   showControls,

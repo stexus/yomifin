@@ -43,8 +43,8 @@ import {
   SearchScopeSelector,
 } from "@/components/search/SearchScopeSelector";
 import { SearchTabButtons } from "@/components/search/SearchTabButtons";
-import { StremioSearchResults } from "@/components/search/StremioSearchResults";
 import { TVSearchPage } from "@/components/search/TVSearchPage";
+import { YozoraSearchResults } from "@/components/search/YozoraSearchResults";
 import useRouter from "@/hooks/useAppRouter";
 import { useJellyseerr } from "@/hooks/useJellyseerr";
 import { useTVItemActionModal } from "@/hooks/useTVItemActionModal";
@@ -59,7 +59,7 @@ import type {
   TvResult,
 } from "@/utils/jellyseerr/server/models/Search";
 import { createStreamystatsApi } from "@/utils/streamystats";
-import { useStremioSearch } from "@/utils/stremio/useStremioSearch";
+import { useYozoraSearch } from "@/utils/yozora/useYozoraSearch";
 
 type SearchType = "Library" | "Discover";
 
@@ -115,14 +115,20 @@ export default function SearchPage() {
   const { settings, updateSettings } = useSettings();
   const { jellyseerrApi } = useJellyseerr();
 
-  // Unified search scope (Jellyfin / Stremio / Both), persisted in settings.
-  const scope: SearchScope = settings?.searchScope ?? "both";
+  // Unified search scope (Jellyfin / Yozora / Both), persisted in settings.
+  // Legacy stored value "stremio" (pre-Yozora migration) maps to "yozora".
+  const storedScope = settings?.searchScope as
+    | SearchScope
+    | "stremio"
+    | undefined;
+  const scope: SearchScope =
+    storedScope === "stremio" ? "yozora" : (storedScope ?? "both");
   const setScope = useCallback(
     (s: SearchScope) => updateSettings({ searchScope: s }),
     [updateSettings],
   );
   const jellyfinScope = scope === "jellyfin" || scope === "both";
-  const stremioScope = scope === "stremio" || scope === "both";
+  const yozoraScope = scope === "yozora" || scope === "both";
   const bothScopes = scope === "both";
   const [jellyseerrOrderBy, setJellyseerrOrderBy] =
     useState<JellyseerrSearchSort>(
@@ -454,10 +460,10 @@ export default function SearchPage() {
       jellyfinScope && searchType === "Library" && debouncedSearch.length > 0,
   });
 
-  // Stremio search (movie/series across every configured addon's search catalog).
-  const stremio = useStremioSearch(
+  // Yozora search (server-side TMDB + AniList, mixed kinds).
+  const yozora = useYozoraSearch(
     debouncedSearch,
-    searchType === "Library" && stremioScope,
+    searchType === "Library" && yozoraScope,
   );
 
   const jellyfinHasResults = useMemo(
@@ -488,19 +494,19 @@ export default function SearchPage() {
 
   const noResults = useMemo(() => {
     const jf = jellyfinScope && jellyfinHasResults;
-    const st = stremioScope && stremio.hits.length > 0;
-    return !jf && !st;
-  }, [jellyfinScope, jellyfinHasResults, stremioScope, stremio.hits.length]);
+    const yz = yozoraScope && yozora.hits.length > 0;
+    return !jf && !yz;
+  }, [jellyfinScope, jellyfinHasResults, yozoraScope, yozora.hits.length]);
 
   const loading = useMemo(() => {
     const jfLoading =
       jellyfinScope && (l1 || l2 || l3 || l7 || l8 || l9 || l10 || l11 || l12);
-    const stLoading = stremioScope && stremio.loading;
-    return jfLoading || stLoading;
+    const yzLoading = yozoraScope && yozora.loading;
+    return jfLoading || yzLoading;
   }, [
     jellyfinScope,
-    stremioScope,
-    stremio.loading,
+    yozoraScope,
+    yozora.loading,
     l1,
     l2,
     l3,
@@ -993,19 +999,17 @@ export default function SearchPage() {
                 }}
               />
             </View>
-            {stremioScope ? (
+            {yozoraScope ? (
               <View>
-                {bothScopes && stremio.hits.length > 0 ? (
+                {bothScopes && yozora.hits.length > 0 ? (
                   <Text className='font-bold text-2xl px-4 mt-3 mb-1 text-purple-400'>
-                    Stremio
+                    Yozora
                   </Text>
                 ) : null}
-                <StremioSearchResults
-                  hits={stremio.hits}
-                  loading={stremio.loading}
-                  unavailable={
-                    stremio.unavailable && debouncedSearch.length > 0
-                  }
+                <YozoraSearchResults
+                  hits={yozora.hits}
+                  loading={yozora.loading}
+                  unavailable={yozora.unavailable && debouncedSearch.length > 0}
                 />
               </View>
             ) : null}

@@ -78,7 +78,7 @@ bun run ios:install-metal-toolchain  # Fix "missing Metal Toolchain" build error
 ## Tech Stack
 
 - **Runtime**: Bun
-- **Framework**: React Native (Expo SDK 54)
+- **Framework**: React Native (Expo SDK 56)
 - **Language**: TypeScript (strict mode)
 - **State Management**: Jotai (global state atoms) + React Query (server state)
 - **API**: Jellyfin SDK (`@jellyfin/sdk`)

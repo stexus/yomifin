@@ -84,7 +84,7 @@ interface Props {
    */
   languageHint?: ProfileId | null;
   /**
-   * Stable per-title key (Jellyfin SeriesId/ItemId, Stremio series name) under
+   * Stable per-title key (Jellyfin SeriesId/ItemId, Yozora series name) under
    * which a manual profile switch (the pill) is remembered. Without it the pill
    * still works but only flips the app-wide active profile.
    */
@@ -155,7 +155,6 @@ export default function YomifinLookupLayer({
   // Open the installed dictionary db once for the player screen's lifetime. Opening is
   // instant (no parse); if none is installed yet, the overlay still shows text but taps
   // do nothing (status "none").
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reload when the config changes
   useEffect(() => {
     try {
       // Only the ACTIVE profile's dictionaries participate — a zh dictionary must
@@ -197,8 +196,14 @@ export default function YomifinLookupLayer({
   const handleWordTap = async (input: string) => {
     const dict = dictRef.current;
     if (!dict || busy) return;
-    // Freeze the current cue at tap time for the Anki card.
-    setSentence(text);
+
+    // Freeze everything playback-dependent synchronously at TAP time. Dictionary
+    // lookup is async; reading the player refs after awaiting it can land on the next
+    // cue, producing a card whose sentence/audio do not match the tapped subtitle.
+    const tappedSentence = text;
+    const tappedCtx = onSnapshotCard?.() ?? null;
+    const tappedCues = cues;
+
     setBusy(true);
     const t0 = Date.now();
     try {
@@ -206,36 +211,42 @@ export default function YomifinLookupLayer({
       console.log(
         `[YOMIFIN LOOKUP] "${r.matchedText}" (${r.entries.length} entries) in ${Date.now() - t0}ms`,
       );
-      setResult(r);
-      onLookupOpen?.();
       // Cloze split: `input` is the cue text from the tapped token to the end of the
-      // line (a strict suffix of `text`), and the lookup decided the match length.
-      const tapAt = text.length - input.length;
+      // line (a strict suffix of `tappedSentence`), and the lookup decided the match
+      // length.
+      const tapAt = tappedSentence.length - input.length;
       clozeRef.current = {
-        prefix: text.slice(0, tapAt).replace(/\n+/g, ""),
+        prefix: tappedSentence.slice(0, tapAt).replace(/\n+/g, ""),
         body: input.slice(0, r.matchedLength).replace(/\n+/g, ""),
         suffix: input.slice(r.matchedLength).replace(/\n+/g, ""),
       };
-      // Cheap snapshot only — the expensive capture is deferred to the add-card press
-      // so that ordinary lookups never trigger a seek/decode.
-      const ctx = onSnapshotCard?.() ?? null;
-      cardCtxRef.current = ctx;
+      // Store the already-frozen snapshot only after lookup succeeds. The expensive
+      // capture remains deferred to the add-card press.
+      cardCtxRef.current = tappedCtx;
       cardBaseRef.current = `card_${Date.now()}`;
       // Anchor the selected cue range at the tapped cue (span 1). -1 = no match
       // (bitmap track / fetch failure) → popup degrades to the single live cue.
-      const anchor = ctx
-        ? findCueIndexByTime(cues, ctx.cueStart, ctx.cueEnd)
+      const anchor = tappedCtx
+        ? findCueIndexByTime(tappedCues, tappedCtx.cueStart, tappedCtx.cueEnd)
         : -1;
       cueAnchorRef.current = anchor;
+      setSentence(tappedSentence);
       setCueRange(
         anchor >= 0 ? { startIndex: anchor, endIndex: anchor } : null,
       );
+      setResult(r);
+      onLookupOpen?.();
     } catch (err) {
       console.error("[YOMIFIN LOOKUP] failed:", err);
     } finally {
       setBusy(false);
     }
   };
+
+  // Freeze the successful lookup's context into this popup render. An add starts
+  // with a short spinner-paint delay; if another subtitle is tapped during it, the
+  // detached first add must not read the second lookup's mutable ref.
+  const popupCardCtx = result ? cardCtxRef.current : null;
 
   return (
     <>
@@ -293,7 +304,7 @@ export default function YomifinLookupLayer({
                 setCueRange({ startIndex: anchor, endIndex: anchor });
             }}
             getMedia={(want, rangeSec) => {
-              const ctx = cardCtxRef.current;
+              const ctx = popupCardCtx;
               if (!ctx || !onCaptureMedia) return undefined;
               // Widen the audio clip to the selected cue range (multi-sentence card).
               const merged = rangeSec

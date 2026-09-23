@@ -1,16 +1,17 @@
 /*
- * Unified-search scope selector: Jellyfin · Stremio · Both. Cross-platform pill
+ * Unified-search scope selector: Jellyfin · Yozora · Both. Cross-platform pill
  * segmented control (no @expo/ui dep so it's safe on every target). Persisted by
- * the caller into Settings.searchScope.
+ * the caller into Settings.searchScope (legacy stored "stremio" is mapped to
+ * "yozora" at the read site).
  */
 import { Pressable, View } from "react-native";
 import { Text } from "@/components/common/Text";
 
-export type SearchScope = "jellyfin" | "stremio" | "both";
+export type SearchScope = "jellyfin" | "yozora" | "both";
 
 const OPTIONS: { key: SearchScope; label: string }[] = [
   { key: "jellyfin", label: "Jellyfin" },
-  { key: "stremio", label: "Stremio" },
+  { key: "yozora", label: "Yozora" },
   { key: "both", label: "Both" },
 ];
 
@@ -43,16 +44,16 @@ export function SearchScopeSelector({ scope, onChange }: Props) {
   );
 }
 
-/** Small provenance chip shown on each search result (Jellyfin / Stremio). */
+/** Small provenance chip shown on each search result (Jellyfin / Yozora). */
 export function SourceBadge({
   source,
   detail,
 }: {
-  source: "jellyfin" | "stremio";
+  source: "jellyfin" | "yozora";
   detail?: string;
 }) {
   const bg = source === "jellyfin" ? "bg-sky-600/80" : "bg-purple-600/80";
-  const label = source === "jellyfin" ? "Jellyfin" : "Stremio";
+  const label = source === "jellyfin" ? "Jellyfin" : "Yozora";
   return (
     <View
       className={`absolute top-1 left-1 rounded-md px-1.5 py-0.5 ${bg}`}

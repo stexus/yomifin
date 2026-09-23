@@ -153,6 +153,17 @@ export default function IndexLayout() {
         }}
       />
       <Stack.Screen
+        name='settings/yozora/page'
+        options={{
+          title: "Yozora",
+          headerShown: !Platform.isTV,
+          headerBlurEffect: "none",
+          headerTransparent: Platform.OS === "ios",
+          headerShadowVisible: false,
+          headerLeft: () => <HeaderBackButton />,
+        }}
+      />
+      <Stack.Screen
         name='settings/appearance/page'
         options={{
           title: t("home.settings.appearance.title"),
