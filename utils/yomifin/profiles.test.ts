@@ -172,4 +172,4 @@ for (const [tag, expected] of tagCases) {
 }
 
 console.log(`\n${pass}/${pass + fail} passed, ${fail} failed`);
-process.exit(fail === 0 ? 0 : 1);
+if (fail > 0) throw new Error(`${fail} regression checks failed`);

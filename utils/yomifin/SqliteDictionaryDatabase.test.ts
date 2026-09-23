@@ -225,4 +225,4 @@ if (existsSync("/tmp/JMdict.db")) {
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail === 0 ? 0 : 1);
+if (fail > 0) throw new Error(`${fail} regression checks failed`);

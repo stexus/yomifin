@@ -12,8 +12,9 @@ const { withEntitlementsPlist } = require("expo/config-plugins");
  * work on a free build — acceptable for the yomifin personal/dev workflow.
  *
  * This plugin must run AFTER any plugin that ADDS these entitlements (e.g.
- * expo-notifications adds aps-environment), so keep it LAST in app.json's
- * `plugins` array. If you move to a paid team, drop this plugin.
+ * expo-notifications adds aps-environment). Expo executes later-registered
+ * entitlement mods first, so keep this plugin FIRST in app.json's `plugins`
+ * array. If you move to a paid team, drop this plugin.
  */
 const PAID_ENTITLEMENTS = [
   "aps-environment", // Push Notifications

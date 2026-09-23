@@ -18,6 +18,7 @@ export const TAB_ROUTES = [
   "(watchlists)",
   "(custom-links)",
   "(settings)",
+  "(yozora)",
 ] as const;
 
 export type TabRoute = (typeof TAB_ROUTES)[number];
@@ -30,9 +31,8 @@ export function isTabRoute(s: string): s is TabRoute {
 /**
  * Check if we're at the root of a tab
  */
-function isAtTabRoot(segments: string[]): boolean {
-  const lastSegment = segments[segments.length - 1];
-  return isTabRoute(lastSegment) || lastSegment === "index";
+export function isAtTabRoot(segments: string[]): boolean {
+  return isTabRoute(segments[segments.length - 1]);
 }
 
 /**

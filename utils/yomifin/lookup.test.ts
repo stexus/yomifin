@@ -337,4 +337,4 @@ for (const [input, expectedLemma, expectedSurface] of zhCases) {
 
 const total = pass + fail;
 console.log(`\n${pass}/${total} passed, ${fail} failed`);
-process.exit(fail === 0 ? 0 : 1);
+if (fail > 0) throw new Error(`${fail} regression checks failed`);

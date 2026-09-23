@@ -53,6 +53,7 @@ import {
   isGestureSurfaceAvailable,
 } from "@/modules/gesture-surface";
 import { useSettings } from "@/utils/atoms/settings";
+import { CONTROLS_CONSTANTS } from "./constants";
 import { useVolumeAndBrightness } from "./hooks/useVolumeAndBrightness";
 import {
   ScrubBubble,
@@ -93,6 +94,8 @@ interface Props {
   onSkipBackward: () => void;
   /** Two-finger tap → play/pause (native gesture-surface path). */
   onTogglePlay?: () => void;
+  onHoldSpeedStart?: () => void;
+  onHoldSpeedEnd?: () => void;
   /**
    * Legacy full-screen dim behind the controls. Both players now use
    * ControlsScrims instead (no dim) and leave this false; kept for opt-in reuse.
@@ -133,6 +136,8 @@ export const GestureOverlay = ({
   onSkipForward,
   onSkipBackward,
   onTogglePlay,
+  onHoldSpeedStart,
+  onHoldSpeedEnd,
   progress,
   max,
   isSeeking,
@@ -150,7 +155,7 @@ export const GestureOverlay = ({
   useEffect(() => {
     console.log(
       surfaceActive
-        ? `[GESTURE] native gesture surface: PRESENT v${gestureSurfaceVersion()} (unified UIKit taps; RNGH owns pan only${
+        ? `[GESTURE] native gesture surface: PRESENT v${gestureSurfaceVersion()} (unified UIKit taps; RNGH owns pan and speed hold${
             gestureSurfaceVersion() >= 2
               ? ""
               : "; v1 — stock ~350ms double-tap window, rebuild for the snappier single tap"
@@ -361,6 +366,8 @@ export const GestureOverlay = ({
     showControls,
     isPlaying,
     onTogglePlay,
+    onHoldSpeedStart,
+    onHoldSpeedEnd,
     onScrubStart,
     onScrubPreview,
     onScrubEnd,
@@ -383,6 +390,8 @@ export const GestureOverlay = ({
     showControls,
     isPlaying,
     onTogglePlay,
+    onHoldSpeedStart,
+    onHoldSpeedEnd,
     onScrubStart,
     onScrubPreview,
     onScrubEnd,
@@ -449,6 +458,19 @@ export const GestureOverlay = ({
     console.log(`[GESTURE] drag-seek commit → ${Math.round(ms / 1000)}s`);
     actionsRef.current.onScrubEnd?.(ms);
   }, []);
+
+  const holdingSpeedRef = useRef(false);
+  const holdSpeedAvailable = Boolean(onHoldSpeedStart);
+  const endHoldSpeed = useCallback(() => {
+    if (!holdingSpeedRef.current) return;
+    holdingSpeedRef.current = false;
+    actionsRef.current.onHoldSpeedEnd?.();
+    actionsRef.current.hideDragFeedback();
+  }, []);
+  useEffect(() => endHoldSpeed, [endHoldSpeed]);
+  useEffect(() => {
+    if (!settings.enableHoldToSpeed || !isPlaying) endHoldSpeed();
+  }, [settings.enableHoldToSpeed, isPlaying, endHoldSpeed]);
 
   // ---- pan bookkeeping (SharedValues: the pan callbacks are WORKLETS) --------------
 
@@ -569,8 +591,24 @@ export const GestureOverlay = ({
         }
       });
 
-    // Unified path: the native surface owns every tap — RNGH owns ONLY the pan.
-    if (surfaceActive) return pan;
+    const hold = Gesture.LongPress()
+      .enabled(settings.enableHoldToSpeed === true && holdSpeedAvailable)
+      .minDuration(CONTROLS_CONSTANTS.HOLD_SPEED_DELAY)
+      .maxDistance(10)
+      .runOnJS(true)
+      .onStart((e) => {
+        const a = actionsRef.current;
+        if (!a.isPlaying || e.y < screenH * 0.15 || e.y > screenH * 0.85)
+          return;
+        holdingSpeedRef.current = true;
+        a.lightHaptic();
+        a.onHoldSpeedStart?.();
+        a.showFeedback("play-forward", `${a.settings.holdToSpeedRate}x`);
+      })
+      .onFinalize(endHoldSpeed);
+
+    // Native UIKit still owns taps. RNGH owns pan and the optional speed hold.
+    if (surfaceActive) return Gesture.Race(pan, hold);
 
     // ---- LEGACY tap tree (stale binary / Android) --------------------------------
     // Suppression race (why these are grace-delayed): a two-finger tap ALSO
@@ -611,9 +649,12 @@ export const GestureOverlay = ({
         else setTimeout(fire, GRACE_MS);
       });
 
-    return Gesture.Race(pan, Gesture.Exclusive(doubleTap, singleTap));
+    return Gesture.Race(pan, hold, Gesture.Exclusive(doubleTap, singleTap));
   }, [
     doubleTapSeconds,
+    settings.enableHoldToSpeed,
+    holdSpeedAvailable,
+    endHoldSpeed,
     dragSeekEnabled,
     surfaceActive,
     screenWidth,

@@ -11,8 +11,10 @@ import { useTranslation } from "react-i18next";
 import { Linking, Platform, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button } from "@/components/Button";
+import { SettingSwitch } from "@/components/common/SettingSwitch";
 import { Text } from "@/components/common/Text";
 import useRouter from "@/hooks/useAppRouter";
+import { useSettings } from "@/utils/atoms/settings";
 import { storage } from "@/utils/mmkv";
 
 export interface IntroSheetRef {
@@ -25,6 +27,10 @@ export const IntroSheet = forwardRef<IntroSheetRef>((_, ref) => {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { settings, updateSettings, pluginSettings } = useSettings();
+  // An admin-locked toggle cannot take the write: updateSettings drops it and
+  // the read stays pinned, so the row would look broken rather than locked.
+  const sentryLocked = pluginSettings?.sentryEnabled?.locked === true;
 
   useImperativeHandle(ref, () => ({
     present: () => {
@@ -180,6 +186,54 @@ export const IntroSheet = forwardRef<IntroSheetRef>((_, ref) => {
                 </View>
               </View>
             </View>
+          </View>
+
+          <View>
+            <Text className='text-lg font-bold'>
+              {t("home.intro.crash_reports_title")}
+            </Text>
+            {/* The whole row toggles: the Switch itself isn't focusable on TV,
+                so the TouchableOpacity carries the remote-select press there. */}
+            <TouchableOpacity
+              activeOpacity={0.7}
+              disabled={sentryLocked}
+              onPress={() =>
+                updateSettings({ sentryEnabled: !settings?.sentryEnabled })
+              }
+              className='flex flex-row items-center mt-2'
+            >
+              <View
+                style={{
+                  width: 50,
+                  height: 50,
+                }}
+                className='flex items-center justify-center'
+              >
+                <Ionicons name='bug-outline' size={28} color='white' />
+              </View>
+              <View className='shrink flex-1 ml-2 mr-3'>
+                <Text className='shrink text-xs'>
+                  {t("home.intro.crash_reports_description")}
+                </Text>
+              </View>
+              {/* Presentational only — the row press above is the single
+                  mutation path. The inertness has to come from a wrapping
+                  View: a Switch ignores its own pointerEvents on Android, so
+                  its native touch handler flipped it and the controlled value
+                  snapped it straight back — a toggle that couldn't be
+                  disabled by tapping the one control that looks tappable. */}
+              <View pointerEvents='none'>
+                <SettingSwitch
+                  value={settings?.sentryEnabled === true}
+                  disabled={sentryLocked}
+                />
+              </View>
+            </TouchableOpacity>
+            {sentryLocked && (
+              <Text className='text-xs text-red-500 mt-1'>
+                {t("home.settings.disabled_by_admin")}
+              </Text>
+            )}
           </View>
 
           <View>

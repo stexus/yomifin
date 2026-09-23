@@ -3,9 +3,18 @@ import type {
   BaseItemDto,
   MediaSourceInfo,
 } from "@jellyfin/sdk/lib/generated-client";
+import { useKeyEventListener } from "expo-key-event";
 import { useLocalSearchParams } from "expo-router";
-import { type FC, useCallback, useEffect, useRef, useState } from "react";
-import { StyleSheet, useWindowDimensions, View } from "react-native";
+import {
+  type FC,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useTranslation } from "react-i18next";
+import { Platform, StyleSheet, useWindowDimensions, View } from "react-native";
 import Animated, {
   Easing,
   type SharedValue,
@@ -17,20 +26,22 @@ import Animated, {
 import { Loader } from "@/components/Loader";
 import ContinueWatchingOverlay from "@/components/video-player/controls/ContinueWatchingOverlay";
 import useRouter from "@/hooks/useAppRouter";
-import { useCreditSkipper } from "@/hooks/useCreditSkipper";
 import { useHaptic } from "@/hooks/useHaptic";
-import { useIntroSkipper } from "@/hooks/useIntroSkipper";
+import { useMediaSegments } from "@/hooks/useMediaSegments";
 import { usePlaybackManager } from "@/hooks/usePlaybackManager";
 import { useTrickplay } from "@/hooks/useTrickplay";
 import type { TechnicalInfo } from "@/modules/mpv-player";
 import { DownloadedItem } from "@/providers/Downloads/types";
 import { useOfflineMode } from "@/providers/OfflineModeProvider";
 import { useSettings } from "@/utils/atoms/settings";
+import { hasChapterMarkers } from "@/utils/chapters";
 import { getDefaultPlaySettings } from "@/utils/jellyfin/getDefaultPlaySettings";
+import { SEGMENT_SKIP_KEY, useSegments } from "@/utils/segments";
 import { msToTicks, ticksToMs } from "@/utils/time";
 import { BottomControls } from "./BottomControls";
 import { ControlsScrims } from "./ControlsScrims";
 import { CONTROLS_CONSTANTS } from "./constants";
+import { AndroidSubtitleScaleOverlay } from "./dropdown/DropdownView";
 import { EpisodeList } from "./EpisodeList";
 import { GestureOverlay } from "./GestureOverlay";
 import { HeaderControls } from "./HeaderControls";
@@ -40,6 +51,8 @@ import { useVideoSlider } from "./hooks/useVideoSlider";
 import { useVideoTime } from "./hooks/useVideoTime";
 import { PlayerStatusBar } from "./PlayerStatusBar";
 import { ScrubProgressBar } from "./ScrubProgressBar";
+import { SegmentSkippedNotice } from "./SegmentSkippedNotice";
+import { SkipSegmentOverlay } from "./SkipSegmentOverlay";
 import { TechnicalInfoOverlay } from "./TechnicalInfoOverlay";
 import { useControlsTimeout } from "./useControlsTimeout";
 import { PlaybackSpeedScope } from "./utils/playback-speed-settings";
@@ -71,6 +84,10 @@ interface Props {
   // Playback speed props
   playbackSpeed?: number;
   setPlaybackSpeed?: (speed: number, scope: PlaybackSpeedScope) => void;
+  subtitleDelay?: number;
+  onSubtitleDelayChange?: (seconds: number) => void;
+  onHoldSpeedStart?: () => void;
+  onHoldSpeedEnd?: () => void;
   // Technical info props
   showTechnicalInfo?: boolean;
   onToggleTechnicalInfo?: () => void;
@@ -84,6 +101,18 @@ interface Props {
   /** Extra header control next to the dropdown (yomifin profile pill). */
   headerLeftSlot?: React.ReactNode;
 }
+
+const CONTROLS_ANIMATION_CONFIG = {
+  duration: 300,
+  easing: Easing.out(Easing.quad),
+};
+
+// Shares its duration with the scrim dim in GestureOverlay so both halves
+// of the speed boost dim together
+const HOLD_SPEED_DIM_CONFIG = {
+  duration: CONTROLS_CONSTANTS.HOLD_SPEED_DIM_DURATION,
+  easing: Easing.out(Easing.quad),
+};
 
 export const Controls: FC<Props> = ({
   item,
@@ -108,6 +137,10 @@ export const Controls: FC<Props> = ({
   downloadedFiles = undefined,
   playbackSpeed = 1.0,
   setPlaybackSpeed,
+  subtitleDelay = 0,
+  onSubtitleDelayChange,
+  onHoldSpeedStart,
+  onHoldSpeedEnd,
   showTechnicalInfo = false,
   onToggleTechnicalInfo,
   getTechnicalInfo,
@@ -128,6 +161,7 @@ export const Controls: FC<Props> = ({
   // True while a drag-anywhere scrub is in flight (pops the minimal bottom bar even
   // when the control pane is hidden).
   const [isScrubbing, setIsScrubbing] = useState(false);
+  const [showSubtitleScale, setShowSubtitleScale] = useState(false);
 
   const { height: screenHeight, width: screenWidth } = useWindowDimensions();
   const { previousItem, nextItem } = usePlaybackManager({
@@ -158,18 +192,51 @@ export const Controls: FC<Props> = ({
 
   // Animate controls visibility
   useEffect(() => {
-    const animationConfig = {
-      duration: 300,
-      easing: Easing.out(Easing.quad),
-    };
-
-    controlsOpacity.value = withTiming(showControls ? 1 : 0, animationConfig);
+    controlsOpacity.value = withTiming(
+      showControls ? 1 : 0,
+      CONTROLS_ANIMATION_CONFIG,
+    );
     headerTranslateY.value = withTiming(
       showControls ? 0 : -10,
-      animationConfig,
+      CONTROLS_ANIMATION_CONFIG,
     );
-    bottomTranslateY.value = withTiming(showControls ? 0 : 10, animationConfig);
+    bottomTranslateY.value = withTiming(
+      showControls ? 0 : 10,
+      CONTROLS_ANIMATION_CONFIG,
+    );
   }, [showControls, controlsOpacity, headerTranslateY, bottomTranslateY]);
+
+  // Dim the controls while a speed boost is held so the video stays readable
+  const handleHoldSpeedStart = useCallback(() => {
+    if (showControls) {
+      controlsOpacity.value = withTiming(
+        CONTROLS_CONSTANTS.HOLD_SPEED_DIM_OPACITY,
+        HOLD_SPEED_DIM_CONFIG,
+      );
+    }
+    onHoldSpeedStart?.();
+  }, [showControls, controlsOpacity, onHoldSpeedStart]);
+
+  const handleHoldSpeedEnd = useCallback(() => {
+    if (showControls) {
+      controlsOpacity.value = withTiming(1, HOLD_SPEED_DIM_CONFIG);
+    }
+    onHoldSpeedEnd?.();
+  }, [showControls, controlsOpacity, onHoldSpeedEnd]);
+
+  // Top edge of the rendered video, so overlays sit inside the frame
+  // instead of in the letterbox bars
+  const _videoTopOffset = useMemo(() => {
+    if (isZoomedToFill) return 0;
+    const videoStream = mediaSource?.MediaStreams?.find(
+      (s) => s.Type === "Video",
+    );
+    if (!videoStream?.Width || !videoStream?.Height) return 0;
+    const videoAspect = videoStream.Width / videoStream.Height;
+    const screenAspect = screenWidth / screenHeight;
+    if (screenAspect >= videoAspect) return 0;
+    return (screenHeight - screenWidth / videoAspect) / 2;
+  }, [isZoomedToFill, mediaSource, screenWidth, screenHeight]);
 
   // Create animated styles
   const headerAnimatedStyle = useAnimatedStyle(() => ({
@@ -247,6 +314,21 @@ export const Controls: FC<Props> = ({
     },
     [progress, seek, play],
   );
+  useKeyEventListener((e) => {
+    if (episodeView) return;
+    if (e?.eventType !== "press") return;
+    const key = e.key;
+
+    if (key === " " || key === "Spacebar" || key === "Space") {
+      togglePlay();
+    } else if (!Platform.isTV && key === "ArrowLeft") {
+      // Exclude TV platforms to prevent conflicts with the remote control,
+      // which uses the same arrow keys for directional UI navigation.
+      handleSkipBackward();
+    } else if (!Platform.isTV && key === "ArrowRight") {
+      handleSkipForward();
+    }
+  });
 
   // Time management hook
   const { currentTime, remainingTime } = useVideoTime({
@@ -348,27 +430,125 @@ export const Controls: FC<Props> = ({
     subtitleIndex: string;
   }>();
 
-  const { showSkipButton, skipIntro } = useIntroSkipper(
-    item.Id!,
-    currentTime,
-    seek,
-    play,
+  // Fetch all segments for the current item
+  const { data: segments } = useSegments(
+    item.Id ?? "",
     offline,
-    api,
     downloadedFiles,
+    api,
   );
 
-  const { showSkipCreditButton, skipCredit, hasContentAfterCredits } =
-    useCreditSkipper(
-      item.Id!,
-      currentTime,
-      seek,
-      play,
-      offline,
-      api,
-      downloadedFiles,
-      maxMs,
-    );
+  // Unified segment orchestration (identical mechanism on mobile and TV):
+  // overlap priority + a single auto-skip driver live in the shared hook.
+  const {
+    activeSegment,
+    skipActiveSegment: onSkipSegment,
+    showSkipButton: showSkipSegmentButton,
+    isOutroActive: showSkipOutroButton,
+    skipOutro: onSkipOutro,
+    hasContentAfterCredits,
+    skippedNotice,
+  } = useMediaSegments({
+    segments,
+    currentTime,
+    maxMs,
+    seek,
+    play,
+    isPlaying,
+    isBuffering,
+  });
+
+  const { t } = useTranslation();
+  const skipSegmentButtonText = t(
+    SEGMENT_SKIP_KEY[activeSegment?.type ?? "Intro"],
+  );
+  const skipOutroButtonText = t(SEGMENT_SKIP_KEY.Outro);
+
+  // Same gate as the bookmark icon in BottomControls, so the skip overlay
+  // only shifts left when the icon is actually shown.
+  const showsChapterIcon = useMemo(
+    () => hasChapterMarkers(item.Chapters, maxMs),
+    [item.Chapters, maxMs],
+  );
+
+  // Whether the "Next Episode" countdown can be rendered at all. The Skip
+  // Credits button yields to it only when this is true; if autoplay is
+  // disabled or its episode limit is reached, Skip Credits must stay available.
+  const willShowNextEpisode =
+    !!nextItem &&
+    settings.autoPlayNextEpisode !== false &&
+    (settings.maxAutoPlayEpisodeCount.value === -1 ||
+      settings.autoPlayEpisodeCount < settings.maxAutoPlayEpisodeCount.value);
+
+  // Credits segment metadata (hasContentAfterCredits) can be wrong, so this
+  // path only swaps Skip Credits for a manually-tappable Next Episode button
+  // — it must never auto-advance on its own.
+  const showNextEpisodeFromCredits =
+    willShowNextEpisode && showSkipOutroButton && !hasContentAfterCredits;
+
+  // Driven by actual playback position vs. duration, independent of segment
+  // metadata, so it's safe to auto-advance from this trigger.
+  const showNextEpisodeFromRemainingTime =
+    willShowNextEpisode &&
+    remainingTime < CONTROLS_CONSTANTS.NEXT_EPISODE_COUNTDOWN_MS;
+
+  const showNextEpisode =
+    showNextEpisodeFromCredits || showNextEpisodeFromRemainingTime;
+  // Whether reaching the end of the item may advance on its own. Pausing is
+  // not a reason to take that away: the countdown follows the remaining time,
+  // which stops moving while playback does.
+  const autoAdvanceNextEpisode = showNextEpisodeFromRemainingTime;
+
+  // Autoplay would run at EOF but the episode cap stops it: ask "Still
+  // watching?" there instead, with playback paused — mirroring the native
+  // player's stillWatchingRequired flow. Gated on reaching the end so the
+  // prompt never covers a video that is still playing.
+  const stillWatchingRequired =
+    !!nextItem &&
+    settings.autoPlayNextEpisode !== false &&
+    settings.maxAutoPlayEpisodeCount.value !== -1 &&
+    settings.autoPlayEpisodeCount >= settings.maxAutoPlayEpisodeCount.value;
+
+  const [stillWatchingVisible, setStillWatchingVisible] = useState(false);
+  // The cap-hitting autoplay updates the episode count synchronously while
+  // currentTime/remainingTime still hold the outgoing episode's near-zero
+  // values (the next item loads async), so "at EOF" alone would fire the
+  // prompt over the incoming episode. Only a progress tick from mid-playback
+  // of the final episode itself arms the trigger.
+  const stillWatchingArmedRef = useRef(false);
+
+  // Reset after an in-place episode switch (setParams keeps Controls mounted).
+  useEffect(() => {
+    stillWatchingArmedRef.current = false;
+    setStillWatchingVisible(false);
+  }, [item.Id]);
+
+  useEffect(() => {
+    if (!stillWatchingRequired || stillWatchingVisible || maxMs <= 0) {
+      return;
+    }
+    if (
+      currentTime > 0 &&
+      remainingTime > CONTROLS_CONSTANTS.STILL_WATCHING_EOF_WINDOW_MS
+    ) {
+      stillWatchingArmedRef.current = true;
+      return;
+    }
+    if (
+      stillWatchingArmedRef.current &&
+      remainingTime <= CONTROLS_CONSTANTS.STILL_WATCHING_EOF_WINDOW_MS
+    ) {
+      setStillWatchingVisible(true);
+      pause();
+    }
+  }, [
+    stillWatchingVisible,
+    stillWatchingRequired,
+    maxMs,
+    currentTime,
+    remainingTime,
+    pause,
+  ]);
 
   const goToItemCommon = useCallback(
     (item: BaseItemDto) => {
@@ -387,15 +567,10 @@ export const Controls: FC<Props> = ({
         mediaSource: newMediaSource,
         audioIndex: defaultAudioIndex,
         subtitleIndex: defaultSubtitleIndex,
-      } = getDefaultPlaySettings(
-        item,
-        settings,
-        {
-          indexes: previousIndexes,
-          source: mediaSource ?? undefined,
-        },
-        { applyLanguagePreferences: true },
-      );
+      } = getDefaultPlaySettings(item, settings, {
+        indexes: previousIndexes,
+        source: mediaSource ?? undefined,
+      });
 
       // Use setParams instead of replace to avoid unmounting/remounting the player,
       // which would create a new MPV native view and crash with "mp_initialize already initialized".
@@ -457,9 +632,10 @@ export const Controls: FC<Props> = ({
         return;
       }
 
+      // Same boundary as the countdown's willShowNextEpisode gate — the
+      // countdown must never complete without actually navigating.
       if (
-        settings.autoPlayEpisodeCount + 1 <
-        settings.maxAutoPlayEpisodeCount.value
+        settings.autoPlayEpisodeCount < settings.maxAutoPlayEpisodeCount.value
       ) {
         goToItemCommon(nextItem);
       }
@@ -499,6 +675,8 @@ export const Controls: FC<Props> = ({
     setShowControls(false);
     setShowAudioSlider(false);
   }, [setShowControls]);
+  const openSubtitleScale = useCallback(() => setShowSubtitleScale(true), []);
+  const closeSubtitleScale = useCallback(() => setShowSubtitleScale(false), []);
 
   const { handleControlsInteraction } = useControlsTimeout({
     showControls,
@@ -539,6 +717,8 @@ export const Controls: FC<Props> = ({
             onSkipForward={handleSkipForward}
             onSkipBackward={handleSkipBackward}
             onTogglePlay={togglePlay}
+            onHoldSpeedStart={handleHoldSpeedStart}
+            onHoldSpeedEnd={handleHoldSpeedEnd}
             progress={progress}
             max={max}
             isSeeking={isSeeking}
@@ -548,6 +728,13 @@ export const Controls: FC<Props> = ({
             trickPlayUrl={trickPlayUrl}
             trickplayInfo={trickplayInfo}
           />
+          {Platform.OS === "android" && (
+            <AndroidSubtitleScaleOverlay
+              visible={showSubtitleScale}
+              onClose={closeSubtitleScale}
+              onBackgroundPress={hideControls}
+            />
+          )}
           {/* Technical Info Overlay - rendered outside animated views to stay visible */}
           {getTechnicalInfo && (
             <TechnicalInfoOverlay
@@ -557,6 +744,7 @@ export const Controls: FC<Props> = ({
               playMethod={playMethod}
               transcodeReasons={transcodeReasons}
               mediaSource={mediaSource}
+              item={item}
             />
           )}
           {/* Subtle top/bottom scrims (no full-screen dim) — fade with the controls. */}
@@ -591,8 +779,6 @@ export const Controls: FC<Props> = ({
             <HeaderControls
               item={item}
               showControls={showControls}
-              offline={offline}
-              mediaSource={mediaSource}
               startPictureInPicture={startPictureInPicture}
               switchOnEpisodeMode={switchOnEpisodeMode}
               aspectRatio={aspectRatio}
@@ -600,6 +786,8 @@ export const Controls: FC<Props> = ({
               onZoomToggle={onZoomToggle}
               playbackSpeed={playbackSpeed}
               setPlaybackSpeed={setPlaybackSpeed}
+              subtitleDelay={subtitleDelay}
+              onSubtitleDelayChange={onSubtitleDelayChange}
               showTechnicalInfo={showTechnicalInfo}
               onToggleTechnicalInfo={onToggleTechnicalInfo}
               leftSlot={headerLeftSlot}
@@ -612,21 +800,15 @@ export const Controls: FC<Props> = ({
             <BottomControls
               item={item}
               chapters={item.Chapters}
+              onOpenSubtitleScale={openSubtitleScale}
+              subtitleDelay={subtitleDelay}
+              onSubtitleDelayChange={onSubtitleDelayChange}
               durationMs={maxMs}
               showControls={showControls}
               isSliding={isSliding}
               showRemoteBubble={showRemoteBubble}
               currentTime={currentTime}
               remainingTime={remainingTime}
-              showSkipButton={showSkipButton}
-              showSkipCreditButton={showSkipCreditButton}
-              hasContentAfterCredits={hasContentAfterCredits}
-              skipIntro={skipIntro}
-              skipCredit={skipCredit}
-              nextItem={nextItem}
-              previousItem={previousItem}
-              handleNextEpisodeAutoPlay={handleNextEpisodeAutoPlay}
-              handleNextEpisodeManual={handleNextEpisodeManual}
               handleControlsInteraction={handleControlsInteraction}
               isPlaying={isPlaying}
               isBuffering={isBuffering}
@@ -636,6 +818,8 @@ export const Controls: FC<Props> = ({
               showSubtitleNav={showSubtitleNav}
               onPrevSubtitle={onPrevSubtitle}
               onNextSubtitle={onNextSubtitle}
+              previousItem={previousItem}
+              nextItem={nextItem}
               goToPreviousItem={goToPreviousItem}
               goToNextItem={goToNextItem}
               min={min}
@@ -653,9 +837,31 @@ export const Controls: FC<Props> = ({
               time={isSliding || showRemoteBubble ? time : remoteTime}
             />
           </Animated.View>
+          {/* Skip Intro / Skip Credits float independently of the controls so
+              they're visible (and tappable) without summoning the controls. */}
+          <SkipSegmentOverlay
+            showSkipButton={showSkipSegmentButton}
+            skipButtonText={skipSegmentButtonText}
+            showSkipCreditButton={showSkipOutroButton}
+            skipCreditButtonText={skipOutroButtonText}
+            hasContentAfterCredits={hasContentAfterCredits}
+            willShowNextEpisode={willShowNextEpisode}
+            showNextEpisode={showNextEpisode}
+            autoAdvanceNextEpisode={autoAdvanceNextEpisode}
+            remainingTime={remainingTime}
+            isPlaying={isPlaying}
+            itemId={item.Id}
+            skipIntro={onSkipSegment}
+            skipCredit={onSkipOutro}
+            onNextEpisodeFinish={handleNextEpisodeAutoPlay}
+            onNextEpisodePress={handleNextEpisodeManual}
+            controlsVisible={showControls}
+            hasChapters={showsChapterIcon}
+          />
+          <SegmentSkippedNotice segment={skippedNotice} />
         </>
       )}
-      {settings.maxAutoPlayEpisodeCount.value !== -1 && (
+      {stillWatchingVisible && (
         <ContinueWatchingOverlay goToNextItem={handleContinueWatching} />
       )}
     </View>

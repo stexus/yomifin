@@ -323,6 +323,8 @@ export default function YozoraPlayerPage() {
       // Picking a track dismisses any active online sub (stays loaded in mpv's
       // list but deselected) and zeroes the sync delay — same as direct-player.
       if (externalSubRef.current) {
+        externalSubRef.current = null;
+        subDelayMsRef.current = 0;
         setExternalSub(null);
         setSubDelayMs(0);
         v.setSubtitleDelay?.(0).catch(() => {});
@@ -346,11 +348,15 @@ export default function YozoraPlayerPage() {
   // overlay draws it), cues into the store, delay reset.
   const handleOnlineSubtitleLoaded = useCallback(
     async (sub: LoadedOnlineSubtitle) => {
+      const previousSub = externalSubRef.current;
+      externalSubRef.current = sub;
+      subDelayMsRef.current = 0;
       try {
         await videoRef.current?.addSubtitleFile?.(sub.path, true);
         await videoRef.current?.setSubtitleVisibility?.(false);
         await videoRef.current?.setSubtitleDelay?.(0);
       } catch (e) {
+        externalSubRef.current = previousSub;
         console.warn(
           `[YOZORA] failed to load online sub into mpv: ${(e as Error).message}`,
         );
@@ -482,6 +488,19 @@ export default function YozoraPlayerPage() {
     setPlaybackSpeed(next);
     videoRef.current?.setSpeed(next).catch(() => {});
   }, []);
+
+  const speedBeforeHoldRef = useRef<number | null>(null);
+  const startSpeedHold = useCallback(() => {
+    if (speedBeforeHoldRef.current !== null) return;
+    speedBeforeHoldRef.current = playbackSpeed;
+    setSpeed(settings.holdToSpeedRate);
+  }, [playbackSpeed, settings.holdToSpeedRate, setSpeed]);
+  const endSpeedHold = useCallback(() => {
+    if (speedBeforeHoldRef.current === null) return;
+    const speed = speedBeforeHoldRef.current;
+    speedBeforeHoldRef.current = null;
+    setSpeed(speed);
+  }, [setSpeed]);
 
   // Pause-on-lookup (same contract as direct-player).
   const pausedByLookupRef = useRef(false);
@@ -698,6 +717,8 @@ export default function YozoraPlayerPage() {
         onSkipForward={() => seekBy(forwardTime)}
         onSkipBackward={() => seekBy(-rewindTime)}
         onTogglePlay={togglePlay}
+        onHoldSpeedStart={startSpeedHold}
+        onHoldSpeedEnd={endSpeedHold}
         progress={progressSV}
         max={maxSV}
         isSeeking={isSeekingSV}

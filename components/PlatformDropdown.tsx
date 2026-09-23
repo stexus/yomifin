@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import React, { useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { Platform, StyleSheet, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Text } from "@/components/common/Text";
@@ -54,6 +55,7 @@ interface PlatformDropdownProps {
   trigger?: React.ReactNode;
   title?: string;
   groups: OptionGroup[];
+  disabled?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   onOptionSelect?: (value?: any) => void;
@@ -203,17 +205,19 @@ const PlatformDropdownComponent = ({
   trigger,
   title,
   groups,
+  disabled: isDisabled,
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   onOptionSelect,
   expoUIConfig,
   bottomSheetConfig,
 }: PlatformDropdownProps) => {
+  const { t } = useTranslation();
   const { showModal, hideModal, isVisible } = useGlobalModal();
 
   // Handle controlled open state for Android
   useEffect(() => {
-    if (Platform.OS === "android" && controlledOpen === true) {
+    if (Platform.OS === "android" && controlledOpen === true && !isDisabled) {
       showModal(
         <BottomSheetContent
           title={title}
@@ -225,12 +229,13 @@ const PlatformDropdownComponent = ({
           }}
         />,
         {
-          snapPoints: ["90%"],
+          // No snap points: sized to its options, so a two-entry dropdown
+          // opens small and a long one stops at the shared ceiling.
           enablePanDownToClose: bottomSheetConfig?.enablePanDownToClose ?? true,
         },
       );
     }
-  }, [controlledOpen]);
+  }, [controlledOpen, isDisabled]);
 
   // Watch for modal dismissal on Android (e.g., swipe down, backdrop tap)
   // and sync the controlled open state
@@ -244,7 +249,7 @@ const PlatformDropdownComponent = ({
     // @expo/ui's <Host> can't size to content, so an in-flow invisible copy of
     // the trigger sizes the wrapper while the Host overlays the real Menu.
     return (
-      <View>
+      <View pointerEvents={isDisabled ? "none" : "auto"}>
         <View pointerEvents='none' aria-hidden style={{ opacity: 0 }}>
           {trigger}
         </View>
@@ -372,15 +377,20 @@ const PlatformDropdownComponent = ({
         onClose={hideModal}
       />,
       {
-        snapPoints: ["90%"],
+        // No snap points: sized to its options, so a two-entry dropdown opens
+        // small and a long one stops at the shared ceiling.
         enablePanDownToClose: bottomSheetConfig?.enablePanDownToClose ?? true,
       },
     );
   };
 
   return (
-    <TouchableOpacity onPress={handlePress} activeOpacity={0.7}>
-      {trigger || <Text className='text-white'>Open Menu</Text>}
+    <TouchableOpacity
+      onPress={handlePress}
+      activeOpacity={0.7}
+      disabled={isDisabled}
+    >
+      {trigger || <Text className='text-white'>{t("common.open_menu")}</Text>}
     </TouchableOpacity>
   );
 };
@@ -393,6 +403,7 @@ export const PlatformDropdown = React.memo(
     return (
       prevProps.title === nextProps.title &&
       prevProps.open === nextProps.open &&
+      prevProps.disabled === nextProps.disabled &&
       prevProps.groups === nextProps.groups && // Reference equality (works because we memoize groups in caller)
       prevProps.trigger === nextProps.trigger // Reference equality
     );

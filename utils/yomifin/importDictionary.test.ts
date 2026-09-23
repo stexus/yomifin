@@ -59,8 +59,9 @@ function makeDb() {
   return {
     db,
     sink: { insertBatch: (rows: TermInsertRow[]) => insertMany(rows) },
-    clear: (title: string) =>
-      db.run("DELETE FROM terms WHERE dictionary = ?", [title]),
+    clear: (title: string) => {
+      db.run("DELETE FROM terms WHERE dictionary = ?", [title]);
+    },
     count: () =>
       (db.prepare("SELECT COUNT(*) c FROM terms").get() as { c: number }).c,
     runner: {
@@ -164,4 +165,4 @@ if (existsSync("./JMdict.zip")) {
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail === 0 ? 0 : 1);
+if (fail > 0) throw new Error(`${fail} regression checks failed`);

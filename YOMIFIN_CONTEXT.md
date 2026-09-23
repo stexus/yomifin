@@ -16,6 +16,27 @@ sideloaded, no App Store concerns.
   `utils/yomifin/LOOKUP_FIDELITY.md`.
 - Upstream Streamyfin conventions (bun, Jotai, expo-router, TV patterns): `CLAUDE.md`.
 
+## Upstream baseline — 2026-09-23
+
+The isolated `sync/upstream-develop-2026-09-23` branch integrates Streamyfin
+`develop` at `7fb905d1e887377ba80ca49b62582690729f77bf` (316 upstream commits).
+The original `yomifin` branch is the clean pre-sync checkpoint `a5349749`.
+This branch uses Expo SDK 57, React Native tvOS 0.86 and MPVKit 0.41.
+Merge validation and remaining physical-iPad gates are in `FEATURES.md`.
+
+The fork deliberately keeps iPhone/iPad on the RN player route, even if a stored
+preference selects Native: upstream's fully native chrome does not host the
+lookup/card overlays. `isNativePlayerSupported` in `utils/atoms/settings.ts`
+enforces this; the upstream TV/Android options remain available. Native iOS
+playback is now `MpvPlayerView → MPVPlayerEngine → MPVLayerRenderer`; preserve
+the subtitle-text delegate and capture/visibility/sub-seek forwarding through
+all three layers when syncing again.
+
+`bun run test:unit` runs repository unit tests through `scripts/test-unit.ts`,
+then the 19 standalone Yomifin/Yozora stages. Bare `bun test` also discovers the
+ignored local Yomitan checkout and standalone scripts that can end its process
+early. Use the package command for a complete result.
+
 ## Architecture
 
 ```
@@ -99,7 +120,7 @@ Key principles (violating these has bitten us before):
 | Yozora on-demand client (tab · sections · player · pure API/session) | `utils/yozora/`, `components/yozora/`, `app/(auth)/(tabs)/(yozora)/`, `app/(auth)/player/yozora-player.tsx`, Settings → Yozora; plan: `docs/yomifin/archive/YOZORA_MIGRATION_PLAN.md` |
 | Settings keys (`yomifin*`, `controlsDimOpacity`) | `utils/atoms/settings.ts` |
 | Settings screens: Dictionaries / Anki / Reader | `app/(auth)/(tabs)/(home)/settings/{dictionaries,anki,reader}/` |
-| Native mpv seams (subtitle text, sub-seek, capture) | `modules/mpv-player/` (`MpvPlayerView.swift`, `MPVLayerRenderer.swift`, module + TS ref) |
+| Native mpv seams (subtitle text, sub-seek, capture) | `modules/mpv-player/` (`MpvPlayerView.swift`, `PlayerEngine.swift`, `MPVLayerRenderer.swift`, module + TS ref) |
 | Native outlined subtitle text (TextKit stroke + char-index tap) | `modules/outlined-text/` (falls back to JS stacked copies on stale binary/non-iOS) |
 | Offline dictionary .db builder | `scripts/build-dictionary-db.ts` |
 | Regression guards | `./scripts/yomifin-test.sh` |
@@ -122,8 +143,10 @@ parity pass. The archived migration plan is historical, not a second tracker.
 - `onSubtitleText {text,start,end}` — live cue (drives the overlay + tap-time freeze).
 - `onProgress {position,duration,…}` (seconds; throttled) + `getCurrentPosition()`.
 - `setSubtitleTrack(id)` / `setSubtitleVisibility(bool)` / `disableSubtitles()`;
-  `getMpvSubtitleId` (`utils/jellyfin/subtitleUtils.ts`) maps Jellyfin→mpv track ids
-  (this mapping was once wrong and picked the wrong initial track — fixed, beware).
+  `applyMpvSubtitleSelection` / `resolveSubtitleTrack`
+  (`utils/jellyfin/subtitleUtils.ts`) match Jellyfin streams to real mpv track
+  identities. Do not restore the old positional `getMpvSubtitleId` mapping.
+  External Yomifin subtitle selection must bypass Jellyfin's track reselection.
 - `subSeek(±1)` — prev/next cue via mpv `sub-seek`.
 - `setSubtitleDelay(seconds)` — mpv `sub-delay` (positive = subs later); drives the
   online-subtitle sync UI. NB: `sub-text`'s start/end stay in the FILE timeline —
@@ -181,6 +204,10 @@ Facts that cost real time to learn (all reproducible via `app.json`/plugins —
   build phase).
 - **iPad UDID** for `expo run:ios --device`: `00008027-000641082130402E`
   (justfile default).
+- The SDK 57 `expo-modules-jsi@57.0.4` dependency needs the checked-in Bun patch
+  qualifying `Swift.abs` in its Date decoder to compile with Xcode 26.3. The
+  version-pinned patch is guarded by `scripts/check-patched-deps.ts`; revisit it
+  when that package changes. Do not leave an untracked node_modules-only fix.
 - The Nix shellHook deliberately defers to system Xcode (unsets
   `DEVELOPER_DIR`/`SDKROOT`, shadows Nix `xcrun`/GNU `tar`, clears `CC`/`CXX`,
   sets UTF-8 locale) — each of those guards a real failure; don't remove them.
@@ -193,60 +220,22 @@ Facts that cost real time to learn (all reproducible via `app.json`/plugins —
 - **RN can't read selection out of styled `<Text>`** — that's why popup selection
   is tap-to-select targets plus the ✎ plain-`TextInput` manual-trim fallback,
   not free text selection.
-- **RNGH + RN touch responders don't compose** over the player: mixing a
-  `GestureDetector` with the controls-dim `Pressable` broke both (two failed
-  attempts). The gesture layer is now ONE RNGH composition
-  (`GestureOverlay.tsx`: `Race(pan, Exclusive(twoFingerTap, doubleTap,
-  singleTap))`) whose child View doubles as the controls-dim layer — never add an
-  RN `Pressable`/`onTouch*` back into that surface. Two more traps hit on device:
-  (1) dim that view via `backgroundColor: rgba(…)`, NEVER via `opacity` — UIKit
-  hit-testing ignores views with alpha ≤ 0.01, so `opacity: 0` kills every gesture
-  the moment controls hide; (2) **RNGH cannot recognize multi-touch taps on iOS,
-  period** — its `RNTapHandler` counts taps per `touchesBegan` event, and on
-  device a two-finger tap registered as a single tap, a double tap, or nothing
-  across THREE different RNGH designs (`minPointers`, `Manual` touch observer,
-  paired taps-2/minPointers-2 recognizers — all failed). Two-finger tap is now a
-  NATIVE seam: `MpvPlayerView.swift` attaches a plain
-  `UITapGestureRecognizer(numberOfTouchesRequired: 2)` to the WINDOW (the RN
-  overlay sits above the mpv view, so window is the only place that sees the
-  touches) as a pure observer (no cancels/delays) → `onTwoFingerTap` event →
-  direct-player toggles play and calls `suppressTaps()`
-  (`components/video-player/controls/tapSuppression.ts`) so the RNGH single/
-  double-tap recognizers — which the same tap also satisfies — swallow it. The
-  RNGH recognizers recognize in the SAME instant as the native one, so the
-  suppression check races the bridge: GestureOverlay grace-delays tap execution
-  ~150ms (doubleTap always; singleTap only when double-tap seek is off, since
-  Exclusive already delays it ~280ms otherwise) and re-checks `tapsSuppressed()`
-  at fire time. UIKit recognizer-prevention history: on seam v1, RNGH's doubleTap
-  ACTIVATING failed the still-Possible native window tap (observed on device
-  2026-07-02 as two-finger → seek); seam v2 sets a UIGestureRecognizerDelegate
-  returning true from shouldRecognizeSimultaneouslyWith, making the native
-  recognizer un-preventable — which is what allowed deleting GestureOverlay's
-  RNGH two-finger recognizers for good (v2 verified working on device).
-  **Seam v3 (DEVICE-VERIFIED 2026-07-03):** ALL taps moved into the
-  dedicated `YomifinGestureSurface` native view (`modules/gesture-surface/`,
-  mounted by GestureOverlay where the dim View sits) — UIKit `require(toFail:)`
-  does the disambiguation, the mpv window recognizer is gone, and the whole
-  suppression/grace/nonce machinery survives ONLY as GestureOverlay's fallback
-  for stale (pre-v3) binaries and Android. UIKit's stock double-tap window
-  (~350ms) made single tap sluggish → surface apiVersion 2 replaces the double
-  recognizer with `TimedDoubleTapRecognizer` (force-fails after
-  `doubleTapMaxIntervalMs`, default 220ms). RNGH keeps ONLY the pan (worklet —
-  drag-anywhere-to-seek needs UI-thread SharedValue writes; taps and pans are
-  disjoint, so no coupling). NEVER
-  run a v1/seam-less binary with this JS: the Metro probe logs the seam VERSION
-  (`twoFingerTapSeamVersion`; v3 = current) — bump it on ANY native seam change
-  so stale installs are provable. Feedback bubble: on the fallback path
-  direct-player bumps
-  `twoFingerNonce` → Controls → GestureOverlay effect shows pause/play; on the
-  surface path GestureOverlay shows it directly. Also: a "full rebuild" that doesn't land on the iPad looks
-  exactly like a broken native feature — the `hasTwoFingerTapSeam` probe logs
-  PRESENT/MISSING in Metro on video load (plus GestureOverlay's own
-  "native gesture surface: PRESENT/MISSING" line); trust them over assumptions.
-  JS-side `onTouchesDown` events are also unreliable here (missed events,
-  `trackedTouchCount` warnings): don't build gesture logic on them, and don't
-  call `mgr.fail()` from `runOnJS(true)` callbacks (`setGestureState` is
-  worklet-only).
+- **RNGH + RN touch responders don't compose** over the player: never add RN
+  `Pressable`/`onTouch*` handlers to the gesture surface. Dim via
+  `backgroundColor: rgba(…)`, never `opacity` (UIKit ignores hit tests below
+  alpha 0.01). Current binaries use `YomifinGestureSurface` for single/double/
+  two-finger taps with UIKit `require(toFail:)` arbitration; surface API v2
+  gives double taps a 220ms window. RNGH owns the worklet pan and, after the
+  upstream merge, the optional hold-to-speed gesture. The hold must restore
+  speed on release/cancellation; its interaction with UIKit taps needs the
+  merge's device gate. Do not rebuild the gesture tree when only a callback
+  changes: actions read latest refs so a render cannot cancel an active hold.
+  RNGH multi-touch taps failed repeatedly on iOS; do not reintroduce them.
+  The old mpv window recognizer (seams 1/2), suppression/grace delay and nonce
+  path survive only for stale binaries/Android; seam 3 removed that recognizer.
+  Metro's seam version and surface PRESENT/MISSING probes identify the installed
+  binary. A build that never lands on the iPad looks like a broken native seam.
+  JS `onTouchesDown` was unreliable here, and `mgr.fail()` is worklet-only.
 - **Anki duplicate detection** is collection-wide by default and first-field-only:
   we send `duplicateScope:"deck"`; a new reading on an existing Expression still
   rejects (Anki semantics, not a bug).

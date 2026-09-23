@@ -31,7 +31,59 @@ Local validation: all 19 regression stages pass (including 29 Yozora cases);
 typecheck passes using the repo's existing Jellyseerr-submodule exclusion.
 The optional alass cross-check skips because `alass-cli` is not installed.
 Biome warnings found in the audit were unused parameters/suppressions and have
-been removed. Upstream synchronization is a separate branch after this cleanup.
+been removed. Cleanup committed as `a5349749` on `yomifin` before the separate
+upstream synchronization below.
+
+## Upstream sync — 2026-09-23
+
+Branch: `sync/upstream-develop-2026-09-23`. Target: Streamyfin `develop`
+`7fb905d1e887377ba80ca49b62582690729f77bf` (316 commits since the shared base;
+23 conflicted paths). The original `yomifin` branch stays at the clean audit
+checkpoint. This is an integration candidate; the Shipped rows below describe
+pre-merge verification, not a new device run.
+
+Resolved integration decisions:
+- Adopt Expo SDK 57 / RN tvOS 0.86 / MPVKit 0.41 and upstream's player engine,
+  subtitle identity matching, media-segment controls and TV/navigation changes.
+- Keep the RN player UI on iPhone/iPad so lookup and Anki remain reachable.
+  Forward decoded cues, subtitle visibility, cue seek and media capture through
+  upstream's new native engine; retain personal signing/config plugins. Capture
+  keeps a thread-safe URL/header snapshot after upstream removed its old fields.
+- Keep native UIKit taps and worklet drag-seek; compose upstream hold-to-speed
+  into that surface. Preserve Yozora, search scopes, overlay styles and settings.
+- Set external-subtitle refs before native loading so track-ready callbacks do
+  not select a Jellyfin track over a newly loaded online subtitle.
+- Add a one-line, version-pinned ExpoModulesJSI Swift compiler patch (`Swift.abs`)
+  for Xcode 26.3; retain upstream dependency versions otherwise.
+- Scope Bun unit-test discovery to repository files and run the fork's standalone
+  scripts separately, preventing ignored checkouts or early process exits from
+  producing incomplete test runs.
+
+Validation on this Mac:
+- 376 unit tests across 44 files and all 19 Yomifin/Yozora regression stages pass.
+- Typecheck (existing Jellyseerr exclusion), Biome and translation-key checks pass.
+- Frozen Bun install, version-pinned dependency-patch guard and staged whitespace
+  checks pass. Local Bun is 1.3.13; upstream CI pins 1.4.2.
+- iOS Metro/Hermes production export succeeds. iOS prebuild and CocoaPods install
+  succeed; use macOS `/usr/bin/tar` (the Nix shell supplies a shim), since GNU tar
+  warnings contaminate Expo's extracted plist and disable precompiled modules.
+- Full unsigned Debug build for generic iOS succeeds on Xcode 26.3 after the
+  ExpoModulesJSI patch and capture-source fix. Signing/install and runtime behavior
+  were not exercised. Android/TV native builds were not run.
+- Expo Doctor: **19/20**, with the package-version check still failing for 34
+  upstream-pinned dependencies (including Sentry 8.23 vs the SDK recommendation
+  7.11, and newer recommended Expo patches). Dependency alignment remains a
+  follow-up; `bun run test` is therefore not fully green. The ignored Android
+  project also needs a fresh prebuild before Android work. Optional alass
+  cross-check still skips because `alass-cli` is absent.
+
+**Required before treating the sync as device-verified:** rebuild/install the
+new binary and exercise Jellyfin + Yozora playback/resume; embedded text/bitmap
+and online subtitles (selection, delay, server sync); lookup pause/resume and an
+Anki card with image/audio; single/double/two-finger taps, drag-seek, hold-speed
+release/cancel; episode navigation and reader/audio/subtitle menus. The existing
+pending gates below remain pending. Android/TV runtime checks are also not part
+of this local audit.
 
 ## Shipped
 
@@ -170,9 +222,9 @@ use the semi-official CLI PKCE flows.
   (request builders + SSE delta parsers, fixture-stream tests). Add a
   yomifin-test.sh step.
 - Device-only: `aiAuth.ts` (SecureStore, web-browser login, refresh) and
-  `aiClient.ts` (streaming via `expo/fetch` — SDK 56 winter runtime supports
-  ReadableStream response bodies; DEVICE-VERIFY early, fallback = non-streaming
-  single response).
+  `aiClient.ts` (streaming via `expo/fetch`; verify ReadableStream response
+  bodies on the current SDK 57 binary early, fallback = non-streaming single
+  response).
 - UI: `components/yomifin/AiAssistSheet.tsx`, mounted inside `YomifinErrorBoundary`,
   zIndex 100001 (above popup per the z-order contract).
 

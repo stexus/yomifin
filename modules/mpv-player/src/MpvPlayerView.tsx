@@ -2,7 +2,11 @@ import { requireNativeView } from "expo";
 import * as React from "react";
 import { useImperativeHandle, useRef } from "react";
 
-import { MpvPlayerViewProps, MpvPlayerViewRef } from "./MpvPlayer.types";
+import {
+  MpvPlayerViewProps,
+  MpvPlayerViewRef,
+  SubtitleStyleConfig,
+} from "./MpvPlayer.types";
 
 const NativeView: React.ComponentType<MpvPlayerViewProps & { ref?: any }> =
   requireNativeView("MpvPlayer");
@@ -20,6 +24,9 @@ export default React.forwardRef<MpvPlayerViewRef, MpvPlayerViewProps>(
       pause: async () => {
         await nativeRef.current?.pause();
       },
+      destroy: async () => {
+        await nativeRef.current?.destroy();
+      },
       seekTo: async (position: number) => {
         await nativeRef.current?.seekTo(position);
       },
@@ -31,6 +38,9 @@ export default React.forwardRef<MpvPlayerViewRef, MpvPlayerViewProps>(
       },
       getSpeed: async () => {
         return await nativeRef.current?.getSpeed();
+      },
+      setMute: async (muted: boolean) => {
+        await nativeRef.current?.setMute(muted);
       },
       isPaused: async () => {
         return await nativeRef.current?.isPaused();
@@ -82,14 +92,14 @@ export default React.forwardRef<MpvPlayerViewRef, MpvPlayerViewProps>(
       subSeek: async (delta: number) => {
         await nativeRef.current?.subSeek(delta);
       },
-      setSubtitleDelay: async (seconds: number) => {
-        await nativeRef.current?.setSubtitleDelay(seconds);
-      },
       setSubtitlePosition: async (position: number) => {
         await nativeRef.current?.setSubtitlePosition(position);
       },
       setSubtitleScale: async (scale: number) => {
         await nativeRef.current?.setSubtitleScale(scale);
+      },
+      setSubtitleDelay: async (seconds: number) => {
+        await nativeRef.current?.setSubtitleDelay(seconds);
       },
       setSubtitleMarginY: async (margin: number) => {
         await nativeRef.current?.setSubtitleMarginY(margin);
@@ -102,6 +112,9 @@ export default React.forwardRef<MpvPlayerViewRef, MpvPlayerViewProps>(
       },
       setSubtitleFontSize: async (size: number) => {
         await nativeRef.current?.setSubtitleFontSize(size);
+      },
+      setSubtitleStyle: async (style: SubtitleStyleConfig) => {
+        await nativeRef.current?.setSubtitleStyle(style);
       },
       setSubtitleBackgroundColor: async (color: string) => {
         await nativeRef.current?.setSubtitleBackgroundColor(color);

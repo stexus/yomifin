@@ -14,11 +14,13 @@ import { Text } from "@/components/common/Text";
 import { Loader } from "@/components/Loader";
 import { useControlsSafeAreaInsets } from "@/hooks/useControlsSafeAreaInsets";
 import { useSettings } from "@/utils/atoms/settings";
-import { chapterMarkers, chapterNameAt } from "@/utils/chapters";
+import {
+  chapterMarkers,
+  chapterNameAt,
+  hasChapterMarkers,
+} from "@/utils/chapters";
 import { formatTimeString } from "@/utils/time";
 import DropdownView from "./dropdown/DropdownView";
-import NextEpisodeCountDownButton from "./NextEpisodeCountDownButton";
-import SkipButton from "./SkipButton";
 import { TrickplayBubble } from "./TrickplayBubble";
 
 // Sleek progress bar height (thinner than the old 10px) + chapter tick height.
@@ -36,15 +38,6 @@ interface BottomControlsProps {
   showRemoteBubble: boolean;
   currentTime: number;
   remainingTime: number;
-  showSkipButton: boolean;
-  showSkipCreditButton: boolean;
-  hasContentAfterCredits: boolean;
-  skipIntro: () => void;
-  skipCredit: () => void;
-  nextItem?: BaseItemDto | null;
-  previousItem?: BaseItemDto | null;
-  handleNextEpisodeAutoPlay: () => void;
-  handleNextEpisodeManual: () => void;
   handleControlsInteraction: () => void;
 
   // ---- control cluster (below the bar) ----
@@ -53,9 +46,14 @@ interface BottomControlsProps {
   togglePlay: () => void;
   handleSkipBackward: () => void;
   handleSkipForward: () => void;
+  onOpenSubtitleScale?: () => void;
+  subtitleDelay?: number;
+  onSubtitleDelayChange?: (seconds: number) => void;
   showSubtitleNav?: boolean;
   onPrevSubtitle?: () => void;
   onNextSubtitle?: () => void;
+  previousItem?: BaseItemDto | null;
+  nextItem?: BaseItemDto | null;
   goToPreviousItem: () => void;
   goToNextItem: (options: { isAutoPlay?: boolean }) => void;
 
@@ -102,24 +100,20 @@ export const BottomControls: FC<BottomControlsProps> = ({
   showRemoteBubble,
   currentTime,
   remainingTime,
-  showSkipButton,
-  showSkipCreditButton,
-  hasContentAfterCredits,
-  skipIntro,
-  skipCredit,
-  nextItem,
-  previousItem,
-  handleNextEpisodeAutoPlay,
-  handleNextEpisodeManual,
   handleControlsInteraction,
   isPlaying,
   isBuffering,
   togglePlay,
   handleSkipBackward,
   handleSkipForward,
+  onOpenSubtitleScale,
+  subtitleDelay,
+  onSubtitleDelayChange,
   showSubtitleNav = false,
   onPrevSubtitle,
   onNextSubtitle,
+  previousItem,
+  nextItem,
   goToPreviousItem,
   goToNextItem,
   min,
@@ -136,8 +130,8 @@ export const BottomControls: FC<BottomControlsProps> = ({
   trickplayInfo,
   time,
 }) => {
-  const { settings } = useSettings();
   const { t } = useTranslation();
+  const { settings } = useSettings();
   const insets = useControlsSafeAreaInsets();
   const [chapterListVisible, setChapterListVisible] = useState(false);
   // Right-hand time label cycles: 0 = total length, 1 = -remaining, 2 = ends-at.
@@ -147,7 +141,10 @@ export const BottomControls: FC<BottomControlsProps> = ({
     () => chapterMarkers(chapters, durationMs),
     [chapters, durationMs],
   );
-  const hasChapters = chapterMarkerList.length > 1;
+  const hasChapters = useMemo(
+    () => hasChapterMarkers(chapters, durationMs),
+    [chapters, durationMs],
+  );
 
   const currentChapterName = useMemo(
     () => (hasChapters ? chapterNameAt(currentTime, chapters) : null),
@@ -206,43 +203,19 @@ export const BottomControls: FC<BottomControlsProps> = ({
         style={{ minHeight: 40 }}
       >
         <View className='flex flex-row items-center' pointerEvents='auto'>
-          {!Platform.isTV && <DropdownView variant='subtitles' />}
+          {!Platform.isTV && (
+            <DropdownView
+              variant='subtitles'
+              onOpenSubtitleScale={onOpenSubtitleScale}
+              subtitleDelay={subtitleDelay}
+              onSubtitleDelayChange={onSubtitleDelayChange}
+            />
+          )}
           {!Platform.isTV && <DropdownView variant='audio' />}
         </View>
 
         <View style={{ flex: 1 }} />
-
-        <View
-          className='flex flex-row items-center space-x-2 shrink-0'
-          pointerEvents='auto'
-        >
-          <SkipButton
-            showButton={showSkipButton}
-            onPress={skipIntro}
-            buttonText='Skip Intro'
-          />
-          <SkipButton
-            showButton={
-              showSkipCreditButton && (hasContentAfterCredits || !nextItem)
-            }
-            onPress={skipCredit}
-            buttonText='Skip Credits'
-          />
-          {settings.autoPlayNextEpisode !== false &&
-            (settings.maxAutoPlayEpisodeCount.value === -1 ||
-              settings.autoPlayEpisodeCount <
-                settings.maxAutoPlayEpisodeCount.value) && (
-              <NextEpisodeCountDownButton
-                show={
-                  !nextItem
-                    ? false
-                    : (showSkipCreditButton && !hasContentAfterCredits) ||
-                      remainingTime < 10000
-                }
-                onFinish={handleNextEpisodeAutoPlay}
-                onPress={handleNextEpisodeManual}
-              />
-            )}
+        <View className='flex flex-row items-center' pointerEvents='auto'>
           {hasChapters && (
             <Pressable
               onPress={() => setChapterListVisible(true)}

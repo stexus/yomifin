@@ -8,15 +8,15 @@ import {
 } from "@gorhom/bottom-sheet";
 import type { BottomSheetModalMethods } from "@gorhom/bottom-sheet/lib/typescript/types";
 import { useQuery } from "@tanstack/react-query";
-import { Image } from "expo-image";
 import { useLocalSearchParams, useNavigation } from "expo-router";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Platform, TouchableOpacity, View } from "react-native";
+import { Platform, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
 import { Button } from "@/components/Button";
+import { Image } from "@/components/common/ServerImage";
 import { Text } from "@/components/common/Text";
 import { GenreTags } from "@/components/GenreTags";
 import Cast from "@/components/jellyseerr/Cast";
@@ -30,6 +30,7 @@ import { JellyserrRatings } from "@/components/Ratings";
 import JellyseerrSeasons from "@/components/series/JellyseerrSeasons";
 import { ItemActions } from "@/components/series/SeriesActions";
 import useRouter from "@/hooks/useAppRouter";
+import { useDismissKeyboardOnLeave } from "@/hooks/useDismissKeyboardOnLeave";
 import { useJellyseerr } from "@/hooks/useJellyseerr";
 import { useJellyseerrCanRequest } from "@/utils/_jellyseerr/useJellyseerrCanRequest";
 import { ANIME_KEYWORD_ID } from "@/utils/jellyseerr/server/api/themoviedb/constants";
@@ -53,9 +54,11 @@ import type {
   TvResult,
 } from "@/utils/jellyseerr/server/models/Search";
 import type { TvDetails } from "@/utils/jellyseerr/server/models/Tv";
+import { writeErrorLog } from "@/utils/log";
 
 // Mobile page component
 const MobilePage: React.FC = () => {
+  useDismissKeyboardOnLeave();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
   const { t } = useTranslation();
@@ -163,6 +166,12 @@ const MobilePage: React.FC = () => {
           setIssueType(undefined);
           setIssueMessage(undefined);
           bottomSheetModalRef?.current?.close();
+        })
+        // The response interceptor already logs and reports the failure with
+        // its route; an uncaught rejection here would re-report it as a
+        // stackless unhandledrejection event.
+        .catch((error) => {
+          writeErrorLog("Jellyseerr submitIssue failed", String(error));
         });
     }
   }, [jellyseerrApi, details, result, issueType, issueMessage]);
@@ -235,13 +244,7 @@ const MobilePage: React.FC = () => {
   useEffect(() => {
     if (details) {
       navigation.setOptions({
-        headerRight: () => (
-          <TouchableOpacity
-            className={`rounded-full pl-1.5 ${Platform.OS === "android" ? "" : "bg-neutral-800/80"}`}
-          >
-            <ItemActions item={details} />
-          </TouchableOpacity>
-        ),
+        headerRight: () => <ItemActions item={details} />,
       });
     }
   }, [details]);

@@ -1,4 +1,4 @@
-import { Feather, Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import type {
   BaseItemDto,
   BaseItemDtoQueryResult,
@@ -23,10 +23,12 @@ import {
   ScrollView,
   View,
 } from "react-native";
-import { Pressable } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button } from "@/components/Button";
+import { HeaderButton } from "@/components/common/HeaderButton";
+import { HeaderIcon } from "@/components/common/HeaderIcon";
 import { Text } from "@/components/common/Text";
+import { HomeHeroCarousel } from "@/components/home/HomeHeroCarousel";
 import { InfiniteScrollingCollectionList } from "@/components/home/InfiniteScrollingCollectionList";
 import { StreamystatsPromotedWatchlists } from "@/components/home/StreamystatsPromotedWatchlists";
 import { StreamystatsRecommendations } from "@/components/home/StreamystatsRecommendations";
@@ -39,7 +41,11 @@ import { useRefreshLibraryOnFocus } from "@/hooks/useRefreshLibraryOnFocus";
 import { useInvalidatePlaybackProgressCache } from "@/hooks/useRevalidatePlaybackProgressCache";
 import { useDownload } from "@/providers/DownloadProvider";
 import { useIntroSheet } from "@/providers/IntroSheetProvider";
-import { apiAtom, userAtom } from "@/providers/JellyfinProvider";
+import {
+  apiAtom,
+  pendingAccountSaveAtom,
+  userAtom,
+} from "@/providers/JellyfinProvider";
 import { SortByOption, SortOrderOption } from "@/utils/atoms/filters";
 import { useSettings } from "@/utils/atoms/settings";
 import { eventBus } from "@/utils/eventBus";
@@ -89,6 +95,9 @@ const HomeMobile = () => {
   const invalidateCache = useInvalidatePlaybackProgressCache();
   const [loadedSections, setLoadedSections] = useState<Set<string>>(new Set());
   const { showIntro } = useIntroSheet();
+  // Gate the intro so it can't steal presentation from the post-login
+  // save-account sheet (both are BottomSheetModals): wait until no save is pending.
+  const pendingAccountSave = useAtomValue(pendingAccountSaveAtom);
 
   // Fallback refresh for newly added content when returning to the home screen
   // (primary path is the LibraryChanged WebSocket event).
@@ -97,7 +106,9 @@ const HomeMobile = () => {
   // Show intro modal on first launch
   useEffect(() => {
     const hasShownIntro = storage.getBoolean("hasShownIntro");
-    if (!hasShownIntro) {
+    // Defer while the save-account sheet is up; this effect re-runs and schedules
+    // the intro once the sheet is dismissed (pendingAccountSaveAtom cleared).
+    if (!hasShownIntro && !pendingAccountSave) {
       const timer = setTimeout(() => {
         showIntro();
       }, 1000);
@@ -106,7 +117,7 @@ const HomeMobile = () => {
         clearTimeout(timer);
       };
     }
-  }, [showIntro]);
+  }, [showIntro, pendingAccountSave]);
 
   useEffect(() => {
     if (isConnected && !prevIsConnected.current) {
@@ -129,18 +140,17 @@ const HomeMobile = () => {
     }
     navigation.setOptions({
       headerLeft: () => (
-        <Pressable
+        <HeaderButton
+          placement='left'
           onPress={() => {
             router.push("/(auth)/downloads");
           }}
-          style={{ marginRight: Platform.OS === "android" ? 16 : 0 }}
         >
-          <Feather
-            name='download'
-            color={hasDownloads ? Colors.primary : "white"}
-            size={24}
+          <HeaderIcon
+            name='downloads'
+            tintColor={hasDownloads ? Colors.primary : "white"}
           />
-        </Pressable>
+        </HeaderButton>
       ),
     });
   }, [navigation, router, hasDownloads]);
@@ -221,22 +231,33 @@ const HomeMobile = () => {
       queryKey,
       queryFn: async ({ pageParam = 0 }) => {
         if (!api) return [];
-        // getLatestMedia doesn't support startIndex, so we fetch all and slice client-side
-        const allData =
-          (
-            await getUserLibraryApi(api).getLatestMedia({
-              userId: user?.Id,
-              limit: 10,
-              fields: ["PrimaryImageAspectRatio"],
-              imageTypeLimit: 1,
-              enableImageTypes: ["Primary", "Backdrop", "Thumb"],
-              includeItemTypes,
-              parentId,
-            })
-          ).data || [];
-
-        // Simulate pagination by slicing
-        return allData.slice(pageParam, pageParam + pageSize);
+        // Use getItems (not getLatestMedia) so we get item-level results
+        // filtered by type from a specific library. getLatestMedia is
+        // episode-oriented and groups results, which drops Series when
+        // combined with a parentId + includeItemTypes filter.
+        //
+        // The specific reason for this is jellyfin 12.0 returns episodes, seasons, or shows,
+        // but we only handle shows in our recently added in [shows] section. So we need to filter by type at the item level.
+        //
+        // For Series we sort by DateLastContentAdded so shows bubble up when
+        // a new episode is added (series cards for new episodes, matching how
+        // Jellyfin's "Latest" row worked pre-12.0). Movies use DateCreated.
+        const response = await getItemsApi(api).getItems({
+          userId: user?.Id,
+          parentId,
+          includeItemTypes,
+          recursive: true,
+          sortBy: includeItemTypes.includes("Series")
+            ? ["DateLastContentAdded"]
+            : ["DateCreated"],
+          sortOrder: ["Descending"],
+          startIndex: pageParam,
+          limit: pageSize,
+          fields: ["PrimaryImageAspectRatio"],
+          imageTypeLimit: 1,
+          enableImageTypes: ["Primary", "Backdrop", "Thumb"],
+        });
+        return response.data.Items || [];
       },
       type: "InfiniteScrollingCollectionList",
       pageSize,
@@ -250,9 +271,7 @@ const HomeMobile = () => {
 
     const latestMediaViews = collections.map((c) => {
       const includeItemTypes: BaseItemKind[] =
-        c.CollectionType === "tvshows" || c.CollectionType === "movies"
-          ? []
-          : ["Movie"];
+        c.CollectionType === "tvshows" ? ["Series"] : ["Movie"];
       const title = t("home.recently_added_in", { libraryName: c.Name });
       const queryKey: string[] = [
         "home",
@@ -300,7 +319,7 @@ const HomeMobile = () => {
                 getItemsApi(api).getResumeItems({
                   userId: user.Id,
                   enableImageTypes: ["Primary", "Backdrop", "Thumb"],
-                  includeItemTypes: ["Movie", "Series", "Episode"],
+                  includeItemTypes: ["Movie", "Episode"],
                   startIndex: 0,
                   limit: 20,
                 }),
@@ -339,7 +358,7 @@ const HomeMobile = () => {
                 await getItemsApi(api).getResumeItems({
                   userId: user.Id,
                   enableImageTypes: ["Primary", "Backdrop", "Thumb"],
-                  includeItemTypes: ["Movie", "Series", "Episode"],
+                  includeItemTypes: ["Movie", "Episode"],
                   startIndex: pageParam,
                   limit: 10,
                 })
@@ -601,6 +620,7 @@ const HomeMobile = () => {
         className='flex flex-col space-y-4'
         style={{ paddingTop: Platform.OS === "android" ? 10 : 0 }}
       >
+        <HomeHeroCarousel />
         {sections.map((section, index) => {
           // Render Streamystats sections after Recently Added sections
           // For default sections: place after Recently Added, before Suggested Movies (if present)

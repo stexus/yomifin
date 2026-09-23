@@ -1,9 +1,7 @@
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
-import type {
-  BaseItemDto,
-  MediaSourceInfo,
-} from "@jellyfin/sdk/lib/generated-client";
+import type { BaseItemDto } from "@jellyfin/sdk/lib/generated-client";
 import { type FC, useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Platform, TouchableOpacity, View } from "react-native";
 import useRouter from "@/hooks/useAppRouter";
 import { useControlsSafeAreaInsets } from "@/hooks/useControlsSafeAreaInsets";
@@ -13,14 +11,13 @@ import { OrientationLock } from "@/packages/expo-screen-orientation";
 import { HEADER_LAYOUT, ICON_SIZES } from "./constants";
 import DropdownView from "./dropdown/DropdownView";
 import { PlaybackSpeedScope } from "./utils/playback-speed-settings";
+import { shouldShowPlayerMenu } from "./utils/shouldShowPlayerMenu";
 import { type AspectRatio } from "./VideoScalingModeSelector";
 import { ZoomToggle } from "./ZoomToggle";
 
 interface HeaderControlsProps {
   item: BaseItemDto;
   showControls: boolean;
-  offline: boolean;
-  mediaSource?: MediaSourceInfo | null;
   startPictureInPicture?: () => Promise<void>;
   switchOnEpisodeMode: () => void;
   aspectRatio?: AspectRatio;
@@ -29,18 +26,19 @@ interface HeaderControlsProps {
   // Playback speed props
   playbackSpeed?: number;
   setPlaybackSpeed?: (speed: number, scope: PlaybackSpeedScope) => void;
+  subtitleDelay?: number;
+  onSubtitleDelayChange?: (seconds: number) => void;
   // Technical info props
   showTechnicalInfo?: boolean;
   onToggleTechnicalInfo?: () => void;
   /** Extra control rendered next to the (leftmost) dropdown — yomifin profile pill. */
   leftSlot?: React.ReactNode;
+  onOpenSubtitleScale?: () => void;
 }
 
 export const HeaderControls: FC<HeaderControlsProps> = ({
   item,
   showControls,
-  offline,
-  mediaSource,
   startPictureInPicture,
   switchOnEpisodeMode,
   aspectRatio: _aspectRatio = "default",
@@ -48,10 +46,14 @@ export const HeaderControls: FC<HeaderControlsProps> = ({
   onZoomToggle,
   playbackSpeed = 1.0,
   setPlaybackSpeed,
+  subtitleDelay = 0,
+  onSubtitleDelayChange,
   showTechnicalInfo = false,
   onToggleTechnicalInfo,
   leftSlot,
+  onOpenSubtitleScale,
 }) => {
+  const { t } = useTranslation();
   const router = useRouter();
   const insets = useControlsSafeAreaInsets();
   const lightHapticFeedback = useHaptic("light");
@@ -106,14 +108,17 @@ export const HeaderControls: FC<HeaderControlsProps> = ({
         className='mr-auto flex flex-row items-center'
         pointerEvents='box-none'
       >
-        {!Platform.isTV && (!offline || !mediaSource?.TranscodingUrl) && (
+        {shouldShowPlayerMenu({ isTV: Platform.isTV }) && (
           <View pointerEvents='auto'>
             <DropdownView
               variant='menu'
               playbackSpeed={playbackSpeed}
               setPlaybackSpeed={setPlaybackSpeed}
+              subtitleDelay={subtitleDelay}
+              onSubtitleDelayChange={onSubtitleDelayChange}
               showTechnicalInfo={showTechnicalInfo}
               onToggleTechnicalInfo={onToggleTechnicalInfo}
+              onOpenSubtitleScale={onOpenSubtitleScale}
             />
           </View>
         )}
@@ -132,8 +137,8 @@ export const HeaderControls: FC<HeaderControlsProps> = ({
             onPress={toggleOrientation}
             disabled={isTogglingOrientation}
             className='aspect-square flex flex-col rounded-xl items-center justify-center p-2'
-            accessibilityLabel='Toggle screen orientation'
-            accessibilityHint='Toggles the screen orientation between portrait and landscape'
+            accessibilityLabel={t("accessibility.toggle_orientation")}
+            accessibilityHint={t("accessibility.toggle_orientation_hint")}
           >
             <MaterialIcons
               name='screen-rotation'

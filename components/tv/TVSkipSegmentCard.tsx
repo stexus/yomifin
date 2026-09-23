@@ -17,12 +17,32 @@ import Animated, {
 } from "react-native-reanimated";
 import { Text } from "@/components/common/Text";
 import { scaleSize } from "@/utils/scaleSize";
+import { SEGMENT_SKIP_KEY, type SegmentTypeName } from "@/utils/segments";
 import { useTVFocusAnimation } from "./hooks/useTVFocusAnimation";
+
+export type TVSkipSegmentType =
+  | "intro"
+  | "credits"
+  | "outro"
+  | "recap"
+  | "commercial"
+  | "preview";
+
+// `credits` is the historical name for Jellyfin's `Outro` type; both resolve to
+// the same display name so the card never disagrees with the other players.
+const SEGMENT_NAME_BY_CARD_TYPE: Record<TVSkipSegmentType, SegmentTypeName> = {
+  intro: "Intro",
+  credits: "Outro",
+  outro: "Outro",
+  recap: "Recap",
+  commercial: "Commercial",
+  preview: "Preview",
+};
 
 export interface TVSkipSegmentCardProps {
   show: boolean;
   onPress: () => void;
-  type: "intro" | "credits";
+  type: TVSkipSegmentType;
   /** Whether controls are visible - affects card position */
   controlsVisible?: boolean;
   /** Callback ref setter for focus guide destination pattern */
@@ -33,9 +53,15 @@ export interface TVSkipSegmentCardProps {
   playButtonRef?: View | null;
 }
 
-// Position constants - same as TVNextEpisodeCountdown (they're mutually exclusive)
-const BOTTOM_WITH_CONTROLS = 300;
-const BOTTOM_WITHOUT_CONTROLS = 120;
+// Position constants — kept in sync with TVNextEpisodeCountdown (the two
+// are mutually exclusive). Scaled to the screen so 4K TVs don't get a
+// card that floats far above the controls.
+//
+// BOTTOM_WITH_CONTROLS is tuned to sit just above the bottom controls bar
+// (metadata + seekbar + buttons ≈ 200px on 1080p). Previously 300, which
+// left the card hovering ~100px above the controls.
+const BOTTOM_WITH_CONTROLS = scaleSize(220);
+const BOTTOM_WITHOUT_CONTROLS = scaleSize(120);
 
 export const TVSkipSegmentCard: FC<TVSkipSegmentCardProps> = ({
   show,
@@ -72,8 +98,7 @@ export const TVSkipSegmentCard: FC<TVSkipSegmentCardProps> = ({
     bottom: bottomPosition.value,
   }));
 
-  const labelText =
-    type === "intro" ? t("player.skip_intro") : t("player.skip_credits");
+  const labelText = t(SEGMENT_SKIP_KEY[SEGMENT_NAME_BY_CARD_TYPE[type]]);
 
   if (!show) return null;
 

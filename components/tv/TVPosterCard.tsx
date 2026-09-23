@@ -1,6 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
 import type { BaseItemDto } from "@jellyfin/sdk/lib/generated-client/models";
-import { Image } from "expo-image";
 import { useAtomValue } from "jotai";
 import React, { useMemo, useRef, useState } from "react";
 import {
@@ -11,8 +10,12 @@ import {
   type ViewStyle,
 } from "react-native";
 import { ProgressBar } from "@/components/common/ProgressBar";
+import { Image } from "@/components/common/ServerImage";
 import { Text } from "@/components/common/Text";
-import { WatchedIndicator } from "@/components/WatchedIndicator";
+import {
+  UnplayedCountBadge,
+  WatchedIndicator,
+} from "@/components/WatchedIndicator";
 import { useScaledTVPosterSizes } from "@/constants/TVPosterSizes";
 import { useScaledTVTypography } from "@/constants/TVTypography";
 import {
@@ -34,6 +37,8 @@ export interface TVPosterCardProps {
   showProgress?: boolean;
   /** Show watched indicator - default: true */
   showWatchedIndicator?: boolean;
+  /** Show the show name - default: false */
+  displayShowName?: boolean;
 
   // Focus props
   hasTVPreferredFocus?: boolean;
@@ -69,6 +74,9 @@ export interface TVPosterCardProps {
 
   /** Custom image URL getter - if not provided, uses smart URL logic */
   imageUrlGetter?: (item: BaseItemDto) => string | undefined;
+
+  /** For horizontal episodes, prefer the episode's own image over the series thumb */
+  preferEpisodeImage?: boolean;
 }
 
 /**
@@ -90,6 +98,7 @@ export const TVPosterCard: React.FC<TVPosterCardProps> = ({
   showText = true,
   showProgress = true,
   showWatchedIndicator = true,
+  displayShowName = false,
   hasTVPreferredFocus = false,
   disabled = false,
   focusableWhenDisabled = false,
@@ -105,6 +114,7 @@ export const TVPosterCard: React.FC<TVPosterCardProps> = ({
   glowColor = "white",
   scaleAmount = 1.05,
   imageUrlGetter,
+  preferEpisodeImage = false,
 }) => {
   const api = useAtomValue(apiAtom);
   const posterSizes = useScaledTVPosterSizes();
@@ -136,9 +146,18 @@ export const TVPosterCard: React.FC<TVPosterCardProps> = ({
     if (orientation === "horizontal") {
       // Episode: prefer series thumb image for consistent look (like hero section)
       if (item.Type === "Episode") {
-        // First try parent/series thumb (horizontal series artwork)
-        if (item.ParentBackdropItemId && item.ParentThumbImageTag) {
-          return `${api.basePath}/Items/${item.ParentBackdropItemId}/Images/Thumb?fillHeight=700&quality=80&tag=${item.ParentThumbImageTag}`;
+        // Opt-in: use the episode's own image instead of the series thumb.
+        if (preferEpisodeImage && item.ImageTags?.Primary) {
+          return `${api.basePath}/Items/${item.Id}/Images/Primary?fillHeight=600&quality=80&tag=${item.ImageTags.Primary}`;
+        }
+        // First try parent/series thumb (horizontal series artwork).
+        // Matched pair: ParentThumbItemId owns the Thumb tag, not ParentBackdropItemId.
+        if (item.ParentThumbItemId && item.ParentThumbImageTag) {
+          return `${api.basePath}/Items/${item.ParentThumbItemId}/Images/Thumb?fillHeight=700&quality=80&tag=${item.ParentThumbImageTag}`;
+        }
+        const parentBackdropTag = item.ParentBackdropImageTags?.[0];
+        if (item.ParentBackdropItemId && parentBackdropTag) {
+          return `${api.basePath}/Items/${item.ParentBackdropItemId}/Images/Backdrop?fillHeight=700&quality=80&tag=${parentBackdropTag}`;
         }
         // Fall back to episode's own primary image
         if (item.ImageTags?.Primary) {
@@ -170,7 +189,7 @@ export const TVPosterCard: React.FC<TVPosterCardProps> = ({
       item,
       width: width * 2, // 2x for quality on large screens
     });
-  }, [api, item, orientation, width, imageUrlGetter]);
+  }, [api, item, orientation, width, imageUrlGetter, preferEpisodeImage]);
 
   // Progress calculation
   const progress = useMemo(() => {
@@ -224,6 +243,14 @@ export const TVPosterCard: React.FC<TVPosterCardProps> = ({
       const duration = item.RunTimeTicks
         ? runtimeTicksToMinutes(item.RunTimeTicks)
         : null;
+      const textColor = displayShowName ? "#9CA3AF" : "#FFFFFF";
+      // When the show name is the title, the episode name takes the slot the
+      // duration usually occupies. Gate on what is actually rendered, so an
+      // item without RunTimeTicks does not silently drop its episode name.
+      // Without a SeriesName the title already falls back to the episode name,
+      // so drop the trailing copy rather than printing the same name twice.
+      const episodeNameSlot = item.SeriesName ? item.Name : null;
+      const trailingText = displayShowName ? episodeNameSlot : duration;
 
       return (
         <View
@@ -237,20 +264,27 @@ export const TVPosterCard: React.FC<TVPosterCardProps> = ({
             <Text
               style={{
                 fontSize: typography.callout,
-                color: "#FFFFFF",
+                color: textColor,
                 fontWeight: "500",
               }}
             >
               {episodeLabel}
             </Text>
           )}
-          {duration && (
+          {trailingText && (
             <>
-              <Text style={{ color: "#FFFFFF", fontSize: typography.callout }}>
+              <Text style={{ fontSize: typography.callout, color: textColor }}>
                 •
               </Text>
-              <Text style={{ fontSize: typography.callout, color: "#FFFFFF" }}>
-                {duration}
+              <Text
+                numberOfLines={1}
+                style={{
+                  fontSize: typography.callout,
+                  color: textColor,
+                  flexShrink: 1,
+                }}
+              >
+                {trailingText}
               </Text>
             </>
           )}
@@ -427,6 +461,12 @@ export const TVPosterCard: React.FC<TVPosterCardProps> = ({
           />
           {PlayButtonOverlay}
           {NowPlayingBadge}
+          {/*
+            The glass view draws the watched checkmark natively but cannot show
+            an unplayed-episode count, so render it as an RN overlay on top.
+            Returns null when not applicable (non-series / fully watched).
+          */}
+          {showWatchedIndicator && <UnplayedCountBadge item={item} />}
         </View>
       );
     }
@@ -448,8 +488,8 @@ export const TVPosterCard: React.FC<TVPosterCardProps> = ({
         <Image
           placeholder={{ blurhash }}
           key={item.Id}
-          id={item.Id}
           source={{ uri: imageUrl }}
+          recyclingKey={item.Id}
           cachePolicy='memory-disk'
           contentFit='cover'
           style={{
@@ -459,7 +499,7 @@ export const TVPosterCard: React.FC<TVPosterCardProps> = ({
         />
         {PlayButtonOverlay}
         {NowPlayingBadge}
-        <WatchedIndicator item={item} />
+        {showWatchedIndicator && <WatchedIndicator item={item} />}
         <ProgressBar item={item} />
       </View>
     );
@@ -471,9 +511,12 @@ export const TVPosterCard: React.FC<TVPosterCardProps> = ({
 
     // Episode: show episode name as title
     if (item.Type === "Episode") {
+      // SeriesName is absent, or empty, on some episode payloads; keep a title
+      // either way.
+      const title = displayShowName ? item.SeriesName || item.Name : item.Name;
       return (
         <Text
-          numberOfLines={2}
+          numberOfLines={displayShowName ? 1 : 2}
           style={{
             fontSize: typography.callout,
             color: "#FFFFFF",
@@ -481,7 +524,7 @@ export const TVPosterCard: React.FC<TVPosterCardProps> = ({
             fontWeight: "500",
           }}
         >
-          {item.Name}
+          {title}
         </Text>
       );
     }
@@ -575,7 +618,7 @@ export const TVPosterCard: React.FC<TVPosterCardProps> = ({
         <View
           style={{ marginTop: scaleSize(12), paddingHorizontal: scaleSize(4) }}
         >
-          {item.Type === "Episode" ? (
+          {item.Type === "Episode" && !displayShowName ? (
             <>
               {renderSubtitle()}
               {renderTitle()}

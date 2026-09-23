@@ -6,16 +6,14 @@ package-lock.json
 # Expo and React Native Build Artifacts
 .expo/
 dist/
+dist-web/
+desktop/
 web-build/
 .tsbuildinfo
 
 # Platform-specific Build Directories
 /ios
 /android
-/iostv
-/iosmobile
-/androidmobile
-/androidtv
 
 # Gradle caches (top-level + per-module native projects)
 **/.gradle/
@@ -40,6 +38,9 @@ Streamyfin.app
 npm-debug.*
 *.orig.*
 *.mp4
+# Tracked on purpose (subtitle preview sample). EAS archives the project with
+# these rules applied even to tracked files, so it must be re-included here.
+!assets/sample_subtitled.mp4
 
 # OS-specific Files
 # macOS
@@ -72,7 +73,13 @@ build/
 # but keep EAS custom build configs (the generic build/ rule above matches .eas/build/)
 !.eas/build/
 !.eas/build/**
-.claude/
+# Claude Code: the shared conventions are tracked so a new learned fact or agent
+# reaches the repo; everything else under .claude/ is per-machine state.
+.claude/*
+!.claude/agents/
+!.claude/commands/
+!.claude/learned-facts/
+!.claude/learned-facts.md
 .agents/skills/**
 skills-lock.json
 

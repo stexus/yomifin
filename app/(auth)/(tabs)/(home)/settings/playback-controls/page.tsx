@@ -7,6 +7,7 @@ import { MpvBufferSettings } from "@/components/settings/MpvBufferSettings";
 import { MpvVoSettings } from "@/components/settings/MpvVoSettings";
 import { PlaybackControlsSettings } from "@/components/settings/PlaybackControlsSettings";
 import { PlayerUISettings } from "@/components/settings/PlayerUISettings";
+import { VideoPlayerSelector } from "@/components/settings/VideoPlayerSelector";
 import { ChromecastSettings } from "../../../../../../components/settings/ChromecastSettings";
 
 export default function PlaybackControlsPage() {
@@ -18,13 +19,15 @@ export default function PlaybackControlsPage() {
       contentContainerStyle={{
         paddingLeft: insets.left,
         paddingRight: insets.right,
+        paddingBottom: insets.bottom,
       }}
     >
       <View
         className='p-4 flex flex-col'
         style={{ paddingTop: Platform.OS === "android" ? 10 : 0 }}
       >
-        <View className='mb-4'>
+        <View>
+          <VideoPlayerSelector className='mb-4' />
           <MediaProvider>
             <MediaToggles className='mb-4' />
             {!Platform.isTV && <PlayerUISettings className='mb-4' />}

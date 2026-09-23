@@ -28,7 +28,7 @@
 
           packages = with pkgs; [
             # JS toolchain
-            bun # primary package manager / runner (CI pins 1.3.14)
+            bun # primary package manager / runner (CI pins 1.4.2)
             nodejs_22 # Node >20 required by the project
 
             # React Native / Metro
