@@ -4,7 +4,7 @@ Yomifin is a **personal iPad language-immersion player** built as a fork of
 Streamyfin (React Native / Expo Jellyfin client with a libmpv playback core).
 It adds **tappable subtitles → Yomitan-style dictionary lookup → one-press Anki
 cards with on-device audio + image**, for Japanese and Chinese (Chinese device gates remain in the tracker). Single user,
-sideloaded, no App Store concerns.
+sideloaded with a purchased FlareStore certificate, no App Store concerns.
 
 - **What to build next / feature backlog:** `FEATURES.md` (the tracker — point a
   session at one feature there).
@@ -164,9 +164,10 @@ parity pass. The archived migration plan is historical, not a second tracker.
   have it (the old window recognizer is REMOVED there). PAN stays an RNGH worklet
   on purpose — drag-anywhere-to-seek writes SharedValues on the UI thread.
 
-Changes to `modules/mpv-player` (or any native dep / app.json plugin) need
-`bun run prebuild` + `expo run:ios` (`just local` / `just remote`). Pure JS/TS
-changes only need Metro (`just dev`).
+Changes to `modules/mpv-player` (or any native dep / app.json plugin) need a
+fresh native binary: `just ipa` + FlareStore sign/install, or the Xcode development
+path `just local` / `just remote`. Pure JS/TS changes only need Metro (`just dev`)
+when using a development build; standalone Release installs need another IPA.
 
 **NEW local module trap:** editing sources inside an EXISTING module pod
 recompiles fine with plain `expo run:ios`, but a NEW `modules/<name>/` pod only
@@ -180,10 +181,46 @@ pod is absent from `ios/Podfile.lock`).
 
 A reproducible toolchain is available through Nix (`flake.nix`, `nix develop`
 or direnv). The `justfile` uses tools on PATH directly (it no longer enters Nix);
-`remote-build.sh` enters Nix when needed. The `justfile` wraps all workflows — `just setup` (fresh Mac), `just local` (build+
-deploy to iPad), `just remote` (from SSH into the Mac build box), `just dev`
-(Metro), `just yomifin-test`. Remote loop: Linux desktop → SSH → headless Mac mini
-(`massimo@10.0.0.99`) → WiFi → iPad, via `./scripts/remote-build.sh`.
+`remote-build.sh` enters Nix when needed. The `justfile` wraps all workflows:
+`just ipa` (unsigned standalone Release IPA for FlareStore), `just setup`
+(fresh Mac), `just local` / `just remote` (legacy Xcode development install),
+`just dev` (Metro), and `just yomifin-test`.
+
+### Current install flow: FlareStore certificate
+
+As of 2026-09-23 the user uses a purchased FlareStore certificate. Build on the
+Mac, then sign/install externally:
+
+```bash
+# From the repo, with Bun, CocoaPods and Xcode available (optionally nix develop):
+just ipa
+# Output: build/Yomifin.ipa
+```
+
+`scripts/ios/build-ipa.sh` installs frozen dependencies, initializes the pinned
+submodule revisions, regenerates only the ignored iOS project, installs pods,
+and runs the unsigned Release archive/IPA builder. It supplies the macOS tar /
+Xcode tool guards even outside Nix. The resulting app bundles its JavaScript and
+does not need Metro. Output lives under ignored `build/`; no signing credentials
+or Apple account are needed to create it.
+
+In FlareStore, select the purchased certificate/profile, import the IPA, and
+sign/install. If the certificate is not already configured, its setup accepts
+the `.p12`, `.mobileprovision` and P12 password.
+[FlareStore's iPadOS guide](https://flarestore.app/guide/ios/).
+Keep the bundle ID consistent with the existing installation you want to update
+(the repo defaults to `com.massimotseng.yomifin`). Signing validity is governed by
+that certificate/profile, not the old free-Personal-Team seven-day workflow.
+Do not put signing assets/passwords in tracked files; `.p12` and
+`.mobileprovision` are already ignored. The IPA command does not upload anything
+to a signing service or modify the login keychain.
+
+The low-level `ios:unsigned-build --sign` option uses Xcode automatic ad-hoc
+export; it is not wired to the purchased certificate. Use external signing for
+this flow. `just local` / `just remote` still use the configured personal Xcode
+team for Metro development; they do not automatically select FlareStore assets.
+The SSH development loop remains Linux → Mac mini (`massimo@10.0.0.99`) → iPad
+via `./scripts/remote-build.sh`.
 
 Facts that cost real time to learn (all reproducible via `app.json`/plugins —
 **never hand-edit `ios/`**):
@@ -192,11 +229,14 @@ Facts that cost real time to learn (all reproducible via `app.json`/plugins —
   fails remotely. `remote-build.sh` runs `security unlock-keychain` first. If
   codesign prompts repeatedly locally, run
   `security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k <pw> ~/Library/Keychains/login.keychain-db`.
-- **Free Apple account:** bundle id `com.massimotseng.yomifin`, team `27326V9T54`
+- **Legacy free Apple account fallback:** bundle id `com.massimotseng.yomifin`, team `27326V9T54`
   (the Apple ID belongs to two teams; this one owns the App ID). Certs/profiles
   expire every **7 days** → rebuild + re-trust (Settings → General → VPN & Device
   Management). `plugins/withFreeAccountEntitlements.js` strips paid entitlements
-  (push, wifi-info) — it must stay **first** in `app.json` plugins (Expo runs
+  (push, wifi-info). This conservative entitlement set also remains in the
+  externally signed IPA until the purchased profile's capabilities are checked;
+  buying a certificate alone does not grant every entitlement. The plugin must
+  stay **first** in `app.json` plugins (Expo runs
   later-registered entitlement mods first); add new offending entitlement keys
   there if a "profile does not support X" error appears.
 - **`plugins/withDisableScriptSandboxing.js`** keeps

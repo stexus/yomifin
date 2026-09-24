@@ -11,7 +11,8 @@ per backlog item to start work without re-exploration.
 3. `./scripts/yomifin-test.sh` + `bun run typecheck` + `bun run lint` green before
    calling anything done.
 4. The exit criterion is **demonstrated on the physical iPad** (JS-only changes via
-   Metro `just dev`; native changes need `just local`/`just remote`).
+   Metro `just dev`; native changes need a fresh `just ipa` + FlareStore install,
+   or the Xcode development path `just local`/`just remote`).
 5. When an item ships, move it to Shipped (one line + pointers) and prune its
    backlog entry. Don't create new markdown files; extend this one or
    YOMIFIN_CONTEXT.md.
@@ -84,6 +85,26 @@ Anki card with image/audio; single/double/two-finger taps, drag-seek, hold-speed
 release/cancel; episode navigation and reader/audio/subtitle menus. The existing
 pending gates below remain pending. Android/TV runtime checks are also not part
 of this local audit.
+
+## FlareStore IPA workflow — 2026-09-23
+
+The user now signs with a purchased FlareStore certificate. `just ipa`
+(`scripts/ios/build-ipa.sh`) creates `build/Yomifin.ipa` as an unsigned,
+standalone Release build for external signing. It installs pinned dependencies,
+regenerates the native iOS project and guards against the GNU tar / Xcode PATH
+issues found during the merge. The archive builder discovers the workspace
+only after CocoaPods creates it (fixing a clean-prebuild failure), explicitly
+targets generic iOS/tvOS, and starts with a fresh zip so removed files cannot
+survive from an older IPA. `YOMIFIN_CONTEXT.md` contains the signing
+steps; personal-team development commands remain available separately.
+
+Validation: `just ipa` completed a full unsigned Release archive and produced
+`build/Yomifin.ipa` on Xcode 26.3. ZIP integrity, expected bundle ID/executable,
+bundled JavaScript and absence of an embedded profile/signature were checked.
+Shell syntax, Biome, typecheck (existing Jellyseerr exclusion) and all 19 fork
+regression stages pass; the optional alass check still skips. Signing with the
+purchased certificate, installing on the iPad and the upstream-sync device gates
+remain pending; do not mark the merged app device-verified from an archive alone.
 
 ## Shipped
 

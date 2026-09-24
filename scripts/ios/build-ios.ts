@@ -1365,11 +1365,6 @@ async function runProductionBuild(options: BuildOptions): Promise<void> {
   const bundleId = getBundleIdentifier(options.projectRoot, xcodeProject);
   log.info(`Bundle ID: ${bundleId}`);
 
-  // Install pods if needed
-  if (options.install) {
-    installPods(options.projectRoot);
-  }
-
   // Create output directory
   const outputDir = options.output
     ? path.dirname(options.output)
@@ -1461,6 +1456,10 @@ async function runProductionBuild(options: BuildOptions): Promise<void> {
       scheme,
       "-configuration",
       options.configuration,
+      "-destination",
+      process.env.EXPO_TV === "1"
+        ? "generic/platform=tvOS"
+        : "generic/platform=iOS",
       "-archivePath",
       sanitizePath(archivePath),
       "archive",
@@ -1585,6 +1584,9 @@ async function runProductionBuild(options: BuildOptions): Promise<void> {
 
       // Zip Payload directory to create IPA
       // Using /usr/bin/zip to ensure compatibility
+      // zip updates an existing archive in place, retaining files removed from
+      // the new app. Start fresh so repeated builds cannot ship stale binaries.
+      fs.rmSync(safeIpaPath, { force: true });
       const zipArgs = ["-r", "-y", safeIpaPath, "Payload"];
 
       const zipResult = spawnSync("zip", zipArgs, {
@@ -1637,6 +1639,12 @@ async function main(): Promise<void> {
   console.log(`  Project Root: ${options.projectRoot}`);
   console.log("\n");
 
+  // CocoaPods creates the workspace. Discovering the project first after a
+  // clean prebuild selects .xcodeproj and leaves every pod out of the build.
+  if (options.install) {
+    installPods(options.projectRoot);
+  }
+
   // Production build mode
   if (options.production) {
     await runProductionBuild(options);
@@ -1655,11 +1663,6 @@ async function main(): Promise<void> {
   // Resolve device
   const device = resolveDevice(options.device);
   log.info(`Target device: ${device.name} (${device.udid})`);
-
-  // Install pods if needed
-  if (options.install) {
-    installPods(options.projectRoot);
-  }
 
   // Build the app
   const buildArgs = getXcodeBuildArgs(xcodeProject, scheme, device, options);

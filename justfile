@@ -7,6 +7,7 @@
 # Usage:
 #   just              # list recipes
 #   just setup        # one-time first-time setup on a fresh Mac
+#   just ipa          # Release IPA for signing/installing through FlareStore
 #   just local        # build + deploy to iPad from THIS Mac
 #   just remote       # build + deploy to iPad (run while SSH'd into the Mac)
 #
@@ -50,6 +51,11 @@ prebuild:
     bun run prebuild
 
 # --- Local build (this Mac) ----------------------------------------------
+
+# Regenerates ios/ and uses the pinned dependencies/submodule revisions.
+# Build a standalone Release IPA for signing/installing through FlareStore.
+ipa:
+    bash scripts/ios/build-ipa.sh
 
 # Build + deploy to the iPad from this Mac.
 # ensure-pods-linked: a NEW modules/<name>/ pod needs a prebuild/pod-install —
