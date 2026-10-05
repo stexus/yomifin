@@ -1,0 +1,22 @@
+# Yomifin agent context
+
+Read `CLAUDE.md` for repository conventions and `YOMIFIN_CONTEXT.md` for the
+fork's architecture, device constraints, and current setup before working here.
+
+For builds, installs, or development workflow, also read
+`docs/yomifin/DEVELOPMENT_AND_DISTRIBUTION.md`.
+
+The user's chosen workflow is two iPad apps: stable
+`com.massimotseng.yomifin` (standalone Release) and development
+`com.massimotseng.yomifin.dev` (Debug Expo development client, app JavaScript
+served by Metro with Fast Refresh). FlareStore signs and installs both using
+the user's purchased certificate. GitHub should distribute stable releases
+and occasional native development-client rebuilds through an app source.
+
+The local config, commands, and publishing workflow are implemented. A local
+Debug IPA was built and verified to omit the app JavaScript bundle. Check the
+guide's status for GitHub publication and iPad installation; those are separate
+validation gates. Handle builds and GitHub setup for the user when access permits.
+Never install an experimental build over the stable identity. JS/TS-only work
+normally needs Metro, while native changes require rebuilding the dev IPA.
+Preserve unrelated work in progress; use Bun for repository commands.

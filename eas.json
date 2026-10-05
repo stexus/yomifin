@@ -12,6 +12,7 @@
         "buildType": "apk"
       },
       "env": {
+        "APP_VARIANT": "development",
         "EXPO_PUBLIC_WRITE_DEBUG": "1"
       }
     },
@@ -35,6 +36,7 @@
         "simulator": true
       },
       "env": {
+        "APP_VARIANT": "development",
         "EXPO_PUBLIC_WRITE_DEBUG": "1"
       }
     },

@@ -33,6 +33,9 @@ KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
 
 cd "$(dirname "$0")/.."
 
+# Development installs must never replace the daily-use app.
+export APP_VARIANT=development EXPO_TV=0
+
 echo "› Unlocking login keychain for codesign…"
 if [ -n "${KEYCHAIN_PASSWORD:-}" ]; then
   security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"

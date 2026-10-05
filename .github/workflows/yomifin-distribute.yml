@@ -1,0 +1,92 @@
+name: Yomifin - FlareStore
+
+on:
+  push:
+    tags: ["yomifin-dev-*", "yomifin-stable-*"]
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: App to build and publish
+        type: choice
+        required: true
+        default: development
+        options: [development, stable]
+
+permissions:
+  contents: write
+
+# Both identities update one catalog. Serialize to preserve each other's entry.
+concurrency:
+  group: yomifin-flarestore
+  cancel-in-progress: false
+
+jobs:
+  distribute:
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      APP_VARIANT: ${{ inputs.variant || (startsWith(github.ref, 'refs/tags/yomifin-stable-') && 'stable' || 'development') }}
+      YOMIFIN_BUILD_NUMBER: ${{ github.run_number }}.${{ github.run_attempt }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.2"
+
+      - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
+        with:
+          xcode-version: "26.6"
+
+      - name: Build unsigned device IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/ios/build-variant.sh "$APP_VARIANT"
+          if [[ "$APP_VARIANT" == development ]]; then
+            echo "IPA_PATH=build/development/Yomifin-Dev.ipa" >> "$GITHUB_ENV"
+          else
+            echo "IPA_PATH=build/stable/Yomifin.ipa" >> "$GITHUB_ENV"
+          fi
+          echo "RELEASE_TAG=yomifin-build-$APP_VARIANT-$GITHUB_RUN_NUMBER-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+
+      - name: Load existing source catalog
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! gh release view yomifin-source >/dev/null 2>&1; then
+            gh release create yomifin-source --target "$GITHUB_SHA" \
+              --title "Yomifin app source" --prerelease --latest=false \
+              --notes "Catalog for FlareStore. This release contains source metadata."
+          fi
+          source_asset="$(gh release view yomifin-source --json assets \
+            --jq '.assets[] | select(.name == "source.json") | .name')"
+          if [[ -n "$source_asset" ]]; then
+            gh release download yomifin-source --pattern source.json --dir build
+          fi
+
+      - name: Validate IPA and update catalog
+        run: bun scripts/ios/app-source.ts
+
+      - name: Publish IPA, then catalog
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_flags=()
+          if [[ "$APP_VARIANT" == development ]]; then
+            release_flags+=(--prerelease --latest=false)
+          else
+            release_flags+=(--latest)
+          fi
+          printf 'Variant: %s\nCommit: %s\nNative build: %s\n' \
+            "$APP_VARIANT" "$GITHUB_SHA" "$YOMIFIN_BUILD_NUMBER" > build/release-notes.txt
+          gh release create "$RELEASE_TAG" "$IPA_PATH" \
+            --target "$GITHUB_SHA" \
+            --title "Yomifin $APP_VARIANT $YOMIFIN_BUILD_NUMBER" \
+            --notes-file build/release-notes.txt "${release_flags[@]}"
+          gh release upload yomifin-source build/source.json --clobber
+          printf 'FlareStore source: https://github.com/%s/releases/download/yomifin-source/source.json\n' \
+            "$GITHUB_REPOSITORY" >> "$GITHUB_STEP_SUMMARY"

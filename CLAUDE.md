@@ -8,6 +8,15 @@ already broke something, and the reason is written down where the rule lives.
 
 ## Yomifin fork
 
+For the user's iPad development and distribution workflow, read
+[docs/yomifin/DEVELOPMENT_AND_DISTRIBUTION.md](docs/yomifin/DEVELOPMENT_AND_DISTRIBUTION.md)
+and its setup status. Stable keeps `com.massimotseng.yomifin`; development uses
+`com.massimotseng.yomifin.dev`, a Debug Expo development client loading app
+JavaScript from Metro for Fast Refresh. FlareStore signs both; GitHub distributes
+IPAs through a source catalog. Local implementation and an unsigned Debug build
+are verified; consult the guide for GitHub/iPad validation status. Agents should
+handle builds and GitHub operations when access permits.
+
 Before touching the language-learning or Yozora layers, read `YOMIFIN_CONTEXT.md`
 (architecture and native contracts) and `FEATURES.md` (current tracker). Run
 `./scripts/yomifin-test.sh` for changes to `utils/yomifin/` or `utils/yozora/`.

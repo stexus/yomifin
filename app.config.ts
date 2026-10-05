@@ -47,7 +47,28 @@ const buildMeta = {
 };
 
 export default ({ config }: ConfigContext): ExpoConfig => {
+  const variant = process.env.APP_VARIANT ?? "stable";
+  if (variant !== "stable" && variant !== "development") {
+    throw new Error(`Unknown APP_VARIANT: ${variant}`);
+  }
+
   if (process.env.EXPO_TV !== "1") {
+    const isDev = variant === "development";
+    config.name = isDev ? "Yomifin Dev" : "Yomifin";
+    config.scheme = isDev ? "yomifin-dev" : "streamyfin";
+    config.ios = {
+      ...config.ios,
+      bundleIdentifier: isDev
+        ? "com.massimotseng.yomifin.dev"
+        : "com.massimotseng.yomifin",
+      buildNumber:
+        process.env.YOMIFIN_BUILD_NUMBER ?? config.ios?.buildNumber ?? "1",
+    };
+    // Only Dev should claim Expo's generated URL scheme when both apps exist.
+    config.plugins = [
+      ...(config.plugins ?? []),
+      ["expo-dev-client", { addGeneratedScheme: isDev }],
+    ];
     config.plugins?.push("expo-background-task");
 
     config.plugins?.push([

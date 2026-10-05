@@ -1189,6 +1189,11 @@ function getAppConfig(projectRoot: string): AppConfig {
   const appConfigPath = path.join(projectRoot, "app.config.js");
   const appConfigTsPath = path.join(projectRoot, "app.config.ts");
 
+  // app.json is only the base config; variants are selected by the dynamic file.
+  if (fs.existsSync(appConfigPath) || fs.existsSync(appConfigTsPath)) {
+    return require("@expo/config").getConfig(projectRoot).exp;
+  }
+
   if (fs.existsSync(appJsonPath)) {
     try {
       const content = fs.readFileSync(appJsonPath, "utf-8");
@@ -1201,12 +1206,6 @@ function getAppConfig(projectRoot: string): AppConfig {
       log.info("Continuing with default configuration");
       return {};
     }
-  }
-
-  // For JS/TS configs, we'd need to evaluate them - just return defaults
-  if (fs.existsSync(appConfigPath) || fs.existsSync(appConfigTsPath)) {
-    log.warn("Dynamic app config detected. Using defaults for bundle ID.");
-    return {};
   }
 
   return {};

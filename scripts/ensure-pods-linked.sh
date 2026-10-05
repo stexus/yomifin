@@ -18,6 +18,18 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 LOCK="ios/Podfile.lock"
 
+# An existing native project keeps its previous identity until regenerated.
+# Check the app target as well as pods before a local/remote development install.
+identity_changed=0
+if [[ "${APP_VARIANT:-stable}" == development ]]; then
+  expected_bundle_id=com.massimotseng.yomifin.dev
+else
+  expected_bundle_id=com.massimotseng.yomifin
+fi
+if ! grep -Eq "PRODUCT_BUNDLE_IDENTIFIER = \"?${expected_bundle_id//./\\.}\"?;" ios/*.xcodeproj/project.pbxproj 2>/dev/null; then
+  identity_changed=1
+fi
+
 missing=()
 for spec in modules/*/ios/*.podspec; do
   [ -e "$spec" ] || continue
@@ -27,8 +39,9 @@ for spec in modules/*/ios/*.podspec; do
   fi
 done
 
-if [ "${#missing[@]}" -gt 0 ]; then
+if [ "${#missing[@]}" -gt 0 ] || [ "$identity_changed" -eq 1 ]; then
   echo "› local module pod(s) not linked yet: ${missing[*]}"
+  echo "› ensuring app identity: $expected_bundle_id"
   echo "› running prebuild (expo prebuild --clean + pod install)…"
   bun run prebuild
 else

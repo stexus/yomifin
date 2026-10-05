@@ -179,10 +179,38 @@ pod is absent from `ios/Podfile.lock`).
 
 ## Dev environment & build (hard-won facts)
 
+### Two-app workflow (2026-10-05; local build verified)
+
+The user wants to keep a working daily-use app while developing on the same
+iPad. User steps, actual commands, and agent implementation context are in
+[Development and distribution](docs/yomifin/DEVELOPMENT_AND_DISTRIBUTION.md).
+
+- Stable: `com.massimotseng.yomifin`, Release with bundled JavaScript; works
+  without Metro. Preserve this identity and its existing installation/data.
+- Development: `com.massimotseng.yomifin.dev`, Debug Expo development client.
+  **Do not bundle the application's JavaScript into this IPA**: serve it from
+  Metro for Fast Refresh. A standalone preview build does not meet this need.
+- FlareStore uses the purchased certificate to sign/install both. GitHub
+  Actions should build unsigned device IPAs and publish a two-app source;
+  signing credentials stay in FlareStore.
+- JS/TS work normally uses Metro. Swift/mpv, native dependencies, Expo plugins,
+  entitlements, and other native changes require a new development-client IPA.
+  Stable releases are deliberately selected after testing.
+- Separate bundle IDs mean separate local settings/dictionaries/downloads;
+  shared Jellyfin or Anki servers still share their server-side state.
+
+Status: variant configuration, build/Metro commands, and GitHub workflow are
+implemented. A local Debug IPA was built and inspected: `.dev` identity, no app
+JavaScript bundle. GitHub publication and physical-iPad sign/install/refresh
+checks remain pending. Agents should complete build/GitHub work when access
+permits; the user handles browser authentication and iPad installation prompts.
+Do not assume the documented source URL exists until publication succeeds.
+
 A reproducible toolchain is available through Nix (`flake.nix`, `nix develop`
 or direnv). The `justfile` uses tools on PATH directly (it no longer enters Nix);
 `remote-build.sh` enters Nix when needed. The `justfile` wraps all workflows:
-`just ipa` (unsigned standalone Release IPA for FlareStore), `just setup`
+`just ipa-dev` (Metro Debug client), `just ipa-stable` / `just ipa` (standalone
+Release IPA for FlareStore), `just setup`
 (fresh Mac), `just local` / `just remote` (legacy Xcode development install),
 `just dev` (Metro), and `just yomifin-test`.
 
@@ -193,11 +221,12 @@ Mac, then sign/install externally:
 
 ```bash
 # From the repo, with Bun, CocoaPods and Xcode available (optionally nix develop):
-just ipa
-# Output: build/Yomifin.ipa
+just ipa-stable
+# Output: build/stable/Yomifin.ipa
+# Development client: just ipa-dev → build/development/Yomifin-Dev.ipa
 ```
 
-`scripts/ios/build-ipa.sh` installs frozen dependencies, initializes the pinned
+`scripts/ios/build-variant.sh` installs frozen dependencies, initializes the pinned
 submodule revisions, regenerates only the ignored iOS project, installs pods,
 and runs the unsigned Release archive/IPA builder. It supplies the macOS tar /
 Xcode tool guards even outside Nix. The resulting app bundles its JavaScript and
@@ -218,7 +247,8 @@ to a signing service or modify the login keychain.
 The low-level `ios:unsigned-build --sign` option uses Xcode automatic ad-hoc
 export; it is not wired to the purchased certificate. Use external signing for
 this flow. `just local` / `just remote` still use the configured personal Xcode
-team for Metro development; they do not automatically select FlareStore assets.
+team for Metro development with the `.dev` identity; they do not automatically
+select FlareStore assets.
 The SSH development loop remains Linux → Mac mini (`massimo@10.0.0.99`) → iPad
 via `./scripts/remote-build.sh`.
 

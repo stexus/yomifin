@@ -7,7 +7,8 @@
 # Usage:
 #   just              # list recipes
 #   just setup        # one-time first-time setup on a fresh Mac
-#   just ipa          # Release IPA for signing/installing through FlareStore
+#   just ipa-dev      # Metro development client for FlareStore
+#   just ipa-stable   # Standalone Release IPA for FlareStore
 #   just local        # build + deploy to iPad from THIS Mac
 #   just remote       # build + deploy to iPad (run while SSH'd into the Mac)
 #
@@ -54,19 +55,25 @@ prebuild:
 
 # Regenerates ios/ and uses the pinned dependencies/submodule revisions.
 # Build a standalone Release IPA for signing/installing through FlareStore.
-ipa:
-    bash scripts/ios/build-ipa.sh
+ipa: ipa-stable
+
+ipa-stable:
+    bash scripts/ios/build-variant.sh stable
+
+# Debug development client; app JavaScript is served by Metro.
+ipa-dev:
+    bash scripts/ios/build-variant.sh development
 
 # Build + deploy to the iPad from this Mac.
 # ensure-pods-linked: a NEW modules/<name>/ pod needs a prebuild/pod-install —
 # `expo run:ios` alone never links it (outlined-text stayed MISSING on device).
 local:
-    ./scripts/ensure-pods-linked.sh
-    EXPO_TV=0 bunx expo run:ios --device {{DEVICE_UDID}}
+    APP_VARIANT=development EXPO_TV=0 ./scripts/ensure-pods-linked.sh
+    APP_VARIANT=development EXPO_TV=0 bunx expo run:ios --device {{DEVICE_UDID}}
 
 # JS/TS-only dev loop — start Metro (no native rebuild for JS changes).
 dev:
-    bunx expo start --dev-client
+    APP_VARIANT=development EXPO_TV=0 bunx expo start --dev-client --lan --scheme yomifin-dev
 
 # List attached devices + their UDIDs.
 devices:
