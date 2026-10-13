@@ -1,8 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import type {
-  BaseItemDto,
-  ChapterInfo,
-} from "@jellyfin/sdk/lib/generated-client";
+import type { ChapterInfo } from "@jellyfin/sdk/lib/generated-client";
 import { type FC, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Platform, Pressable, TouchableOpacity, View } from "react-native";
@@ -20,7 +17,6 @@ import {
   hasChapterMarkers,
 } from "@/utils/chapters";
 import { formatTimeString } from "@/utils/time";
-import DropdownView from "./dropdown/DropdownView";
 import { TrickplayBubble } from "./TrickplayBubble";
 
 // Sleek progress bar height (thinner than the old 10px) + chapter tick height.
@@ -28,7 +24,8 @@ const SLIDER_HEIGHT = 6;
 const TICK_HEIGHT = 9;
 
 interface BottomControlsProps {
-  item: BaseItemDto;
+  trackMenus: React.ReactNode;
+  onPanelOpenChange: (open: boolean) => void;
   /** Item chapters, used for the tick overlay and chapter list. */
   chapters?: ChapterInfo[] | null;
   /** Total media duration in milliseconds. */
@@ -46,16 +43,11 @@ interface BottomControlsProps {
   togglePlay: () => void;
   handleSkipBackward: () => void;
   handleSkipForward: () => void;
-  onOpenSubtitleScale?: () => void;
-  subtitleDelay?: number;
-  onSubtitleDelayChange?: (seconds: number) => void;
   showSubtitleNav?: boolean;
   onPrevSubtitle?: () => void;
   onNextSubtitle?: () => void;
-  previousItem?: BaseItemDto | null;
-  nextItem?: BaseItemDto | null;
-  goToPreviousItem: () => void;
-  goToNextItem: (options: { isAutoPlay?: boolean }) => void;
+  goToPreviousItem?: () => void;
+  goToNextItem?: () => void;
 
   // Slider props
   min: SharedValue<number>;
@@ -65,8 +57,6 @@ interface BottomControlsProps {
   handleSliderStart: () => void;
   handleSliderComplete: (value: number) => void;
   handleSliderChange: (value: number) => void;
-  handleTouchStart: () => void;
-  handleTouchEnd: () => void;
   /** Programmatic seek (chapter list, hotkeys) — bypasses slide gesture state. */
   seekTo: (value: number) => void;
 
@@ -93,6 +83,8 @@ interface BottomControlsProps {
 const ICON = "white";
 
 export const BottomControls: FC<BottomControlsProps> = ({
+  trackMenus,
+  onPanelOpenChange,
   chapters,
   durationMs,
   showControls,
@@ -106,14 +98,9 @@ export const BottomControls: FC<BottomControlsProps> = ({
   togglePlay,
   handleSkipBackward,
   handleSkipForward,
-  onOpenSubtitleScale,
-  subtitleDelay,
-  onSubtitleDelayChange,
   showSubtitleNav = false,
   onPrevSubtitle,
   onNextSubtitle,
-  previousItem,
-  nextItem,
   goToPreviousItem,
   goToNextItem,
   min,
@@ -123,8 +110,6 @@ export const BottomControls: FC<BottomControlsProps> = ({
   handleSliderStart,
   handleSliderComplete,
   handleSliderChange,
-  handleTouchStart,
-  handleTouchEnd,
   seekTo,
   trickPlayUrl,
   trickplayInfo,
@@ -203,22 +188,17 @@ export const BottomControls: FC<BottomControlsProps> = ({
         style={{ minHeight: 40 }}
       >
         <View className='flex flex-row items-center' pointerEvents='auto'>
-          {!Platform.isTV && (
-            <DropdownView
-              variant='subtitles'
-              onOpenSubtitleScale={onOpenSubtitleScale}
-              subtitleDelay={subtitleDelay}
-              onSubtitleDelayChange={onSubtitleDelayChange}
-            />
-          )}
-          {!Platform.isTV && <DropdownView variant='audio' />}
+          {trackMenus}
         </View>
 
         <View style={{ flex: 1 }} />
         <View className='flex flex-row items-center' pointerEvents='auto'>
           {hasChapters && (
             <Pressable
-              onPress={() => setChapterListVisible(true)}
+              onPress={() => {
+                setChapterListVisible(true);
+                onPanelOpenChange(true);
+              }}
               hitSlop={10}
               className='justify-center ml-2'
               accessibilityRole='button'
@@ -269,8 +249,6 @@ export const BottomControls: FC<BottomControlsProps> = ({
             justifyContent: "center",
             overflow: "visible",
           }}
-          onTouchStart={handleTouchStart}
-          onTouchEnd={handleTouchEnd}
           pointerEvents='auto'
         >
           <Slider
@@ -333,13 +311,19 @@ export const BottomControls: FC<BottomControlsProps> = ({
           style={{ gap: 26, paddingVertical: 6 }}
           pointerEvents='auto'
         >
-          {previousItem && (
+          {goToPreviousItem && (
             <TouchableOpacity onPress={goToPreviousItem} hitSlop={8}>
               <Ionicons name='play-skip-back' size={26} color={ICON} />
             </TouchableOpacity>
           )}
 
-          <TouchableOpacity onPress={handleSkipBackward} hitSlop={8}>
+          <TouchableOpacity
+            accessibilityLabel={t("player.controls.rewind", {
+              seconds: rewind,
+            })}
+            onPress={handleSkipBackward}
+            hitSlop={8}
+          >
             <View style={{ justifyContent: "center", alignItems: "center" }}>
               <Ionicons
                 name='refresh-outline'
@@ -364,7 +348,7 @@ export const BottomControls: FC<BottomControlsProps> = ({
             <TouchableOpacity
               onPress={onPrevSubtitle}
               hitSlop={8}
-              accessibilityLabel='Previous subtitle'
+              accessibilityLabel={t("player.controls.previous_subtitle")}
             >
               <View style={{ flexDirection: "row", alignItems: "center" }}>
                 <Ionicons name='caret-back' size={18} color={ICON} />
@@ -377,7 +361,13 @@ export const BottomControls: FC<BottomControlsProps> = ({
             </TouchableOpacity>
           )}
 
-          <TouchableOpacity onPress={togglePlay} hitSlop={10}>
+          <TouchableOpacity
+            accessibilityLabel={t(
+              isPlaying ? "player.controls.pause" : "common.play",
+            )}
+            onPress={togglePlay}
+            hitSlop={10}
+          >
             {/* Fixed 46×46 box so swapping the play icon for the buffering Loader
                 can't change Row C's height — the whole stack is bottom-anchored, so a
                 height change there pushes the progress bar up/down (flicker). */}
@@ -405,7 +395,7 @@ export const BottomControls: FC<BottomControlsProps> = ({
             <TouchableOpacity
               onPress={onNextSubtitle}
               hitSlop={8}
-              accessibilityLabel='Next subtitle'
+              accessibilityLabel={t("player.controls.next_subtitle")}
             >
               <View style={{ flexDirection: "row", alignItems: "center" }}>
                 <Ionicons
@@ -418,7 +408,13 @@ export const BottomControls: FC<BottomControlsProps> = ({
             </TouchableOpacity>
           )}
 
-          <TouchableOpacity onPress={handleSkipForward} hitSlop={8}>
+          <TouchableOpacity
+            accessibilityLabel={t("player.controls.forward", {
+              seconds: forward,
+            })}
+            onPress={handleSkipForward}
+            hitSlop={8}
+          >
             <View style={{ justifyContent: "center", alignItems: "center" }}>
               <Ionicons name='refresh-outline' size={34} color={ICON} />
               <Text
@@ -434,11 +430,8 @@ export const BottomControls: FC<BottomControlsProps> = ({
             </View>
           </TouchableOpacity>
 
-          {nextItem && (
-            <TouchableOpacity
-              onPress={() => goToNextItem({ isAutoPlay: false })}
-              hitSlop={8}
-            >
+          {goToNextItem && (
+            <TouchableOpacity onPress={goToNextItem} hitSlop={8}>
               <Ionicons name='play-skip-forward' size={26} color={ICON} />
             </TouchableOpacity>
           )}
@@ -450,7 +443,10 @@ export const BottomControls: FC<BottomControlsProps> = ({
         chapters={chapters}
         currentPositionMs={currentTime}
         onSeek={seekTo}
-        onClose={() => setChapterListVisible(false)}
+        onClose={() => {
+          setChapterListVisible(false);
+          onPanelOpenChange(false);
+        }}
       />
     </View>
   );

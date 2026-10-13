@@ -21,12 +21,20 @@ const files = [
 );
 
 if (files.length === 0) throw new Error("No repository unit tests found");
-const result = spawnSync(
-  process.execPath,
-  ["test", ...files.map((path) => `./${path}`)],
-  {
-    stdio: "inherit",
-  },
-);
-if (result.error) throw result.error;
-process.exit(result.status ?? 1);
+// UI specs replace native views with React hosts. Bun module mocks are global,
+// so isolate these from utility specs' different native stubs.
+const uiFiles = files.filter((path) => path.endsWith(".ui.test.tsx"));
+const batches = [
+  files.filter((path) => !uiFiles.includes(path)),
+  ...uiFiles.map((path) => [path]),
+];
+for (const batch of batches) {
+  if (!batch.length) continue;
+  const result = spawnSync(
+    process.execPath,
+    ["test", ...batch.map((path) => `./${path}`)],
+    { stdio: "inherit" },
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0) process.exit(result.status ?? 1);
+}

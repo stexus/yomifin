@@ -182,20 +182,22 @@ export interface MpvPlayerViewRef {
   getCurrentAudioTrack: () => Promise<number>;
   // YOMIFIN Phase 4 (Anki media capture). On-device, MPVKit-bundled ffmpeg.
   /** Capture the frame at `pos` seconds (no subs/OSD) to a JPG path. `sourceUrl` =
-   *  static/original stream ("" => playing URL). Returns success. */
+   *  static/original stream or offline file; URL and headers must be frozen. */
   captureScreenshot: (
     path: string,
     sourceUrl: string,
     pos: number,
+    headers: Record<string, string>,
   ) => Promise<boolean>;
   /** Extract an AAC .m4a clip of `sourceUrl`'s [start,end] (seconds) for the given
-   *  audio track (<=0 = current). `sourceUrl` "" => playing URL. Returns success. */
+   *  original-source audio track. URL and headers must be frozen. Returns success. */
   extractAudio: (
     start: number,
     end: number,
     audioId: number,
     path: string,
     sourceUrl: string,
+    headers: Record<string, string>,
   ) => Promise<boolean>;
   // Video scaling
   setZoomedToFill: (zoomed: boolean) => Promise<void>;

@@ -313,23 +313,22 @@ public class MpvPlayerModule: Module {
         return 3
       }
 
-      // captureScreenshot(view, path, sourceUrl, pos) -> Bool : frame at `pos` (no subs/
-      // OSD) to a JPG path. sourceUrl="" => use the playing URL (local/offline).
-      AsyncFunction("captureScreenshot") { (view: MpvPlayerView, path: String, sourceUrl: String, pos: Double, promise: Promise) in
+      // Capture accepts an explicit frozen URL + headers, including offline files.
+      // Never consult the live player source while a card is being created.
+      AsyncFunction("captureScreenshot") { (view: MpvPlayerView, path: String, sourceUrl: String, pos: Double, headers: [String: String], promise: Promise) in
         DispatchQueue.global(qos: .userInitiated).async {
           do {
-            let ok = try view.captureScreenshot(to: path, sourceUrl: sourceUrl, pos: pos)
+            let ok = try view.captureScreenshot(to: path, sourceUrl: sourceUrl, pos: pos, headers: headers)
             promise.resolve(ok)
           } catch {
             promise.reject(error)
           }
         }
       }
-      // extractAudio(view, start, end, audioId, path, sourceUrl) -> Bool : AAC .m4a clip
-      // of [start,end]. audioId<=0 = current track; sourceUrl="" => playing URL.
-      AsyncFunction("extractAudio") { (view: MpvPlayerView, start: Double, end: Double, audioId: Int, path: String, sourceUrl: String, promise: Promise) in
+      // Extract the selected range/track using the same frozen source as the image.
+      AsyncFunction("extractAudio") { (view: MpvPlayerView, start: Double, end: Double, audioId: Int, path: String, sourceUrl: String, headers: [String: String], promise: Promise) in
         DispatchQueue.global(qos: .userInitiated).async {
-          let ok = view.extractAudioClip(start: start, end: end, audioId: audioId, sourceUrl: sourceUrl, to: path)
+          let ok = view.extractAudioClip(start: start, end: end, audioId: audioId, sourceUrl: sourceUrl, headers: headers, to: path)
           promise.resolve(ok)
         }
       }

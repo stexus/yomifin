@@ -41,17 +41,30 @@ export const TrickplayBubble: FC<TrickplayBubbleProps> = ({
   imageScale = 1,
   chapterName,
 }) => {
+  const timeStr = `${time.hours > 0 ? `${time.hours}:` : ""}${String(time.minutes).padStart(2, "0")}:${String(time.seconds).padStart(2, "0")}`;
   if (!trickPlayUrl || !trickplayInfo) {
-    return null;
+    return (
+      <View
+        pointerEvents='none'
+        style={{
+          position: "absolute",
+          bottom: 8,
+          left: -35,
+          padding: 8,
+          borderRadius: 6,
+          backgroundColor: "rgba(0,0,0,0.8)",
+        }}
+      >
+        <Text style={{ color: "white", fontVariant: ["tabular-nums"] }}>
+          {timeStr}
+        </Text>
+        {chapterName ? <Text numberOfLines={1}>{chapterName}</Text> : null}
+      </View>
+    );
   }
-
   const { x, y, url } = trickPlayUrl;
   const tileWidth = CONTROLS_CONSTANTS.TILE_WIDTH;
-  const tileHeight = tileWidth / trickplayInfo.aspectRatio!;
-  const timeStr = `${time.hours > 0 ? `${time.hours}:` : ""}${
-    time.minutes < 10 ? `0${time.minutes}` : time.minutes
-  }:${time.seconds < 10 ? `0${time.seconds}` : time.seconds}`;
-
+  const tileHeight = tileWidth / (trickplayInfo.aspectRatio || 1);
   const finalScale = BASE_IMAGE_SCALE * imageScale;
 
   return (

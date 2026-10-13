@@ -5,8 +5,8 @@
  * reason duplicates existed was the `card_${Date.now()}` base name — so filenames are
  * now derived from the media CONTENT identity instead:
  *
- *   image key = hash(itemId | framePos quantized to 250ms)
- *   audio key = hash(itemId | cueStart | cueEnd, each quantized to 250ms)
+ *   image key = hash(source identity | framePos quantized to 250ms)
+ *   audio key = hash(source identity | audio track | cueStart | cueEnd)
  *   word key  = hash(term | reading)
  *
  * The audio key uses the SELECTED cue range, so a 1-line and a 2-line selection get
@@ -38,18 +38,28 @@ export function quantizeSec(sec: number): number {
 }
 
 /** Key for the captured frame (same item + same quantized position ⇒ same file). */
-export function imageMediaKey(mediaId: string, framePos: number): string {
-  return fnv1a(`${mediaId}|img|${quantizeSec(framePos)}`);
+export function imageMediaKey(sourceId: string, framePos: number): string {
+  return fnv1a(
+    JSON.stringify(["capture-v2", sourceId, "img", quantizeSec(framePos)]),
+  );
 }
 
 /** Key for the audio clip — spans the SELECTED cue range, not just the tapped cue. */
 export function audioMediaKey(
-  mediaId: string,
+  sourceId: string,
   cueStart: number,
   cueEnd: number,
+  audioId: number,
 ): string {
   return fnv1a(
-    `${mediaId}|aud|${quantizeSec(cueStart)}|${quantizeSec(cueEnd)}`,
+    JSON.stringify([
+      "capture-v2",
+      sourceId,
+      "aud",
+      audioId,
+      quantizeSec(cueStart),
+      quantizeSec(cueEnd),
+    ]),
   );
 }
 

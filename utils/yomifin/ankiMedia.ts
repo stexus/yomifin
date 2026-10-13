@@ -10,9 +10,8 @@
  *  - The cue + frame position are FROZEN at tap time (CaptureContext) so the capture is
  *    correct even though it runs later, and so it can seek a throwaway handle to exactly
  *    that spot.
- *  - `sourceUrl` should be the STATIC/original stream (e.g. `?static=true`) so the
- *    throwaway handle's seek is a plain HTTP range request — never a transcode. Empty
- *    string => native falls back to the currently-playing URL (e.g. local/offline file).
+ *  - The source URL and headers are explicit, including for offline files. Capture
+ *    never falls back to the live player's source after Add has been pressed.
  *
  * Media dedup (batch mining): filenames are CONTENT-DERIVED (mediaKey.ts) — mining
  * several words from one sentence shares one .m4a + one .jpg. An in-session
@@ -22,7 +21,15 @@
  * Best-effort: any failure returns partial/empty media so the card still gets created.
  */
 import { File, Paths } from "expo-file-system";
+import { CARD_CAPTURE_CACHE_MAX } from "@/constants/Mining";
 import { audioMediaKey, imageMediaKey } from "./mediaKey";
+
+export interface CaptureSource {
+  /** Includes provider/server, item, and source/version identity (not just title). */
+  id: string;
+  url: string;
+  headers: Record<string, string>;
+}
 
 /** Frozen at tap time; drives the (later) capture. Times are seconds. */
 export interface CaptureContext {
@@ -30,6 +37,7 @@ export interface CaptureContext {
   cueEnd: number;
   /** Playback position when the word was tapped (the frame to grab). */
   framePos: number;
+  source: CaptureSource;
 }
 
 /** The subset of the mpv player ref this module needs. */
@@ -38,6 +46,7 @@ export interface MediaCapturer {
     path: string,
     sourceUrl: string,
     pos: number,
+    headers: Record<string, string>,
   ) => Promise<boolean>;
   extractAudio: (
     start: number,
@@ -45,6 +54,7 @@ export interface MediaCapturer {
     audioId: number,
     path: string,
     sourceUrl: string,
+    headers: Record<string, string>,
   ) => Promise<boolean>;
   getCurrentAudioTrack: () => Promise<number>;
 }
@@ -76,7 +86,7 @@ interface MediaFile {
 // stay cached (base64 reused verbatim for the next card off the same line); failures
 // are evicted so a retry re-captures. Bounded so a long session can't hoard base64.
 const captureCache = new Map<string, Promise<MediaFile | null>>();
-const CAPTURE_CACHE_MAX = 12;
+const pendingCaptures = new Set<string>();
 
 function cached(
   key: string,
@@ -89,18 +99,23 @@ function cached(
   }
   const task = produce().then(
     (result) => {
+      pendingCaptures.delete(key);
       if (result === null) captureCache.delete(key); // allow retry after failure
+      // Never evict in-flight captures: another lookup would start a second writer
+      // to the same temp file. Bound settled results without duplicating native work.
+      for (const candidate of captureCache.keys()) {
+        if (captureCache.size <= CARD_CAPTURE_CACHE_MAX) break;
+        if (!pendingCaptures.has(candidate)) captureCache.delete(candidate);
+      }
       return result;
     },
     (e) => {
+      pendingCaptures.delete(key);
       captureCache.delete(key);
       throw e;
     },
   );
-  if (captureCache.size >= CAPTURE_CACHE_MAX) {
-    const oldest = captureCache.keys().next().value;
-    if (oldest !== undefined) captureCache.delete(oldest);
-  }
+  pendingCaptures.add(key);
   captureCache.set(key, task);
   return task;
 }
@@ -117,7 +132,7 @@ function tryDelete(file: File | null): void {
 async function captureImage(
   player: MediaCapturer,
   key: string,
-  sourceUrl: string,
+  source: CaptureSource,
   framePos: number,
 ): Promise<MediaFile | null> {
   let imgFile: File | null = null;
@@ -127,8 +142,9 @@ async function captureImage(
     if (imgFile.exists) imgFile.delete();
     const ok = await player.captureScreenshot(
       plainPath(imgFile.uri),
-      sourceUrl,
+      source.url,
       framePos,
+      source.headers,
     );
     if (ok && imgFile.exists) {
       const base64 = await imgFile.base64();
@@ -153,22 +169,23 @@ async function captureImage(
 async function captureAudio(
   player: MediaCapturer,
   key: string,
-  sourceUrl: string,
+  source: CaptureSource,
   cueStart: number,
   cueEnd: number,
+  aid: number,
 ): Promise<MediaFile | null> {
   let audFile: File | null = null;
   try {
-    const aid = await player.getCurrentAudioTrack().catch(() => 0);
     const filename = `yomifin_${key}.m4a`;
     audFile = new File(Paths.cache, filename);
     if (audFile.exists) audFile.delete();
     const ok = await player.extractAudio(
       cueStart,
       cueEnd,
-      aid ?? 0,
+      aid,
       plainPath(audFile.uri),
-      sourceUrl,
+      source.url,
+      source.headers,
     );
     if (ok && audFile.exists) {
       const base64 = await audFile.base64();
@@ -191,31 +208,55 @@ async function captureAudio(
 }
 
 /**
- * Capture frame + audio clip for one card. Call this on "+ Anki card" press (NOT on
- * tap). `ctx` is the tap-time snapshot (its cue range may have been widened by the
- * popup's multi-cue selection); `mediaId` is a stable identity for the playing item
- * (itemId) that keys the content-derived filenames; `sourceUrl` is the static/original
- * stream ("" => native uses the playing URL). `want` gates each capture on whether
- * some field template actually references it (Phase 8).
+ * Prepare synchronously on Add, BEFORE yielding to paint the spinner. Copy all
+ * inputs and start the audio-track read now, rather than after screenshot capture.
+ * The returned function does the expensive work later using only these inputs.
+ * `audioId` identifies a track in the supplied source: undefined reads the player's
+ * selection; null skips audio when that selection cannot be mapped safely.
  */
-export async function captureCardMedia(
+export function prepareCardMedia(
   player: MediaCapturer,
   ctx: CaptureContext,
-  mediaId: string,
-  sourceUrl: string,
   want: MediaWant = { image: true, audio: true },
+  audioId?: number | null,
+): () => Promise<CapturedMedia> {
+  const snapshot = {
+    ...ctx,
+    source: { ...ctx.source, headers: { ...ctx.source.headers } },
+  };
+  const requested = { ...want };
+  const track =
+    !want.audio || audioId === null
+      ? Promise.resolve(null)
+      : audioId !== undefined
+        ? Promise.resolve(audioId)
+        : player.getCurrentAudioTrack().catch(() => null);
+  return async () => captureCardMedia(player, snapshot, requested, await track);
+}
+
+async function captureCardMedia(
+  player: MediaCapturer,
+  ctx: CaptureContext,
+  want: MediaWant,
+  audioId: number | null,
 ): Promise<CapturedMedia> {
   const out: CapturedMedia = {};
-  const imgKey = imageMediaKey(mediaId, ctx.framePos);
-  const audKey = audioMediaKey(mediaId, ctx.cueStart, ctx.cueEnd);
+  if (!ctx.source.url) return out;
+  const imgKey = imageMediaKey(ctx.source.id, ctx.framePos);
+  const audKey = audioMediaKey(
+    ctx.source.id,
+    ctx.cueStart,
+    ctx.cueEnd,
+    audioId ?? 0,
+  );
   console.log(
-    `[YOMIFIN MEDIA] capture start keys={img:${imgKey},aud:${audKey}} want={img:${want.image},aud:${want.audio}} cue=[${ctx.cueStart.toFixed(2)},${ctx.cueEnd.toFixed(2)}] frame@${ctx.framePos.toFixed(2)} src=${sourceUrl ? "static" : "playing"}`,
+    `[YOMIFIN MEDIA] capture start keys={img:${imgKey},aud:${audKey}} want={img:${want.image},aud:${want.audio}} cue=[${ctx.cueStart.toFixed(2)},${ctx.cueEnd.toFixed(2)}] frame@${ctx.framePos.toFixed(2)} aid=${audioId}`,
   );
 
   // --- image (frame at tap position) ---
   if (want.image) {
     const img = await cached(imgKey, () =>
-      captureImage(player, imgKey, sourceUrl, ctx.framePos),
+      captureImage(player, imgKey, ctx.source, ctx.framePos),
     ).catch(() => null);
     if (img) {
       out.imageFilename = img.filename;
@@ -225,9 +266,16 @@ export async function captureCardMedia(
 
   // --- audio clip ([cueStart, cueEnd] of the SELECTED cue range) ---
   if (want.audio) {
-    if (ctx.cueEnd > ctx.cueStart) {
+    if (ctx.cueEnd > ctx.cueStart && audioId !== null && audioId > 0) {
       const aud = await cached(audKey, () =>
-        captureAudio(player, audKey, sourceUrl, ctx.cueStart, ctx.cueEnd),
+        captureAudio(
+          player,
+          audKey,
+          ctx.source,
+          ctx.cueStart,
+          ctx.cueEnd,
+          audioId,
+        ),
       ).catch(() => null);
       if (aud) {
         out.audioFilename = aud.filename;
@@ -235,7 +283,7 @@ export async function captureCardMedia(
       }
     } else {
       console.warn(
-        `[YOMIFIN MEDIA] skipping audio: invalid cue range [${ctx.cueStart},${ctx.cueEnd}]`,
+        `[YOMIFIN MEDIA] skipping audio: unknown track or invalid cue range [${ctx.cueStart},${ctx.cueEnd}]`,
       );
     }
   }

@@ -627,6 +627,27 @@ export const getMpvAudioId = (
 };
 
 /**
+ * When capture opens the original file, a transcode's single playback track ID
+ * cannot identify that file's selected audio track. Capturing the playback file
+ * (including downloads) uses its actual native selection instead. Undefined asks
+ * for that selection; null means a transcode cannot be mapped safely.
+ */
+export const getMpvCaptureAudioId = (
+  mediaSource: MediaSourceInfo | null | undefined,
+  jellyfinAudioIndex: number | undefined,
+  capturesOriginalSource: boolean,
+): number | null | undefined => {
+  if (!capturesOriginalSource || !mediaSource?.TranscodingUrl) return undefined;
+  return (
+    getMpvAudioId(
+      mediaSource,
+      jellyfinAudioIndex ?? mediaSource.DefaultAudioStreamIndex ?? undefined,
+      false,
+    ) ?? null
+  );
+};
+
+/**
  * True when switching to this subtitle forces the server to re-process the
  * stream, which cuts playback and reseeks.
  *

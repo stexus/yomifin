@@ -12,8 +12,7 @@
  * during playback), and cross-fades its own contents when the controls toggle.
  */
 import { Ionicons } from "@expo/vector-icons";
-import type { BaseItemDto } from "@jellyfin/sdk/lib/generated-client";
-import { type FC, useMemo } from "react";
+import { type FC, useEffect } from "react";
 import { StyleSheet, View } from "react-native";
 import Animated, {
   useAnimatedStyle,
@@ -27,7 +26,7 @@ import { useSettings } from "@/utils/atoms/settings";
 import { useSystemStatus } from "./hooks/useSystemStatus";
 
 interface Props {
-  item: BaseItemDto;
+  title: string;
   showControls: boolean;
   getTechnicalInfo?: () => Promise<TechnicalInfo>;
 }
@@ -56,23 +55,8 @@ function netIcon(netType: string): keyof typeof Ionicons.glyphMap {
   return "globe-outline";
 }
 
-function buildTitle(item: BaseItemDto): string {
-  if (item.Type === "Episode") {
-    const s = item.ParentIndexNumber;
-    const e = item.IndexNumber;
-    const code =
-      s != null && e != null
-        ? `S${String(s).padStart(2, "0")}E${String(e).padStart(2, "0")}`
-        : e != null
-          ? `E${String(e).padStart(2, "0")}`
-          : null;
-    return [item.SeriesName, code, item.Name].filter(Boolean).join("  ·  ");
-  }
-  return item.Name ?? "";
-}
-
 export const PlayerStatusBar: FC<Props> = ({
-  item,
+  title,
   showControls,
   getTechnicalInfo,
 }) => {
@@ -109,13 +93,13 @@ export const PlayerStatusBar: FC<Props> = ({
   const showThroughput =
     showControls || (persistent && settings.playerStatusShowNetwork);
 
-  const title = useMemo(() => buildTitle(item), [item]);
-
   // Contents fade with the controls; during playback they render at reduced opacity
   // (subtle), full opacity when the controls come up.
   const targetOpacity = showControls ? 1 : 0.55;
   const opacity = useSharedValue(targetOpacity);
-  opacity.value = withTiming(targetOpacity, { duration: 250 });
+  useEffect(() => {
+    opacity.value = withTiming(targetOpacity, { duration: 250 });
+  }, [opacity, targetOpacity]);
   const fadeStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
 
   const anyLeft = showClock || showDate;

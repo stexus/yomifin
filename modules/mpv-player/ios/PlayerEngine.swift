@@ -445,13 +445,13 @@ final class MPVPlayerEngine: NSObject {
 		renderer?.subSeek(delta)
 	}
 
-	func captureScreenshot(to path: String, sourceUrl: String, pos: Double) throws -> Bool {
+	func captureScreenshot(to path: String, sourceUrl: String, pos: Double, headers: [String: String]) throws -> Bool {
 		guard let renderer else { return false }
-		return try renderer.captureScreenshot(to: path, sourceUrl: sourceUrl, pos: pos)
+		return try renderer.captureScreenshot(to: path, sourceUrl: sourceUrl, pos: pos, headers: headers)
 	}
 
-	func extractAudioClip(start: Double, end: Double, audioId: Int, sourceUrl: String, to outputPath: String) -> Bool {
-		return renderer?.extractAudioClip(start: start, end: end, audioId: audioId, sourceUrl: sourceUrl, to: outputPath) ?? false
+	func extractAudioClip(start: Double, end: Double, audioId: Int, sourceUrl: String, headers: [String: String], to outputPath: String) -> Bool {
+		return renderer?.extractAudioClip(start: start, end: end, audioId: audioId, sourceUrl: sourceUrl, headers: headers, to: outputPath) ?? false
 	}
 
 	func setSubtitleTrack(_ trackId: Int) {

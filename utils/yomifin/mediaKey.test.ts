@@ -51,19 +51,36 @@ check(
 // audio keys: keyed on the SELECTED cue range (1-line vs 2-line selections differ)
 check(
   "audio key stable for same range",
-  audioMediaKey("item1", 10.0, 12.5) === audioMediaKey("item1", 10.001, 12.499),
+  audioMediaKey("item1", 10.0, 12.5, 1) ===
+    audioMediaKey("item1", 10.001, 12.499, 1),
 );
 check(
   "audio key: extended range differs",
-  audioMediaKey("item1", 10.0, 12.5) !== audioMediaKey("item1", 10.0, 15.5),
+  audioMediaKey("item1", 10.0, 12.5, 1) !==
+    audioMediaKey("item1", 10.0, 15.5, 1),
 );
 check(
   "audio key differs across items",
-  audioMediaKey("a", 10, 12) !== audioMediaKey("b", 10, 12),
+  audioMediaKey("a", 10, 12, 1) !== audioMediaKey("b", 10, 12, 1),
 );
 check(
   "audio and image keys never collide in name-space",
-  imageMediaKey("item1", 10) !== audioMediaKey("item1", 10, 10),
+  imageMediaKey("item1", 10) !== audioMediaKey("item1", 10, 10, 1),
+);
+
+check(
+  "audio keys and filenames distinguish tracks of the same source",
+  audioMediaKey("source1", 10, 12, 1) !== audioMediaKey("source1", 10, 12, 2),
+);
+check(
+  "audio keys distinguish versions of the same item",
+  audioMediaKey("server/item/version1", 10, 12, 1) !==
+    audioMediaKey("server/item/version2", 10, 12, 1),
+);
+check(
+  "image keys distinguish source versions",
+  imageMediaKey("server/item/version1", 11) !==
+    imageMediaKey("server/item/version2", 11),
 );
 
 // word audio keys

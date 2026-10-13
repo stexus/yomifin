@@ -19,6 +19,73 @@ per backlog item to start work without re-exploration.
 
 ---
 
+## Shared mobile player UI — 2026-10-05 (pending iPad verification)
+
+Jellyfin and Yozora now render the same `PlayerControls`, status/header/bottom
+controls and `PlayerMenu` components. The source adapters keep stream/session,
+track selection, episode/segment data, progress reporting and mining callbacks.
+The shared UI uses milliseconds and owns the five-second timeout, fades,
+hold-speed dimming, slider/drag seeking, time labels and timestamp previews.
+
+Both players use the same app menu sheets. The native SwiftUI menu wrapper does
+not report presentation/dismissal; sheets provide real lifecycle events so the
+controls stay visible while choosing an option or opening the subtitle-scale
+panel. Track/menu props remain stable across playback ticks. Android Back closes
+the sheet before leaving the player.
+
+Yozora now displays buffered progress, remembers the global speed setting, offers
+technical info, zoom and supported PiP, and uses track language hints for reader
+profiles. Downloaded subtitles carry server language where available; an unknown
+external language uses the chosen reader profile. `usePlayerSubtitleStyle` applies
+the same native scaling/placement calculations in both players. Existing native
+and TV renderers remain separate.
+
+Implementation: `components/video-player/controls/{PlayerControls,PlayerInteraction}.tsx`,
+`dropdown/{PlayerMenu,PlayerMenuSheet}.tsx`, the Jellyfin `Controls`/`DropdownView`
+adapters, `components/yozora/YozoraPlayerControls.tsx`, both player routes and
+`hooks/usePlayerSubtitleStyle.ts`. The UI change is JS-only; the pending capture
+binary requirement below still applies to the pre-existing native changes.
+
+Local validation: typecheck, read-only Biome and i18n checks pass. The repository
+runner passes 396 tests (including 16 new presentation/timer/React interaction
+cases), all 20 Yomifin/Yozora stages pass, and the optional real-alass cross-check
+passes. Production iOS and Android Hermes bundle exports succeed. React UI tests
+isolate their native-view mocks in a separate Bun process. No physical-iPad
+interaction run was performed.
+
+Device checks must cover menus held open beyond five seconds, sheet-to-scale/online-sub
+handoffs, playing/paused seeks, two-finger taps and hold cancellation, PiP return,
+text/bitmap/external subtitles and Anki capture. Also check Jellyfin chapters,
+segments, episode transitions, offline/transcoded playback and Yozora expiry recovery.
+
+## Card capture isolation — 2026-09-25 (pending iPad verification)
+
+Add Card now prepares its capture synchronously before the spinner delay. The
+image stays anchored to the word tap; selected sentence bounds, audio track,
+source URL/headers, and Anki configuration cannot follow subsequent playback.
+Original-file audio mapping handles Jellyfin transcodes; downloads snapshot the
+local player's actual track even when retaining original transcode metadata.
+Capture cache keys and Anki filenames include source/version and track identity; pending captures cannot
+be evicted into a second writer to the same temporary file. Media failures still
+save the text card, omit failed attachment references, and report missing media.
+
+Implementation: `ankiMedia.ts`, `mediaKey.ts`, `anki.ts`, the lookup/popup and both
+player adapters, and the iOS capture methods. `scripts/yomifin-test.sh` includes
+capture/submission regression tests as stage 20. **Requires a new native binary**:
+capture methods now take explicit frozen headers and never read a live source.
+
+Local validation: 380 repository unit tests and all 20 Yomifin regression stages
+pass (including 9 capture/submission tests). Typecheck, Biome, and an unsigned
+Debug build for generic iOS pass. Optional alass validation skips because the
+tool is not installed. No signing, install, or physical-iPad run was performed.
+Biome now excludes generated `build/` archives instead of formatting bundled app files.
+
+Device gate: on Jellyfin and Yozora, extend a sentence, Add, immediately resume or
+seek and tap another word while creation finishes; verify the original sentence,
+audio range/track and tapped frame. Also check another audio track/source version,
+Jellyfin transcoding, offline files, custom proxy headers, and missing-media feedback.
+Closing the player or suspending/terminating the app is not a new completion guarantee.
+
 ## Repository audit — 2026-09-23
 
 The previously uncommitted Yozora migration and tap-time snapshot fix are now
@@ -183,9 +250,9 @@ In rough order of expected want:
   `direct-player.tsx` into a hook/component both players use. Deliberately NOT
   done in the polish pass: it's the one risky step (touches the load-bearing
   file) and needs its own session + a full Jellyfin-side device regression pass.
-  Trigger: actually missing a control during real use — keep a list. (Gestures,
-  controls-dim, playback speed, and watch-state/resume shipped WITHOUT it — the
-  shared `GestureOverlay` needed no extraction.)
+  The 2026-10-05 shared mobile UI extraction leaves these mining/session
+  contracts in their source routes; sharing controls no longer requires this
+  larger extraction.
 - Embedded-sub gate never explicitly verified: tappable overlay on a stream's
   EMBEDDED text track (jimaku path is verified; embedded should be identical —
   confirm once).
@@ -288,6 +355,9 @@ The app-wide log polling and query stale-time fixes are already committed
 
 ### 8. AirPlay to TV
 Not implemented in the fork; investigate the desired playback/mining behavior.
+
+### 9. skip intro, next episode
+Currently doesn't seem to be working. Next episode should come up at a configurable time per series and automatically mark watched.
 
 ### 12.5 Yozora detail-page parity pass (user request 2026-07-15)
 Make `(yozora)/detail.tsx` feel like the Yozora web Detail page

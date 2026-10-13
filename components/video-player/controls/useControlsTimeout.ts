@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
+import { createControlsTimer } from "./utils/controlsTimer";
 
 interface UseControlsTimeoutProps {
   showControls: boolean;
@@ -17,40 +18,46 @@ export const useControlsTimeout = ({
   timeout = 10000,
   disabled = false,
 }: UseControlsTimeoutProps) => {
-  const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latest = useRef({
+    showControls,
+    isSliding,
+    episodeView,
+    disabled,
+    onHideControls,
+    timeout,
+  });
+  latest.current = {
+    showControls,
+    isSliding,
+    episodeView,
+    disabled,
+    onHideControls,
+    timeout,
+  };
+  const timerRef = useRef<ReturnType<typeof createControlsTimer> | null>(null);
+  if (!timerRef.current)
+    timerRef.current = createControlsTimer(
+      () => {
+        const state = latest.current;
+        return (
+          state.showControls &&
+          !state.disabled &&
+          !state.isSliding &&
+          !state.episodeView
+        );
+      },
+      () => latest.current.onHideControls(),
+      () => latest.current.timeout,
+    );
 
   useEffect(() => {
-    const resetControlsTimeout = () => {
-      if (controlsTimeoutRef.current) {
-        clearTimeout(controlsTimeoutRef.current);
-      }
-
-      if (!disabled && showControls && !isSliding && !episodeView) {
-        controlsTimeoutRef.current = setTimeout(() => {
-          onHideControls();
-        }, timeout);
-      }
-    };
-
-    resetControlsTimeout();
-
-    return () => {
-      if (controlsTimeoutRef.current) {
-        clearTimeout(controlsTimeoutRef.current);
-      }
-    };
+    timerRef.current?.reset();
+    return () => timerRef.current?.clear();
   }, [showControls, isSliding, episodeView, timeout, onHideControls, disabled]);
 
   const handleControlsInteraction = useCallback(() => {
-    if (disabled || !showControls) return;
-
-    if (controlsTimeoutRef.current) {
-      clearTimeout(controlsTimeoutRef.current);
-    }
-    controlsTimeoutRef.current = setTimeout(() => {
-      onHideControls();
-    }, timeout);
-  }, [disabled, showControls, onHideControls, timeout]);
+    timerRef.current?.reset();
+  }, []);
 
   return {
     handleControlsInteraction,

@@ -142,8 +142,14 @@ export default React.forwardRef<MpvPlayerViewRef, MpvPlayerViewProps>(
         path: string,
         sourceUrl: string,
         pos: number,
+        headers: Record<string, string>,
       ) => {
-        return await nativeRef.current?.captureScreenshot(path, sourceUrl, pos);
+        return await nativeRef.current?.captureScreenshot(
+          path,
+          sourceUrl,
+          pos,
+          headers,
+        );
       },
       extractAudio: async (
         start: number,
@@ -151,6 +157,7 @@ export default React.forwardRef<MpvPlayerViewRef, MpvPlayerViewProps>(
         audioId: number,
         path: string,
         sourceUrl: string,
+        headers: Record<string, string>,
       ) => {
         return await nativeRef.current?.extractAudio(
           start,
@@ -158,6 +165,7 @@ export default React.forwardRef<MpvPlayerViewRef, MpvPlayerViewProps>(
           audioId,
           path,
           sourceUrl,
+          headers,
         );
       },
       // Video scaling

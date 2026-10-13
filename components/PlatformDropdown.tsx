@@ -141,7 +141,7 @@ const OptionGroupComponent: React.FC<{ group: OptionGroup }> = ({ group }) => (
   </View>
 );
 
-const BottomSheetContent: React.FC<{
+export const BottomSheetContent: React.FC<{
   title?: string;
   groups: OptionGroup[];
   onOptionSelect?: (value?: any) => void;

@@ -33,7 +33,8 @@ the subtitle-text delegate and capture/visibility/sub-seek forwarding through
 all three layers when syncing again.
 
 `bun run test:unit` runs repository unit tests through `scripts/test-unit.ts`,
-then the 19 standalone Yomifin/Yozora stages. Bare `bun test` also discovers the
+isolates `.ui.test.tsx` React component tests from native module mocks, then runs
+the 20 standalone Yomifin/Yozora stages. Bare `bun test` also discovers the
 ignored local Yomitan checkout and standalone scripts that can end its process
 early. Use the package command for a complete result.
 
@@ -65,7 +66,7 @@ Key principles (violating these has bitten us before):
 - **Everything rendered over the video sits inside `YomifinErrorBoundary`** so a
   popup crash can never freeze the app root (this happened; it took down the UI).
 - **Run `./scripts/yomifin-test.sh` after any change under `utils/yomifin/`**
-  (19 stages covering the language layer and the Yozora API/display/filter helpers). Add a test case when you
+  (20 stages covering the language layer, card capture/submission, and Yozora helpers). Add a test case when you
   add lookup/marker behavior. `bun run typecheck` + `bun run check` must stay clean; `bun run lint` applies fixes.
 - **Exit criteria are device gates.** JS-side tests are necessary, not sufficient;
   a feature is done when demonstrated on the physical iPad.
@@ -95,8 +96,12 @@ Key principles (violating these has bitten us before):
    libmpv encode-mode handle → AAC `.m4a`). Both run on a background queue, both
    accept a `sourceUrl` = the **static/original** stream
    (`…/Videos/{id}/stream?static=true`) so a seek is an HTTP range request, never a
-   transcode; `""` falls back to the playing (local) file. Capture runs **only** on
-   "+ Anki card" press — tap time only freezes a cheap `CaptureContext`.
+   transcode. Offline capture supplies its file URL explicitly; capture never falls
+   back to the live player's source. Tap time freezes frame/cue times plus source
+   URL/identity/headers. **Add** freezes the selected range, audio track and Anki
+   settings before yielding for the spinner; only then does decoding run. A
+   transcode's audio ID is mapped back to the original file. Cache keys/filenames
+   distinguish source versions and audio tracks; in-flight captures stay deduplicated.
    Why the weird screenshot path: the playback `vo=avfoundation` has **no** VO-side
    screenshot (frames live on the GPU) and MPVKit's ffmpeg ships **no image
    encoders** — every simpler approach was tried and failed on device.
@@ -133,7 +138,13 @@ All resolution, metadata and progress go through `/api/v1`; types/constants in
 separate `yozora.*` MMKV keys, while settings hold only preferences. The player
 receives canonical title/episode identity plus a resolved URL and resume time;
 it sends progress ticks and can re-resolve an expired URL. Both players share
-the lookup layer and optional-server `OnlineSubtitlesModal`.
+`components/video-player/controls/PlayerControls.tsx`, its menu sheets, status
+bar, timeline, transport and interaction behavior, alongside the lookup layer and
+optional-server `OnlineSubtitlesModal`. `Controls.tsx` and `YozoraPlayerControls.tsx`
+are source adapters; shared UI receives plain data/callbacks and milliseconds.
+The menu sheets report open/dismiss state to suspend control hiding. Native
+subtitle scaling lives in `hooks/usePlayerSubtitleStyle.ts`. Keep session/reporting,
+subtitle loading and mining snapshots inside their source routes.
 
 See `FEATURES.md` for pending device gates and the unimplemented detail-page
 parity pass. The archived migration plan is historical, not a second tracker.
@@ -153,8 +164,8 @@ parity pass. The archived migration plan is historical, not a second tracker.
   the JS side adds the delay for capture/anchoring.
 - `addSubtitleFile(pathOrUrl, select)` — mpv `sub-add`; online (jimaku) subs are
   downloaded to cache (`yomifin_sub_*`) and loaded through this.
-- `captureScreenshot(path, sourceUrl, pos)` / `extractAudio(start, end, aid, path, sourceUrl)`
-  — background-queue Promises (see Settled decision 4).
+- `captureScreenshot(path, sourceUrl, pos, headers)` / `extractAudio(start, end, aid, path, sourceUrl, headers)`
+  — background-queue Promises with explicit frozen inputs (see Settled decision 4).
 - `getCurrentAudioTrack()`, `getSubtitleTracks()`, `getTechnicalInfo()`.
 - **Gesture surface (separate module, `modules/gesture-surface/`)** —
   `YomifinGestureSurface` expo view owning ALL video tap gestures (single/double/
@@ -207,7 +218,12 @@ Check the distribution guide for its run link and current publication status.
 Physical-iPad sign/install/refresh checks remain pending. Continue development
 on `sync/upstream-develop-2026-09-23` with the setup commits incorporated;
 `setup/yomifin-flarestore` contains its committed history plus the build setup.
-Neither initial cloud build contains the uncommitted local player/Anki changes.
+The setup branch is historical; new work stays on the integration branch.
+The shared player UI and Anki capture-isolation changes are now committed for
+user-requested rebuilds tagged `yomifin-dev-20261013-2` and
+`yomifin-stable-20261013-2`. Check their workflow status before assuming publication.
+The first cloud Dev binary predates the new capture API; install the rebuilt Dev
+client before using current Metro code. Physical-iPad feature checks remain open.
 Agents should use existing Git SSH access to push build
 tags; Actions publishes with its built-in `GITHUB_TOKEN`. Do not ask the user for
 GitHub CLI login, OAuth authorization, or a PAT. The user handles iPad installation
@@ -325,6 +341,8 @@ Facts that cost real time to learn (all reproducible via `app.json`/plugins —
   overlay `9999` (so tapping another word re-looks-up instead of closing) <
   popup `100000` (above controls).
 - **Best-effort card invariant:** any media/word-audio failure still adds a text
-  card. Never let capture errors block `addNote`.
+  card. Never let capture errors block `addNote`. Report missing attachments in the
+  completion toast and omit references to failed uploads; do not retry `addNote`
+  automatically.
 - Debug logs are grep-able prefixes: `[YOMIFIN LOOKUP]`, `[YOMIFIN MEDIA]`,
   `[YOMIFIN ANKI]`, `[YOMIFIN SENSES]` (Metro), `[captureScreenshot]` (device).

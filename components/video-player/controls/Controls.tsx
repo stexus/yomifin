@@ -1,9 +1,8 @@
-import { Api } from "@jellyfin/sdk";
+import type { Api } from "@jellyfin/sdk";
 import type {
   BaseItemDto,
   MediaSourceInfo,
 } from "@jellyfin/sdk/lib/generated-client";
-import { useKeyEventListener } from "expo-key-event";
 import { useLocalSearchParams } from "expo-router";
 import {
   type FC,
@@ -14,16 +13,7 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { Platform, StyleSheet, useWindowDimensions, View } from "react-native";
-import Animated, {
-  Easing,
-  type SharedValue,
-  useAnimatedReaction,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from "react-native-reanimated";
-import { Loader } from "@/components/Loader";
+import { type SharedValue, useSharedValue } from "react-native-reanimated";
 import ContinueWatchingOverlay from "@/components/video-player/controls/ContinueWatchingOverlay";
 import useRouter from "@/hooks/useAppRouter";
 import { useHaptic } from "@/hooks/useHaptic";
@@ -31,32 +21,24 @@ import { useMediaSegments } from "@/hooks/useMediaSegments";
 import { usePlaybackManager } from "@/hooks/usePlaybackManager";
 import { useTrickplay } from "@/hooks/useTrickplay";
 import type { TechnicalInfo } from "@/modules/mpv-player";
-import { DownloadedItem } from "@/providers/Downloads/types";
+import type { DownloadedItem } from "@/providers/Downloads/types";
 import { useOfflineMode } from "@/providers/OfflineModeProvider";
 import { useSettings } from "@/utils/atoms/settings";
 import { hasChapterMarkers } from "@/utils/chapters";
 import { getDefaultPlaySettings } from "@/utils/jellyfin/getDefaultPlaySettings";
 import { SEGMENT_SKIP_KEY, useSegments } from "@/utils/segments";
-import { msToTicks, ticksToMs } from "@/utils/time";
-import { BottomControls } from "./BottomControls";
-import { ControlsScrims } from "./ControlsScrims";
+import { ticksToMs } from "@/utils/time";
 import { CONTROLS_CONSTANTS } from "./constants";
-import { AndroidSubtitleScaleOverlay } from "./dropdown/DropdownView";
+import DropdownView from "./dropdown/DropdownView";
 import { EpisodeList } from "./EpisodeList";
-import { GestureOverlay } from "./GestureOverlay";
-import { HeaderControls } from "./HeaderControls";
-import { useRemoteControl } from "./hooks/useRemoteControl";
-import { useVideoNavigation } from "./hooks/useVideoNavigation";
-import { useVideoSlider } from "./hooks/useVideoSlider";
 import { useVideoTime } from "./hooks/useVideoTime";
-import { PlayerStatusBar } from "./PlayerStatusBar";
-import { ScrubProgressBar } from "./ScrubProgressBar";
+import { PlayerControls } from "./PlayerControls";
 import { SegmentSkippedNotice } from "./SegmentSkippedNotice";
 import { SkipSegmentOverlay } from "./SkipSegmentOverlay";
 import { TechnicalInfoOverlay } from "./TechnicalInfoOverlay";
-import { useControlsTimeout } from "./useControlsTimeout";
-import { PlaybackSpeedScope } from "./utils/playback-speed-settings";
-import { type AspectRatio } from "./VideoScalingModeSelector";
+import type { PlaybackSpeedScope } from "./utils/playback-speed-settings";
+import { playerTitle } from "./utils/playerPresentation";
+import type { AspectRatio } from "./VideoScalingModeSelector";
 
 interface Props {
   item: BaseItemDto;
@@ -72,7 +54,7 @@ interface Props {
   togglePlay: () => void;
   setShowControls: (shown: boolean) => void;
   mediaSource?: MediaSourceInfo | null;
-  seek: (ticks: number) => void;
+  seek: (positionMs: number) => void;
   startPictureInPicture?: () => Promise<void>;
   play: () => void;
   pause: () => void;
@@ -100,19 +82,8 @@ interface Props {
   onNextSubtitle?: () => void;
   /** Extra header control next to the dropdown (yomifin profile pill). */
   headerLeftSlot?: React.ReactNode;
+  interactionBlocked?: boolean;
 }
-
-const CONTROLS_ANIMATION_CONFIG = {
-  duration: 300,
-  easing: Easing.out(Easing.quad),
-};
-
-// Shares its duration with the scrim dim in GestureOverlay so both halves
-// of the speed boost dim together
-const HOLD_SPEED_DIM_CONFIG = {
-  duration: CONTROLS_CONSTANTS.HOLD_SPEED_DIM_DURATION,
-  easing: Easing.out(Easing.quad),
-};
 
 export const Controls: FC<Props> = ({
   item,
@@ -130,7 +101,7 @@ export const Controls: FC<Props> = ({
   showControls,
   setShowControls,
   mediaSource,
-  aspectRatio = "default",
+  aspectRatio: _aspectRatio = "default",
   isZoomedToFill = false,
   onZoomToggle,
   api = null,
@@ -150,280 +121,37 @@ export const Controls: FC<Props> = ({
   onPrevSubtitle,
   onNextSubtitle,
   headerLeftSlot,
+  interactionBlocked,
 }) => {
   const offline = useOfflineMode();
   const { settings, updateSettings } = useSettings();
   const router = useRouter();
   const lightHapticFeedback = useHaptic("light");
-
   const [episodeView, setEpisodeView] = useState(false);
-  const [_showAudioSlider, setShowAudioSlider] = useState(false);
-  // True while a drag-anywhere scrub is in flight (pops the minimal bottom bar even
-  // when the control pane is hidden).
-  const [isScrubbing, setIsScrubbing] = useState(false);
-  const [showSubtitleScale, setShowSubtitleScale] = useState(false);
-
-  const { height: screenHeight, width: screenWidth } = useWindowDimensions();
   const { previousItem, nextItem } = usePlaybackManager({
     item,
     isOffline: offline,
   });
-
   const {
     trickPlayUrl,
     calculateTrickplayUrl,
     trickplayInfo,
     prefetchAllTrickplayImages,
   } = useTrickplay(item);
-
-  const min = useSharedValue(0);
-  // Regular value for use during render (avoids Reanimated warning)
   const maxMs = ticksToMs(item.RunTimeTicks || 0);
   const max = useSharedValue(maxMs);
-
-  // Animation values for controls
-  const controlsOpacity = useSharedValue(showControls ? 1 : 0);
-  const headerTranslateY = useSharedValue(showControls ? 0 : -50);
-  const bottomTranslateY = useSharedValue(showControls ? 0 : 50);
-
   useEffect(() => {
     prefetchAllTrickplayImages();
   }, [prefetchAllTrickplayImages]);
-
-  // Animate controls visibility
   useEffect(() => {
-    controlsOpacity.value = withTiming(
-      showControls ? 1 : 0,
-      CONTROLS_ANIMATION_CONFIG,
-    );
-    headerTranslateY.value = withTiming(
-      showControls ? 0 : -10,
-      CONTROLS_ANIMATION_CONFIG,
-    );
-    bottomTranslateY.value = withTiming(
-      showControls ? 0 : 10,
-      CONTROLS_ANIMATION_CONFIG,
-    );
-  }, [showControls, controlsOpacity, headerTranslateY, bottomTranslateY]);
-
-  // Dim the controls while a speed boost is held so the video stays readable
-  const handleHoldSpeedStart = useCallback(() => {
-    if (showControls) {
-      controlsOpacity.value = withTiming(
-        CONTROLS_CONSTANTS.HOLD_SPEED_DIM_OPACITY,
-        HOLD_SPEED_DIM_CONFIG,
-      );
-    }
-    onHoldSpeedStart?.();
-  }, [showControls, controlsOpacity, onHoldSpeedStart]);
-
-  const handleHoldSpeedEnd = useCallback(() => {
-    if (showControls) {
-      controlsOpacity.value = withTiming(1, HOLD_SPEED_DIM_CONFIG);
-    }
-    onHoldSpeedEnd?.();
-  }, [showControls, controlsOpacity, onHoldSpeedEnd]);
-
-  // Top edge of the rendered video, so overlays sit inside the frame
-  // instead of in the letterbox bars
-  const _videoTopOffset = useMemo(() => {
-    if (isZoomedToFill) return 0;
-    const videoStream = mediaSource?.MediaStreams?.find(
-      (s) => s.Type === "Video",
-    );
-    if (!videoStream?.Width || !videoStream?.Height) return 0;
-    const videoAspect = videoStream.Width / videoStream.Height;
-    const screenAspect = screenWidth / screenHeight;
-    if (screenAspect >= videoAspect) return 0;
-    return (screenHeight - screenWidth / videoAspect) / 2;
-  }, [isZoomedToFill, mediaSource, screenWidth, screenHeight]);
-
-  // Create animated styles
-  const headerAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: controlsOpacity.value,
-    transform: [{ translateY: headerTranslateY.value }],
-    position: "absolute" as const,
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 10,
-  }));
-
-  const bottomAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: controlsOpacity.value,
-    transform: [{ translateY: bottomTranslateY.value }],
-    position: "absolute" as const,
-    bottom: 0,
-    left: 0,
-    right: 0,
-    zIndex: 10,
-  }));
-
-  // Initialize progress values - MPV uses milliseconds
-  useEffect(() => {
-    if (item) {
-      progress.value = ticksToMs(item?.UserData?.PlaybackPositionTicks);
-      max.value = ticksToMs(item.RunTimeTicks || 0);
-    }
+    progress.value = ticksToMs(item.UserData?.PlaybackPositionTicks);
+    max.value = ticksToMs(item.RunTimeTicks || 0);
   }, [item, progress, max]);
-
-  // Navigation hooks
-  const {
-    handleSeekBackward,
-    handleSeekForward,
-    handleSkipBackward,
-    handleSkipForward,
-  } = useVideoNavigation({
-    progress,
-    isPlaying,
-    seek,
-    play,
-  });
-
-  // Double-tap seek (gesture layer): signed relative seek in seconds.
-  const handleSeekRelative = useCallback(
-    (seconds: number) => {
-      if (seconds >= 0) handleSeekForward(seconds);
-      else handleSeekBackward(-seconds);
-    },
-    [handleSeekForward, handleSeekBackward],
-  );
-
-  // Drag-anywhere-to-seek (GestureOverlay's worklet pan drives progress/scrubMs on
-  // the UI thread; these JS callbacks only run at the lifecycle edges + a throttled
-  // preview). Same contract as the slider: pause during, seek + resume on release.
-  const wasPlayingBeforeScrubRef = useRef(false);
-  const handleScrubStart = useCallback(() => {
-    wasPlayingBeforeScrubRef.current = isPlaying;
-    setIsScrubbing(true);
-    pause();
-  }, [isPlaying, pause]);
-  const handleScrubPreview = useCallback(
-    (ms: number) => {
-      calculateTrickplayUrl(msToTicks(ms));
-    },
-    [calculateTrickplayUrl],
-  );
-  const handleScrubEnd = useCallback(
-    (ms: number) => {
-      const value = Math.max(0, Math.floor(ms));
-      progress.value = value;
-      seek(value);
-      setIsScrubbing(false);
-      if (wasPlayingBeforeScrubRef.current) play();
-    },
-    [progress, seek, play],
-  );
-  useKeyEventListener((e) => {
-    if (episodeView) return;
-    if (e?.eventType !== "press") return;
-    const key = e.key;
-
-    if (key === " " || key === "Spacebar" || key === "Space") {
-      togglePlay();
-    } else if (!Platform.isTV && key === "ArrowLeft") {
-      // Exclude TV platforms to prevent conflicts with the remote control,
-      // which uses the same arrow keys for directional UI navigation.
-      handleSkipBackward();
-    } else if (!Platform.isTV && key === "ArrowRight") {
-      handleSkipForward();
-    }
-  });
-
-  // Time management hook
   const { currentTime, remainingTime } = useVideoTime({
     progress,
     max,
     isSeeking,
   });
-
-  // Chapter navigation now lives inside BottomControls (chapter-list button + progress
-  // ticks); the old center prev/next-chapter buttons were removed in the UI rework.
-
-  const toggleControls = useCallback(() => {
-    if (showControls) {
-      setShowAudioSlider(false);
-      setShowControls(false);
-    } else {
-      setShowControls(true);
-    }
-  }, [showControls, setShowControls]);
-
-  // Remote control hook
-  const {
-    remoteScrubProgress,
-    isRemoteScrubbing,
-    showRemoteBubble,
-    isSliding: isRemoteSliding,
-    time: remoteTime,
-  } = useRemoteControl({
-    progress,
-    min,
-    max,
-    showControls,
-    isPlaying,
-    seek,
-    play,
-    togglePlay,
-    toggleControls,
-    calculateTrickplayUrl,
-    handleSeekForward,
-    handleSeekBackward,
-  });
-
-  // Slider hook
-  const {
-    isSliding,
-    time,
-    handleSliderStart,
-    handleTouchStart,
-    handleTouchEnd,
-    handleSliderComplete,
-    handleSliderChange,
-    seekTo,
-  } = useVideoSlider({
-    progress,
-    isSeeking,
-    isPlaying,
-    seek,
-    play,
-    pause,
-    calculateTrickplayUrl,
-    showControls,
-  });
-
-  const effectiveProgress = useSharedValue(0);
-
-  // Recompute progress whenever remote scrubbing is active or when progress significantly changes
-  useAnimatedReaction(
-    () => ({
-      isScrubbing: isRemoteScrubbing.value,
-      scrub: remoteScrubProgress.value,
-      actual: progress.value,
-    }),
-    (current, previous) => {
-      // Always update if scrubbing state changed or we're currently scrubbing
-      if (
-        current.isScrubbing !== previous?.isScrubbing ||
-        current.isScrubbing
-      ) {
-        effectiveProgress.value =
-          current.isScrubbing && current.scrub != null
-            ? current.scrub
-            : current.actual;
-      } else {
-        // When not scrubbing, only update if progress changed significantly (1 second)
-        // MPV uses milliseconds
-        const progressUnit = CONTROLS_CONSTANTS.PROGRESS_UNIT_MS;
-        const progressDiff = Math.abs(current.actual - effectiveProgress.value);
-        if (progressDiff >= progressUnit) {
-          effectiveProgress.value = current.actual;
-        }
-      }
-    },
-    [],
-  );
-
   const { bitrateValue, subtitleIndex, audioIndex } = useLocalSearchParams<{
     bitrateValue: string;
     audioIndex: string;
@@ -671,219 +399,127 @@ export const Controls: FC<Props> = ({
     [goToNextItem],
   );
 
-  const hideControls = useCallback(() => {
-    setShowControls(false);
-    setShowAudioSlider(false);
-  }, [setShowControls]);
-  const openSubtitleScale = useCallback(() => setShowSubtitleScale(true), []);
-  const closeSubtitleScale = useCallback(() => setShowSubtitleScale(false), []);
-
-  const { handleControlsInteraction } = useControlsTimeout({
-    showControls,
-    // Don't auto-hide mid-scrub (slider or remote) or while the episode list is up.
-    isSliding: isSliding || isRemoteSliding || isScrubbing,
-    episodeView,
-    onHideControls: hideControls,
-    // Auto-dismiss the control pane ~5s after it's shown / last interacted with.
-    timeout: 5000,
-    disabled: false,
-  });
-
+  const onClose = useCallback(() => {
+    lightHapticFeedback();
+    router.back();
+  }, [lightHapticFeedback, router]);
   const switchOnEpisodeMode = useCallback(() => {
     setEpisodeView(true);
-    if (isPlaying) {
-      togglePlay();
-    }
-  }, [isPlaying, togglePlay]);
-
-  return (
-    <View style={styles.controlsContainer} pointerEvents='box-none'>
-      {episodeView ? (
-        <EpisodeList
-          item={item}
-          close={() => setEpisodeView(false)}
-          goToItem={goToItemCommon}
+    if (isPlaying) pause();
+  }, [isPlaying, pause]);
+  const menu = useMemo(
+    () => (
+      <DropdownView
+        variant='menu'
+        playbackSpeed={playbackSpeed}
+        setPlaybackSpeed={setPlaybackSpeed}
+        showTechnicalInfo={showTechnicalInfo}
+        onToggleTechnicalInfo={onToggleTechnicalInfo}
+      />
+    ),
+    [playbackSpeed, setPlaybackSpeed, showTechnicalInfo, onToggleTechnicalInfo],
+  );
+  const trackMenus = useMemo(
+    () => (
+      <>
+        <DropdownView
+          variant='subtitles'
+          subtitleDelay={subtitleDelay}
+          onSubtitleDelayChange={onSubtitleDelayChange}
         />
-      ) : (
-        <>
-          <GestureOverlay
-            screenWidth={screenWidth}
-            screenHeight={screenHeight}
-            showControls={showControls}
-            isPlaying={isPlaying}
-            onToggleControls={toggleControls}
-            twoFingerNonce={twoFingerNonce}
-            onSeekRelative={handleSeekRelative}
-            onSkipForward={handleSkipForward}
-            onSkipBackward={handleSkipBackward}
-            onTogglePlay={togglePlay}
-            onHoldSpeedStart={handleHoldSpeedStart}
-            onHoldSpeedEnd={handleHoldSpeedEnd}
-            progress={progress}
-            max={max}
-            isSeeking={isSeeking}
-            onScrubStart={handleScrubStart}
-            onScrubPreview={handleScrubPreview}
-            onScrubEnd={handleScrubEnd}
-            trickPlayUrl={trickPlayUrl}
-            trickplayInfo={trickplayInfo}
-          />
-          {Platform.OS === "android" && (
-            <AndroidSubtitleScaleOverlay
-              visible={showSubtitleScale}
-              onClose={closeSubtitleScale}
-              onBackgroundPress={hideControls}
-            />
-          )}
-          {/* Technical Info Overlay - rendered outside animated views to stay visible */}
-          {getTechnicalInfo && (
-            <TechnicalInfoOverlay
-              showControls={showControls}
-              visible={showTechnicalInfo}
-              getTechnicalInfo={getTechnicalInfo}
-              playMethod={playMethod}
-              transcodeReasons={transcodeReasons}
-              mediaSource={mediaSource}
+        <DropdownView variant='audio' />
+      </>
+    ),
+    [subtitleDelay, onSubtitleDelayChange],
+  );
+  return (
+    <>
+      <PlayerControls
+        title={playerTitle(item)}
+        durationMs={maxMs}
+        progress={progress}
+        cacheProgress={cacheProgress}
+        isSeeking={isSeeking}
+        isPlaying={isPlaying}
+        isBuffering={isBuffering}
+        showControls={showControls}
+        setShowControls={setShowControls}
+        play={play}
+        pause={pause}
+        togglePlay={togglePlay}
+        seek={seek}
+        onClose={onClose}
+        menu={menu}
+        trackMenus={trackMenus}
+        profilePill={headerLeftSlot}
+        twoFingerNonce={twoFingerNonce}
+        onHoldSpeedStart={onHoldSpeedStart}
+        onHoldSpeedEnd={onHoldSpeedEnd}
+        startPictureInPicture={startPictureInPicture}
+        isZoomedToFill={isZoomedToFill}
+        onZoomToggle={onZoomToggle}
+        onOpenEpisodes={
+          item.Type === "Episode" ? switchOnEpisodeMode : undefined
+        }
+        onPreviousEpisode={previousItem ? goToPreviousItem : undefined}
+        onNextEpisode={nextItem ? handleNextEpisodeManual : undefined}
+        showSubtitleNav={showSubtitleNav}
+        onPrevSubtitle={onPrevSubtitle}
+        onNextSubtitle={onNextSubtitle}
+        chapters={item.Chapters}
+        getTechnicalInfo={getTechnicalInfo}
+        trickPlayUrl={trickPlayUrl}
+        trickplayInfo={trickplayInfo}
+        calculateTrickplayUrl={calculateTrickplayUrl}
+        interactionBlocked={interactionBlocked || stillWatchingVisible}
+        panel={
+          episodeView ? (
+            <EpisodeList
               item={item}
+              close={() => setEpisodeView(false)}
+              goToItem={goToItemCommon}
             />
-          )}
-          {/* Subtle top/bottom scrims (no full-screen dim) — fade with the controls. */}
-          <ControlsScrims showControls={showControls} />
-          {/* Custom OSD status bar — mounted independently so it can show a subtle
-              clock/battery during regular playback, and expand when controls are up. */}
-          <PlayerStatusBar
-            item={item}
-            showControls={showControls}
-            getTechnicalInfo={getTechnicalInfo}
-          />
-          {/* Mid-playback buffering spinner (controls hidden). */}
-          {isBuffering && !showControls && (
-            <View style={styles.centerSpinner} pointerEvents='none'>
-              <Loader size='large' />
-            </View>
-          )}
-          {/* Drag-anywhere scrub: pop just the sleek bar when controls are hidden. */}
-          <ScrubProgressBar
-            visible={isScrubbing && !showControls}
-            progress={progress}
-            min={min}
-            max={max}
-            cacheProgress={cacheProgress}
-            chapters={item.Chapters}
-            durationMs={maxMs}
-          />
-          <Animated.View
-            style={headerAnimatedStyle}
-            pointerEvents={showControls ? "auto" : "none"}
-          >
-            <HeaderControls
-              item={item}
-              showControls={showControls}
-              startPictureInPicture={startPictureInPicture}
-              switchOnEpisodeMode={switchOnEpisodeMode}
-              aspectRatio={aspectRatio}
-              isZoomedToFill={isZoomedToFill}
-              onZoomToggle={onZoomToggle}
-              playbackSpeed={playbackSpeed}
-              setPlaybackSpeed={setPlaybackSpeed}
-              subtitleDelay={subtitleDelay}
-              onSubtitleDelayChange={onSubtitleDelayChange}
-              showTechnicalInfo={showTechnicalInfo}
-              onToggleTechnicalInfo={onToggleTechnicalInfo}
-              leftSlot={headerLeftSlot}
-            />
-          </Animated.View>
-          <Animated.View
-            style={bottomAnimatedStyle}
-            pointerEvents={showControls ? "auto" : "none"}
-          >
-            <BottomControls
-              item={item}
-              chapters={item.Chapters}
-              onOpenSubtitleScale={openSubtitleScale}
-              subtitleDelay={subtitleDelay}
-              onSubtitleDelayChange={onSubtitleDelayChange}
-              durationMs={maxMs}
-              showControls={showControls}
-              isSliding={isSliding}
-              showRemoteBubble={showRemoteBubble}
-              currentTime={currentTime}
+          ) : undefined
+        }
+        overlays={
+          <>
+            {getTechnicalInfo && (
+              <TechnicalInfoOverlay
+                showControls={showControls}
+                visible={showTechnicalInfo}
+                getTechnicalInfo={getTechnicalInfo}
+                playMethod={playMethod}
+                transcodeReasons={transcodeReasons}
+                mediaSource={mediaSource}
+                item={item}
+              />
+            )}
+            <SkipSegmentOverlay
+              showSkipButton={showSkipSegmentButton}
+              skipButtonText={skipSegmentButtonText}
+              showSkipCreditButton={showSkipOutroButton}
+              skipCreditButtonText={skipOutroButtonText}
+              hasContentAfterCredits={hasContentAfterCredits}
+              willShowNextEpisode={willShowNextEpisode}
+              showNextEpisode={showNextEpisode}
+              autoAdvanceNextEpisode={autoAdvanceNextEpisode}
               remainingTime={remainingTime}
-              handleControlsInteraction={handleControlsInteraction}
               isPlaying={isPlaying}
-              isBuffering={isBuffering}
-              togglePlay={togglePlay}
-              handleSkipBackward={handleSkipBackward}
-              handleSkipForward={handleSkipForward}
-              showSubtitleNav={showSubtitleNav}
-              onPrevSubtitle={onPrevSubtitle}
-              onNextSubtitle={onNextSubtitle}
-              previousItem={previousItem}
-              nextItem={nextItem}
-              goToPreviousItem={goToPreviousItem}
-              goToNextItem={goToNextItem}
-              min={min}
-              max={max}
-              effectiveProgress={effectiveProgress}
-              cacheProgress={cacheProgress}
-              handleSliderStart={handleSliderStart}
-              handleSliderComplete={handleSliderComplete}
-              handleSliderChange={handleSliderChange}
-              handleTouchStart={handleTouchStart}
-              handleTouchEnd={handleTouchEnd}
-              seekTo={seekTo}
-              trickPlayUrl={trickPlayUrl}
-              trickplayInfo={trickplayInfo}
-              time={isSliding || showRemoteBubble ? time : remoteTime}
+              itemId={item.Id}
+              skipIntro={onSkipSegment}
+              skipCredit={onSkipOutro}
+              onNextEpisodeFinish={handleNextEpisodeAutoPlay}
+              onNextEpisodePress={handleNextEpisodeManual}
+              controlsVisible={showControls}
+              hasChapters={showsChapterIcon}
             />
-          </Animated.View>
-          {/* Skip Intro / Skip Credits float independently of the controls so
-              they're visible (and tappable) without summoning the controls. */}
-          <SkipSegmentOverlay
-            showSkipButton={showSkipSegmentButton}
-            skipButtonText={skipSegmentButtonText}
-            showSkipCreditButton={showSkipOutroButton}
-            skipCreditButtonText={skipOutroButtonText}
-            hasContentAfterCredits={hasContentAfterCredits}
-            willShowNextEpisode={willShowNextEpisode}
-            showNextEpisode={showNextEpisode}
-            autoAdvanceNextEpisode={autoAdvanceNextEpisode}
-            remainingTime={remainingTime}
-            isPlaying={isPlaying}
-            itemId={item.Id}
-            skipIntro={onSkipSegment}
-            skipCredit={onSkipOutro}
-            onNextEpisodeFinish={handleNextEpisodeAutoPlay}
-            onNextEpisodePress={handleNextEpisodeManual}
-            controlsVisible={showControls}
-            hasChapters={showsChapterIcon}
-          />
-          <SegmentSkippedNotice segment={skippedNotice} />
-        </>
-      )}
+            <SegmentSkippedNotice segment={skippedNotice} />
+          </>
+        }
+      />
       {stillWatchingVisible && (
         <ContinueWatchingOverlay goToNextItem={handleContinueWatching} />
       )}
-    </View>
+    </>
   );
 };
-
-const styles = StyleSheet.create({
-  controlsContainer: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  centerSpinner: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 6,
-  },
-});

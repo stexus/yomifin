@@ -1,69 +1,41 @@
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
-import type { BaseItemDto } from "@jellyfin/sdk/lib/generated-client";
 import { type FC, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Platform, TouchableOpacity, View } from "react-native";
-import useRouter from "@/hooks/useAppRouter";
 import { useControlsSafeAreaInsets } from "@/hooks/useControlsSafeAreaInsets";
 import { useHaptic } from "@/hooks/useHaptic";
 import { useOrientation } from "@/hooks/useOrientation";
 import { OrientationLock } from "@/packages/expo-screen-orientation";
 import { HEADER_LAYOUT, ICON_SIZES } from "./constants";
-import DropdownView from "./dropdown/DropdownView";
-import { PlaybackSpeedScope } from "./utils/playback-speed-settings";
 import { shouldShowPlayerMenu } from "./utils/shouldShowPlayerMenu";
-import { type AspectRatio } from "./VideoScalingModeSelector";
 import { ZoomToggle } from "./ZoomToggle";
 
 interface HeaderControlsProps {
-  item: BaseItemDto;
   showControls: boolean;
+  onClose: () => void;
+  menu: React.ReactNode;
   startPictureInPicture?: () => Promise<void>;
-  switchOnEpisodeMode: () => void;
-  aspectRatio?: AspectRatio;
+  switchOnEpisodeMode?: () => void;
   isZoomedToFill?: boolean;
   onZoomToggle?: () => void;
-  // Playback speed props
-  playbackSpeed?: number;
-  setPlaybackSpeed?: (speed: number, scope: PlaybackSpeedScope) => void;
-  subtitleDelay?: number;
-  onSubtitleDelayChange?: (seconds: number) => void;
-  // Technical info props
-  showTechnicalInfo?: boolean;
-  onToggleTechnicalInfo?: () => void;
-  /** Extra control rendered next to the (leftmost) dropdown — yomifin profile pill. */
   leftSlot?: React.ReactNode;
-  onOpenSubtitleScale?: () => void;
 }
 
 export const HeaderControls: FC<HeaderControlsProps> = ({
-  item,
   showControls,
+  onClose,
+  menu,
   startPictureInPicture,
   switchOnEpisodeMode,
-  aspectRatio: _aspectRatio = "default",
   isZoomedToFill = false,
   onZoomToggle,
-  playbackSpeed = 1.0,
-  setPlaybackSpeed,
-  subtitleDelay = 0,
-  onSubtitleDelayChange,
-  showTechnicalInfo = false,
-  onToggleTechnicalInfo,
   leftSlot,
-  onOpenSubtitleScale,
 }) => {
   const { t } = useTranslation();
-  const router = useRouter();
   const insets = useControlsSafeAreaInsets();
   const lightHapticFeedback = useHaptic("light");
   const { orientation, lockOrientation } = useOrientation();
   const [isTogglingOrientation, setIsTogglingOrientation] = useState(false);
-
-  const onClose = async () => {
-    lightHapticFeedback();
-    router.back();
-  };
 
   const toggleOrientation = useCallback(async () => {
     if (isTogglingOrientation) return;
@@ -109,18 +81,7 @@ export const HeaderControls: FC<HeaderControlsProps> = ({
         pointerEvents='box-none'
       >
         {shouldShowPlayerMenu({ isTV: Platform.isTV }) && (
-          <View pointerEvents='auto'>
-            <DropdownView
-              variant='menu'
-              playbackSpeed={playbackSpeed}
-              setPlaybackSpeed={setPlaybackSpeed}
-              subtitleDelay={subtitleDelay}
-              onSubtitleDelayChange={onSubtitleDelayChange}
-              showTechnicalInfo={showTechnicalInfo}
-              onToggleTechnicalInfo={onToggleTechnicalInfo}
-              onOpenSubtitleScale={onOpenSubtitleScale}
-            />
-          </View>
+          <View pointerEvents='auto'>{menu}</View>
         )}
         {leftSlot ? (
           <View pointerEvents='auto' style={{ marginLeft: 8 }}>
@@ -150,6 +111,7 @@ export const HeaderControls: FC<HeaderControlsProps> = ({
         )}
         {!Platform.isTV && startPictureInPicture && (
           <TouchableOpacity
+            accessibilityLabel={t("player.controls.picture_in_picture")}
             onPress={startPictureInPicture}
             className='aspect-square flex flex-col rounded-xl items-center justify-center p-2'
           >
@@ -160,8 +122,9 @@ export const HeaderControls: FC<HeaderControlsProps> = ({
             />
           </TouchableOpacity>
         )}
-        {item?.Type === "Episode" && (
+        {switchOnEpisodeMode && (
           <TouchableOpacity
+            accessibilityLabel={t("player.controls.episodes")}
             onPress={switchOnEpisodeMode}
             className='aspect-square flex flex-col rounded-xl items-center justify-center p-2'
           >
@@ -170,12 +133,11 @@ export const HeaderControls: FC<HeaderControlsProps> = ({
         )}
         {/* Prev/next EPISODE moved to the bottom control cluster (senplayer layout). */}
         {/* MPV Zoom Toggle */}
-        <ZoomToggle
-          isZoomedToFill={isZoomedToFill}
-          onToggle={onZoomToggle ?? (() => {})}
-          disabled={!onZoomToggle}
-        />
+        {onZoomToggle && (
+          <ZoomToggle isZoomedToFill={isZoomedToFill} onToggle={onZoomToggle} />
+        )}
         <TouchableOpacity
+          accessibilityLabel={t("common.close")}
           onPress={onClose}
           className='aspect-square flex flex-col rounded-xl items-center justify-center p-2'
         >

@@ -1,7 +1,7 @@
 import { debounce } from "lodash";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SharedValue } from "react-native-reanimated";
-import { msToTicks, ticksToSeconds } from "@/utils/time";
+import { msToTicks } from "@/utils/time";
 import { CONTROLS_CONSTANTS } from "../constants";
 
 interface UseVideoSliderProps {
@@ -14,11 +14,16 @@ interface UseVideoSliderProps {
   calculateTrickplayUrl: (progressInTicks: number) => void;
   showControls: boolean;
 }
+const sliderTime = (ms: number) => {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  return {
+    hours: Math.floor(seconds / 3600),
+    minutes: Math.floor(seconds / 60) % 60,
+    seconds: seconds % 60,
+  };
+};
 
-/**
- * Hook to manage video slider interactions.
- * MPV player uses milliseconds for time values.
- */
+/** Slider UI consumes milliseconds; the source adapter handles native conversion. */
 export function useVideoSlider({
   progress,
   isSeeking,
@@ -30,85 +35,52 @@ export function useVideoSlider({
   showControls,
 }: UseVideoSliderProps) {
   const [isSliding, setIsSliding] = useState(false);
-  const [time, setTime] = useState({ hours: 0, minutes: 0, seconds: 0 });
+  const [time, setTime] = useState(sliderTime(0));
   const wasPlayingRef = useRef(false);
-  const lastProgressRef = useRef<number>(0);
+  const handleSliderChange = useMemo(
+    () =>
+      debounce((value: number) => {
+        calculateTrickplayUrl(msToTicks(value));
+        setTime(sliderTime(value));
+      }, CONTROLS_CONSTANTS.SLIDER_DEBOUNCE_MS),
+    [calculateTrickplayUrl],
+  );
+  useEffect(() => () => handleSliderChange.cancel(), [handleSliderChange]);
 
   const handleSliderStart = useCallback(() => {
-    if (!showControls) {
-      return;
-    }
-
-    setIsSliding(true);
+    if (!showControls) return;
     wasPlayingRef.current = isPlaying;
-    lastProgressRef.current = progress.value;
-
-    pause();
     isSeeking.value = true;
+    setIsSliding(true);
+    setTime(sliderTime(progress.value));
+    pause();
   }, [showControls, isPlaying, pause, progress, isSeeking]);
-
-  const handleTouchStart = useCallback(() => {
-    if (!showControls) {
-      return;
-    }
-  }, [showControls]);
-
-  const handleTouchEnd = useCallback(() => {
-    if (!showControls) {
-      return;
-    }
-  }, [showControls]);
-
   const handleSliderComplete = useCallback(
-    async (value: number) => {
+    (value: number) => {
+      handleSliderChange.cancel();
       setIsSliding(false);
+      const target = Math.max(0, Math.floor(value));
+      progress.value = target;
+      seek(target);
       isSeeking.value = false;
-      progress.value = value;
-      // MPV uses ms, seek expects ms
-      const seekValue = Math.max(0, Math.floor(value));
-      seek(seekValue);
-      if (wasPlayingRef.current) {
-        play();
-      }
+      if (wasPlayingRef.current) play();
     },
-    [seek, play, progress, isSeeking],
+    [handleSliderChange, seek, play, progress, isSeeking],
   );
-
-  // Programmatic seek (chapter list, hotkeys) that bypasses the slide gesture.
-  // Reads `isPlaying` directly instead of `wasPlayingRef`, which is only set
-  // during a real slide and would carry stale state on a tap-to-seek.
   const seekTo = useCallback(
     (value: number) => {
-      const seekValue = Math.max(0, Math.floor(value));
-      progress.value = seekValue;
-      seek(seekValue);
-      if (isPlaying) {
-        play();
-      }
+      const target = Math.max(0, Math.floor(value));
+      progress.value = target;
+      seek(target);
+      // A chapter tap must not inherit a previous slider gesture's resume state.
+      if (isPlaying) play();
     },
     [seek, play, progress, isPlaying],
   );
-
-  const handleSliderChange = useCallback(
-    debounce((value: number) => {
-      // Convert ms to ticks for trickplay
-      const progressInTicks = msToTicks(value);
-      calculateTrickplayUrl(progressInTicks);
-      const progressInSeconds = Math.floor(ticksToSeconds(progressInTicks));
-      const hours = Math.floor(progressInSeconds / 3600);
-      const minutes = Math.floor((progressInSeconds % 3600) / 60);
-      const seconds = progressInSeconds % 60;
-      setTime({ hours, minutes, seconds });
-    }, CONTROLS_CONSTANTS.SLIDER_DEBOUNCE_MS),
-    [calculateTrickplayUrl],
-  );
-
   return {
     isSliding,
     time,
     handleSliderStart,
-    handleTouchStart,
-    handleTouchEnd,
     handleSliderComplete,
     handleSliderChange,
     seekTo,

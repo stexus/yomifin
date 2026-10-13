@@ -57,9 +57,6 @@ final class MPVLayerRenderer {
     
     private var mpv: OpaquePointer?
 
-    // Yomifin capture uses a throwaway mpv handle on a background queue. Keep
-    // URL and headers together so a concurrent load cannot mix two sources.
-    private var captureSource: (url: URL?, headers: [String: String]?) = (nil, nil)
     
     private var pendingExternalSubtitles: [String] = []
     private var initialSubtitleId: Int?
@@ -596,9 +593,6 @@ final class MPVLayerRenderer {
             guard let self else { return }
             // Assigned on the queue, not the caller's thread: these values are
             // read by event handlers and reloads that also run on this queue.
-            self.stateQueue.sync(flags: .barrier) {
-                self.captureSource = (url, headers)
-            }
             self.pendingExternalSubtitles = externalSubtitles ?? []
             self.initialSubtitleId = initialSubtitleId
             self.initialAudioId = initialAudioId
@@ -1583,19 +1577,11 @@ final class MPVLayerRenderer {
     /// (`MPV_RENDER_API_TYPE_SW`), seek it to the current position, render one frame into
     /// a CPU buffer (libplacebo/swscale, no GL/Metal), and encode the JPEG with
     /// iOS-native UIKit. Fully on-device; works for streamed + local sources.
-    func captureScreenshot(to path: String, sourceUrl: String, pos: Double) throws -> Bool {
-        // Prefer the STATIC/original stream URL (range request, never a transcode);
-        // fall back to the currently-playing URL (e.g. local/offline file).
-        let source = stateQueue.sync { captureSource }
-        let url: URL
-        if !sourceUrl.isEmpty, let u = URL(string: sourceUrl) {
-            url = u
-        } else if let u = source.url {
-            url = u
-        } else {
+    func captureScreenshot(to path: String, sourceUrl: String, pos: Double, headers: [String: String]) throws -> Bool {
+        guard !sourceUrl.isEmpty, let url = URL(string: sourceUrl), pos.isFinite, pos >= 0 else {
             throw ScreenshotError.noHandle
         }
-        let capturePos = pos >= 0 ? pos : cachedPosition
+        let capturePos = pos
 
         guard let cap = mpv_create() else { throw ScreenshotError.createFailed }
         defer { mpv_terminate_destroy(cap) }
@@ -1610,7 +1596,7 @@ final class MPVLayerRenderer {
         mpv_set_option_string(cap, "hr-seek", "yes")
         mpv_set_option_string(cap, "start", String(format: "%.3f", max(0, capturePos)))
         mpv_set_option_string(cap, "msg-level", "all=no")
-        if let headers = source.headers, !headers.isEmpty {
+        if !headers.isEmpty {
             let headerString = headers.map { "\($0): \($1)" }.joined(separator: "\r\n")
             mpv_set_option_string(cap, "http-header-fields", headerString)
         }
@@ -1718,19 +1704,12 @@ final class MPVLayerRenderer {
         return FileManager.default.fileExists(atPath: path)
     }
 
-    /// Extract [start, end] of `sourceUrl`'s audio (track `audioId`) to an AAC `.m4a` at
-    /// `outputPath`, using a throwaway libmpv encode-mode handle. `sourceUrl` should be
-    /// the static/original stream (range request, no transcode); "" falls back to the
-    /// currently-playing URL (local/offline file). Blocks until encoding finishes.
-    func extractAudioClip(start: Double, end: Double, audioId: Int, sourceUrl: String, to outputPath: String) -> Bool {
-        let source = stateQueue.sync { captureSource }
-        let url: URL
-        if !sourceUrl.isEmpty, let u = URL(string: sourceUrl) {
-            url = u
-        } else if let u = source.url {
-            url = u
-        } else {
-            Logger.shared.log("extractAudioClip: no source URL", type: "Error")
+    /// Extract a frozen original-source range/track with an independent encode handle.
+    /// No playback state is consulted, even if the user resumes or switches sources.
+    func extractAudioClip(start: Double, end: Double, audioId: Int, sourceUrl: String, headers: [String: String], to outputPath: String) -> Bool {
+        guard !sourceUrl.isEmpty, let url = URL(string: sourceUrl),
+              start.isFinite, end.isFinite, end > start, audioId > 0 else {
+            Logger.shared.log("extractAudioClip: invalid frozen capture request", type: "Error")
             return false
         }
         guard let enc = mpv_create() else {
@@ -1743,7 +1722,7 @@ final class MPVLayerRenderer {
         mpv_set_option_string(enc, "vid", "no")        // audio only (no video decode)
         mpv_set_option_string(enc, "vo", "null")
         mpv_set_option_string(enc, "ao", "null")
-        mpv_set_option_string(enc, "aid", audioId > 0 ? String(audioId) : "auto")
+        mpv_set_option_string(enc, "aid", String(audioId))
         mpv_set_option_string(enc, "start", String(format: "%.3f", max(0, start)))
         mpv_set_option_string(enc, "end", String(format: "%.3f", end))
         // Encode mode: setting `o` switches mpv into headless encode; it quits at EOF.
@@ -1753,7 +1732,7 @@ final class MPVLayerRenderer {
         mpv_set_option_string(enc, "oacopts", "b=128k")
         mpv_set_option_string(enc, "msg-level", "all=warn")
         // Carry the same HTTP headers (Jellyfin auth) for streamed sources.
-        if let headers = source.headers, !headers.isEmpty {
+        if !headers.isEmpty {
             let headerString = headers.map { "\($0): \($1)" }.joined(separator: "\r\n")
             mpv_set_option_string(enc, "http-header-fields", headerString)
         }

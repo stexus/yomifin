@@ -410,31 +410,56 @@ export async function checkAnkiDuplicate(
 }
 
 /**
- * Add one card to Anki. Resolves with the new note id on success; rejects with a
- * user-facing message (duplicate, missing deck/model, unreachable) on failure.
+ * Add one card using the configuration captured on Add. Resolves with its note ID
+ * and missing attachments; rejects only if the note itself could not be added.
  */
-export async function addAnkiCard(data: CardData): Promise<number> {
-  const config = getAnkiConfig(data.profileId);
+export async function addAnkiCard(
+  data: CardData,
+  config: AnkiConfig,
+): Promise<{ noteId: number; missingMedia: string[] }> {
   const markers = collectMarkers(config.fieldTemplates);
-  // Upload media first so the field references resolve — but only media a template
-  // actually references (best-effort: a media upload failure shouldn't block a text
-  // card, so swallow and continue).
-  const m = data.media;
-  try {
-    if (markers.has("sentence-audio") && m?.audioFilename && m.audioBase64)
-      await storeMedia(config.url, m.audioFilename, m.audioBase64);
-    if (markers.has("picture") && m?.imageFilename && m.imageBase64)
-      await storeMedia(config.url, m.imageFilename, m.imageBase64);
-    if (markers.has("audio") && data.wordAudio)
-      await storeMedia(
-        config.url,
-        data.wordAudio.filename,
-        data.wordAudio.base64,
-      );
-  } catch (e) {
-    console.warn("[YOMIFIN ANKI] storeMediaFile failed:", e);
+  // Preserve the text-card fallback, but never emit references to failed uploads.
+  // Handle each attachment separately so one failure doesn't skip the others.
+  const m = { ...data.media };
+  let wordAudio = data.wordAudio;
+  const missingMedia: string[] = [];
+  const upload = async (label: string, filename?: string, base64?: string) => {
+    if (filename && base64) {
+      try {
+        await storeMedia(config.url, filename, base64);
+        return true;
+      } catch (e) {
+        console.warn("[YOMIFIN ANKI] storeMediaFile failed:", e);
+      }
+    }
+    missingMedia.push(label);
+    return false;
+  };
+  if (
+    markers.has("sentence-audio") &&
+    !(await upload("sentence audio", m.audioFilename, m.audioBase64))
+  ) {
+    delete m.audioFilename;
+    delete m.audioBase64;
   }
-  const note = buildNote(config, data, data.forceDuplicate);
+  if (
+    markers.has("picture") &&
+    !(await upload("image", m.imageFilename, m.imageBase64))
+  ) {
+    delete m.imageFilename;
+    delete m.imageBase64;
+  }
+  if (
+    markers.has("audio") &&
+    !(await upload("word audio", wordAudio?.filename, wordAudio?.base64))
+  ) {
+    wordAudio = undefined;
+  }
+  const note = buildNote(
+    config,
+    { ...data, media: m, wordAudio },
+    data.forceDuplicate,
+  );
   const fields = note.fields;
   console.log(
     `[YOMIFIN ANKI] addNote deck="${config.deckName}" model="${config.modelName}" ` +
@@ -444,7 +469,7 @@ export async function addAnkiCard(data: CardData): Promise<number> {
   try {
     const id = await ankiInvoke<number>(config.url, "addNote", { note });
     console.log(`[YOMIFIN ANKI] addNote ok id=${id}`);
-    return id;
+    return { noteId: id, missingMedia };
   } catch (e) {
     console.warn(`[YOMIFIN ANKI] addNote failed: ${(e as Error).message}`);
     throw e;

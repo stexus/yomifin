@@ -47,6 +47,7 @@ import { ScrollView } from "react-native-gesture-handler";
 import Animated, { FadeInLeft, FadeInRight } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
+import { CARD_ADD_SPINNER_DELAY_MS } from "@/constants/Mining";
 import {
   type AnkiDuplicateStatus,
   addAnkiCard,
@@ -92,14 +93,13 @@ interface Props {
   /** Subtitle cue frozen at tap time — fallback sentence when there's no cue store. */
   sentence?: string;
   /**
-   * Phase 4/8: resolves the in-flight media capture for this card. `want` gates each
-   * capture on the field templates; `rangeSec` widens the audio to the selected cue
-   * range (min start … max end).
+   * Freeze media inputs synchronously at Add; return the deferred capture operation.
+   * `rangeSec` widens audio to the selected cue range (min start … max end).
    */
-  getMedia?: (
+  prepareMedia?: (
     want: MediaWant,
     rangeSec?: { start: number; end: number },
-  ) => Promise<CapturedMedia> | undefined;
+  ) => (() => Promise<CapturedMedia>) | undefined;
   /** Phase 8 cue store: the item's full parsed track ([] = none/bitmap). */
   cues?: SubtitleCue[];
   /** Phase 8: selected cue range (anchored at tap; null = no anchor). */
@@ -129,7 +129,7 @@ export default function DefinitionPopup({
   theme,
   dictTints = {},
   sentence = "",
-  getMedia,
+  prepareMedia,
   cues = [],
   cueRange = null,
   anchorIndex = -1,
@@ -348,6 +348,7 @@ export default function DefinitionPopup({
   // The add-card task runs detached: the user can close the popup / resume playback
   // while it finishes (toast reports the outcome). Guard state writes on unmount.
   const mountedRef = useRef(true);
+  const addingRef = useRef(false);
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -356,11 +357,9 @@ export default function DefinitionPopup({
   }, []);
 
   const handleAddCard = async (force = false) => {
-    if (adding || added) return;
+    if (addingRef.current || added) return;
+    addingRef.current = true;
     setAdding(true);
-    // Let the spinner PAINT before any heavy work starts (device feedback: the
-    // indication lagged behind the press).
-    await new Promise((r) => setTimeout(r, 30));
     try {
       // Gate the expensive work on what the field templates actually reference.
       const config = getAnkiConfig(profileId);
@@ -400,10 +399,17 @@ export default function DefinitionPopup({
       const rangeSec = hasCueStore
         ? (rangeSpanSec(cues, cueRange) ?? undefined)
         : undefined;
+      // Prepare BEFORE yielding: the selected track/source must not follow playback
+      // or another lookup during the spinner delay or the later screenshot capture.
+      let capture: (() => Promise<CapturedMedia>) | undefined;
+      try {
+        if (want.image || want.audio) capture = prepareMedia?.(want, rangeSec);
+      } catch (e) {
+        console.warn("[YOMIFIN MEDIA] preparation failed:", e);
+      }
+      await new Promise((r) => setTimeout(r, CARD_ADD_SPINNER_DELAY_MS));
       const [media, wordAudio] = await Promise.all([
-        (want.image || want.audio) && getMedia
-          ? getMedia(want, rangeSec)
-          : Promise.resolve(undefined),
+        capture ? capture() : Promise.resolve(undefined),
         markers.has("audio") && entry
           ? fetchWordAudioCached(
               config.wordAudioSources,
@@ -412,24 +418,32 @@ export default function DefinitionPopup({
             )
           : Promise.resolve(null),
       ]);
-      await addAnkiCard({
-        result,
-        activeIndex: safeIndex,
-        sentence: displaySentence,
-        selection,
-        customSelectionText: customText ?? undefined,
-        cloze: cardCloze,
-        documentTitle,
-        media,
-        wordAudio,
-        profileId,
-        forceDuplicate: force,
-      });
+      const outcome = await addAnkiCard(
+        {
+          result,
+          activeIndex: safeIndex,
+          sentence: displaySentence,
+          selection,
+          customSelectionText: customText ?? undefined,
+          cloze: cardCloze,
+          documentTitle,
+          media,
+          wordAudio,
+          profileId,
+          forceDuplicate: force,
+        },
+        config,
+      );
       if (mountedRef.current) setAdded(true);
-      toast.success("Card added to Anki");
+      if (outcome.missingMedia.length > 0) {
+        toast.warning(`Card added; missing ${outcome.missingMedia.join(", ")}`);
+      } else {
+        toast.success("Card added to Anki");
+      }
     } catch (e) {
       toast.error((e as Error).message || "Failed to add card");
     } finally {
+      addingRef.current = false;
       if (mountedRef.current) setAdding(false);
     }
   };

@@ -17,13 +17,7 @@ import { useLocalSearchParams, useNavigation } from "expo-router";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Alert,
-  PixelRatio,
-  Platform,
-  useWindowDimensions,
-  View,
-} from "react-native";
+import { Alert, Platform, View } from "react-native";
 import { useAnimatedReaction, useSharedValue } from "react-native-reanimated";
 import { BITRATES } from "@/components/BitrateSelector";
 import { Text } from "@/components/common/Text";
@@ -42,6 +36,7 @@ import {
   PlaybackSpeedScope,
   updatePlaybackSpeedSettings,
 } from "@/components/video-player/controls/utils/playback-speed-settings";
+import { playerProfileHint } from "@/components/video-player/controls/utils/playerPresentation";
 import { VideoPlayerView } from "@/components/video-player/VideoPlayerView";
 import OnlineSubtitlesModal, {
   type LoadedOnlineSubtitle,
@@ -56,6 +51,7 @@ import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { useOrientation } from "@/hooks/useOrientation";
 import { usePlaybackManager } from "@/hooks/usePlaybackManager";
 import usePlaybackSpeed from "@/hooks/usePlaybackSpeed";
+import { usePlayerSubtitleStyle } from "@/hooks/usePlayerSubtitleStyle";
 import { useInvalidatePlaybackProgressCache } from "@/hooks/useRevalidatePlaybackProgressCache";
 import { useWebSocket } from "@/hooks/useWebsockets";
 import {
@@ -91,33 +87,26 @@ import {
   applyMpvSubtitleSelection,
   getExternalSubtitleUrl,
   getMpvAudioId,
+  getMpvCaptureAudioId,
   isImageBasedSubtitle,
 } from "@/utils/jellyfin/subtitleUtils";
 import { logAndCaptureError, writeToLog } from "@/utils/log";
-import {
-  getEffectiveSubtitleMarginY,
-  getEffectiveSubtitleScale,
-} from "@/utils/subtitles";
 import {
   isLocalSubtitleIndex,
   localSubtitleIndex,
   toServerSubtitleIndex,
 } from "@/utils/subtitles/subtitleIndex";
-import {
-  applySubtitleStyle,
-  buildSubtitleStyle,
-} from "@/utils/subtitles/subtitleStyle";
 import { msToTicks, ticksToSeconds } from "@/utils/time";
 import {
   type CaptureContext,
-  captureCardMedia,
+  type CaptureSource,
   type MediaWant,
+  prepareCardMedia,
 } from "@/utils/yomifin/ankiMedia";
 import {
   buildSrtUrl,
   fetchSubtitleSrt,
 } from "@/utils/yomifin/fetchSubtitleSrt";
-import { profileIdForLanguageTag } from "@/utils/yomifin/profiles";
 import { parseSrt, type SubtitleCue } from "@/utils/yomifin/srt";
 import { estimateSubtitleOffset } from "@/utils/yomifin/subSync";
 import {
@@ -135,8 +124,6 @@ export default function DirectPlayerPage() {
   const navigation = useNavigation();
   const router = useRouter();
   const { settings, updateSettings } = useSettings();
-
-  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
 
   const [isPlaybackStopped, setIsPlaybackStopped] = useState(false);
   // Mirror of isPlaybackStopped that is already set when a report is built.
@@ -863,17 +850,24 @@ export default function DirectPlayerPage() {
 
   // YOMIFIN Phase 4: the STATIC/original stream URL for capture — a throwaway handle
   // seeking on this is a plain HTTP range request (never a transcode), regardless of
-  // whether playback itself is direct/transcoded. Empty => native uses the playing URL
-  // (e.g. the local file when offline).
+  // whether playback itself is direct/transcoded. When absent, the tap snapshot
+  // explicitly uses videoSource.url (e.g. the local file when offline).
   const yomifinCaptureSourceUrl = useMemo(() => {
     if (offline || !api?.basePath || !api.accessToken || !item?.Id) return "";
     const p = new URLSearchParams({
       static: "true",
-      mediaSourceId,
+      mediaSourceId: stream?.mediaSource?.Id ?? mediaSourceId,
       api_key: api.accessToken,
     });
     return `${api.basePath}/Videos/${item.Id}/stream?${p.toString()}`;
-  }, [offline, api?.basePath, api?.accessToken, item?.Id, mediaSourceId]);
+  }, [
+    offline,
+    api?.basePath,
+    api?.accessToken,
+    item?.Id,
+    mediaSourceId,
+    stream?.mediaSource?.Id,
+  ]);
 
   // Phase 5: pause while a definition popup is open, resume on close — but only if the
   // lookup was the one that paused (don't fight a user's manual pause).
@@ -882,7 +876,9 @@ export default function DirectPlayerPage() {
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
 
+  const [yomifinLookupVisible, setYomifinLookupVisible] = useState(false);
   const yomifinLookupOpen = useCallback(() => {
+    setYomifinLookupVisible(true);
     if (!settings.yomifinPauseOnLookup) return;
     if (isPlayingRef.current) {
       pausedByLookupRef.current = true;
@@ -892,6 +888,7 @@ export default function DirectPlayerPage() {
   }, [settings.yomifinPauseOnLookup]);
 
   const yomifinLookupClose = useCallback(() => {
+    setYomifinLookupVisible(false);
     if (pausedByLookupRef.current) {
       pausedByLookupRef.current = false;
       setPlaying(true);
@@ -911,11 +908,17 @@ export default function DirectPlayerPage() {
     const audio = streams.find(
       (s) => s.Type === "Audio" && s.Index === currentAudioIndex,
     );
-    return (
-      profileIdForLanguageTag(sub?.Language) ??
-      profileIdForLanguageTag(audio?.Language)
-    );
-  }, [stream?.mediaSource, currentSubtitleIndex, currentAudioIndex]);
+    return playerProfileHint({
+      externalSubtitle: externalSub,
+      subtitleLanguage: sub?.Language,
+      audioLanguage: audio?.Language,
+    });
+  }, [
+    stream?.mediaSource,
+    currentSubtitleIndex,
+    currentAudioIndex,
+    externalSub,
+  ]);
 
   // YOMIFIN: verify the running BINARY has the native two-finger-tap seam and say so
   // loudly in Metro — a stale binary makes the gesture silently dead, which has
@@ -1015,35 +1018,6 @@ export default function DirectPlayerPage() {
   const yomifinNextSubtitle = useCallback(() => {
     videoRef.current?.subSeek?.(1);
   }, []);
-
-  // Cheap: snapshot the cue range + frame position at TAP time (no decode/seek).
-  const yomifinSnapshotCard = useCallback(
-    (): CaptureContext => ({
-      cueStart: yomifinCueRef.current.start,
-      cueEnd: yomifinCueRef.current.end,
-      framePos: progress.get() / 1000,
-    }),
-    [progress],
-  );
-
-  // Expensive: runs ONLY on "+ Anki card" press. Best-effort (partial/empty on failure).
-  // `want` gates each capture on whether a field template references it (Phase 8).
-  // Filenames are content-derived from itemId + times (media dedup: batch-mining one
-  // line shares one .jpg/.m4a; the capture layer collapses repeat captures).
-  const yomifinCaptureMedia = useCallback(
-    async (ctx: CaptureContext, want: MediaWant) => {
-      const v = videoRef.current;
-      if (!v) return {};
-      return captureCardMedia(
-        v,
-        ctx,
-        item?.Id ?? itemId ?? "item",
-        yomifinCaptureSourceUrl,
-        want,
-      );
-    },
-    [yomifinCaptureSourceUrl, item?.Id, itemId],
-  );
 
   const togglePlay = async () => {
     lightHapticFeedback();
@@ -1439,6 +1413,77 @@ export default function DirectPlayerPage() {
     settings.mpvDemuxerMaxBackBytes,
     settings.mpvVoDriver,
   ]);
+
+  const yomifinCaptureSource = useMemo<CaptureSource | null>(() => {
+    const url = yomifinCaptureSourceUrl || videoSource?.url;
+    if (!url) return null;
+    return {
+      id: JSON.stringify([
+        "jellyfin",
+        api?.basePath,
+        item?.Id ?? itemId,
+        stream?.mediaSource?.Id ?? mediaSourceId,
+        offline ? url : null,
+      ]),
+      url,
+      headers: yomifinCaptureSourceUrl
+        ? {
+            ...(api?.accessToken
+              ? { Authorization: `MediaBrowser Token="${api.accessToken}"` }
+              : {}),
+            ...getJellyfinHeadersForUrl(url, api?.basePath),
+          }
+        : { ...videoSource?.headers },
+    };
+  }, [
+    yomifinCaptureSourceUrl,
+    videoSource,
+    api?.basePath,
+    api?.accessToken,
+    item?.Id,
+    itemId,
+    stream?.mediaSource?.Id,
+    mediaSourceId,
+    offline,
+  ]);
+
+  // Anchor the frame, timeline and source to the tapped subtitle. No media decoding.
+  const yomifinSnapshotCard = useCallback(
+    (): CaptureContext | null =>
+      yomifinCaptureSource
+        ? {
+            cueStart: yomifinCueRef.current.start,
+            cueEnd: yomifinCueRef.current.end,
+            framePos: progress.get() / 1000,
+            source: yomifinCaptureSource,
+          }
+        : null,
+    [progress, yomifinCaptureSource],
+  );
+
+  const yomifinPrepareMedia = useCallback(
+    (ctx: CaptureContext, want: MediaWant) => {
+      const v = videoRef.current;
+      if (!v) return undefined;
+      // A transcode's aid=1 is NOT necessarily track 1 of the original file.
+      // Only map when opening the original file; downloads use their local track.
+      const audioId =
+        ctx.source.id !== yomifinCaptureSource?.id
+          ? null
+          : getMpvCaptureAudioId(
+              stream?.mediaSource,
+              currentAudioIndex,
+              !!yomifinCaptureSourceUrl,
+            );
+      return prepareCardMedia(v, ctx, want, audioId);
+    },
+    [
+      stream?.mediaSource,
+      currentAudioIndex,
+      yomifinCaptureSource?.id,
+      yomifinCaptureSourceUrl,
+    ],
+  );
 
   const volumeUpCb = useCallback(async () => {
     if (Platform.isTV) return;
@@ -1955,49 +2000,17 @@ export default function DirectPlayerPage() {
     videoRef,
   ]);
 
-  // Apply subtitle settings after MPV has enumerated tracks; applying them on
-  // load is too early for ASS override/alignment on Android.
-  useEffect(() => {
-    if (!tracksReady || !videoRef.current) return;
-    const videoStream = stream?.mediaSource?.MediaStreams?.find(
-      (mediaStream) => mediaStream.Type === "Video",
-    );
-    const effectiveMarginY =
-      settings.subtitleMarginY === undefined
-        ? undefined
-        : getEffectiveSubtitleMarginY(settings.subtitleMarginY);
-    const effectiveScale = getEffectiveSubtitleScale(
-      settings.subtitleSize,
-      videoStream?.Width,
-      videoStream?.Height,
-      screenWidth * PixelRatio.get(),
-      screenHeight * PixelRatio.get(),
-      isZoomedToFill && screenHeight > screenWidth ? "cover" : "contain",
-      getActivePlayerType(settings),
-    );
-    void applySubtitleStyle(
-      videoRef.current,
-      buildSubtitleStyle(settings, {
-        scale: effectiveScale,
-        marginY:
-          effectiveMarginY !== undefined &&
-          Platform.OS === "android" &&
-          !Platform.isTV &&
-          screenHeight > screenWidth
-            ? Math.round(effectiveMarginY * 0.7)
-            : effectiveMarginY,
-      }),
-    ).catch((error: unknown) => {
-      console.error("Failed to apply subtitle settings:", error);
-    });
-  }, [
-    tracksReady,
-    settings,
-    stream?.mediaSource,
-    screenWidth,
-    screenHeight,
-    isZoomedToFill,
-  ]);
+  const subtitleVideoStream = stream?.mediaSource?.MediaStreams?.find(
+    (mediaStream) => mediaStream.Type === "Video",
+  );
+  usePlayerSubtitleStyle({
+    playerRef: videoRef,
+    ready: tracksReady,
+    videoWidth: subtitleVideoStream?.Width,
+    videoHeight: subtitleVideoStream?.Height,
+    zoomed: isZoomedToFill,
+    playerType: getActivePlayerType(settings),
+  });
 
   // Apply initial playback speed when video loads
   useEffect(() => {
@@ -2219,6 +2232,7 @@ export default function DirectPlayerPage() {
                 />
               ) : (
                 <Controls
+                  interactionBlocked={onlineSubsVisible || yomifinLookupVisible}
                   mediaSource={stream?.mediaSource}
                   item={item}
                   togglePlay={togglePlay}
@@ -2270,7 +2284,7 @@ export default function DirectPlayerPage() {
                 onLookupClose={yomifinLookupClose}
                 popupPosition={settings.yomifinPopupPosition ?? "right"}
                 onSnapshotCard={yomifinSnapshotCard}
-                onCaptureMedia={yomifinCaptureMedia}
+                onPrepareMedia={yomifinPrepareMedia}
                 languageHint={yomifinLanguageHint}
                 profileKey={item?.SeriesId ?? item?.Id ?? undefined}
                 documentTitle={

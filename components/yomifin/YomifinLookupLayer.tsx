@@ -64,17 +64,15 @@ interface Props {
    * Phase 4 — cheap, called at TAP: snapshot the cue range + frame position so the
    * (later) media capture matches the tapped moment. No decoding/seeking here.
    */
-  onSnapshotCard?: () => CaptureContext;
+  onSnapshotCard?: () => CaptureContext | null;
   /**
-   * Phase 4 — expensive, called only on "+ Anki card" PRESS: grab the frame + audio
-   * clip for the frozen snapshot. Kept off the tap path so ordinary lookups cost
-   * nothing (no per-tap seek/decode). Filenames are content-derived inside the
-   * capture layer (media dedup), so no per-card base name is threaded through.
+   * Called synchronously on Add to freeze remaining inputs. Returns the expensive
+   * capture operation, which can run after the popup yields to paint its spinner.
    */
-  onCaptureMedia?: (
+  onPrepareMedia?: (
     ctx: CaptureContext,
     want: MediaWant,
-  ) => Promise<CapturedMedia>;
+  ) => (() => Promise<CapturedMedia>) | undefined;
   /** Playing media item's title, for the {document-title} marker. */
   documentTitle?: string;
   /**
@@ -99,7 +97,7 @@ export default function YomifinLookupLayer({
   onLookupClose,
   popupPosition = "right",
   onSnapshotCard,
-  onCaptureMedia,
+  onPrepareMedia,
   documentTitle,
   languageHint,
   profileKey,
@@ -303,14 +301,14 @@ export default function YomifinLookupLayer({
               if (anchor >= 0)
                 setCueRange({ startIndex: anchor, endIndex: anchor });
             }}
-            getMedia={(want, rangeSec) => {
+            prepareMedia={(want, rangeSec) => {
               const ctx = popupCardCtx;
-              if (!ctx || !onCaptureMedia) return undefined;
+              if (!ctx || !onPrepareMedia) return undefined;
               // Widen the audio clip to the selected cue range (multi-sentence card).
               const merged = rangeSec
                 ? { ...ctx, cueStart: rangeSec.start, cueEnd: rangeSec.end }
                 : ctx;
-              return onCaptureMedia(merged, want);
+              return onPrepareMedia(merged, want);
             }}
             position={popupPosition}
             onClose={closeLookup}

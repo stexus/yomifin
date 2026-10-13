@@ -55,6 +55,8 @@ export interface LoadedOnlineSubtitle {
   /** Yozora subtitle id when the file came from the server source (enables
    *  "Sync on server"); undefined for jimaku-direct files. */
   serverId?: number;
+  /** Language supplied by the subtitle source, when known. */
+  language?: string;
 }
 
 /** One server-cached subtitle row (Yozora SUB-1; provider may also be the
@@ -310,6 +312,7 @@ export default function OnlineSubtitlesModal({
         name: row.name,
         cues,
         serverId: row.id,
+        language: row.lang,
       });
       if (cues.length === 0) {
         setServerError(

@@ -817,7 +817,22 @@
     "segment_skipped_outro": "Credits skipped",
     "segment_skipped_recap": "Recap skipped",
     "segment_skipped_commercial": "Commercial skipped",
-    "segment_skipped_preview": "Preview skipped"
+    "segment_skipped_preview": "Preview skipped",
+    "controls": {
+      "picture_in_picture": "Picture in picture",
+      "episodes": "Episodes",
+      "previous_subtitle": "Previous subtitle",
+      "next_subtitle": "Next subtitle",
+      "pause": "Pause",
+      "rewind": "Rewind {{seconds}} seconds",
+      "forward": "Forward {{seconds}} seconds",
+      "subtitle_text_size": "Tappable subtitles · Text size",
+      "subtitle_weight": "Tappable subtitles · Weight",
+      "subtitle_outline": "Tappable subtitles · Outline",
+      "subtitle_position": "Tappable subtitles · Position",
+      "online_subtitles": "Online subtitles…",
+      "subtitles_off": "No subtitles"
+    }
   },
   "chapters": {
     "title": "Chapters",

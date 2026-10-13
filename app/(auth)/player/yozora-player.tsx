@@ -21,16 +21,14 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { useLocalSearchParams, useNavigation } from "expo-router";
 import { useSetAtom } from "jotai";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Pressable,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
-} from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSharedValue } from "react-native-reanimated";
-import { GestureOverlay } from "@/components/video-player/controls/GestureOverlay";
 import { suppressTaps } from "@/components/video-player/controls/tapSuppression";
+import {
+  bufferedPositionMs,
+  clampPositionMs,
+  playerProfileHint,
+} from "@/components/video-player/controls/utils/playerPresentation";
 import OnlineSubtitlesModal, {
   type LoadedOnlineSubtitle,
   type ServerSubtitleSource,
@@ -39,6 +37,7 @@ import ProfilePill from "@/components/yomifin/ProfilePill";
 import YomifinErrorBoundary from "@/components/yomifin/YomifinErrorBoundary";
 import YomifinLookupLayer from "@/components/yomifin/YomifinLookupLayer";
 import YozoraPlayerControls from "@/components/yozora/YozoraPlayerControls";
+import { usePlayerSubtitleStyle } from "@/hooks/usePlayerSubtitleStyle";
 import {
   type MpvAudioTrack,
   type MpvOnPlaybackStateChangePayload,
@@ -55,8 +54,8 @@ import {
 } from "@/utils/atoms/yomifinCueStore";
 import {
   type CaptureContext,
-  captureCardMedia,
   type MediaWant,
+  prepareCardMedia,
 } from "@/utils/yomifin/ankiMedia";
 import { fnv1a } from "@/utils/yomifin/mediaKey";
 import type { SubtitleCue } from "@/utils/yomifin/srt";
@@ -90,7 +89,7 @@ const TICK_INTERVAL_MS = 15_000;
 export default function YozoraPlayerPage() {
   const videoRef = useRef<MpvPlayerViewRef>(null);
   const navigation = useNavigation();
-  const { settings } = useSettings();
+  const { settings, updateSettings } = useSettings();
   const { client, connected } = useYozora();
   const queryClient = useQueryClient();
 
@@ -139,7 +138,6 @@ export default function YozoraPlayerPage() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isBuffering, setIsBuffering] = useState(true);
   const [showControls, setShowControls] = useState(true);
-  const [positionSec, setPositionSec] = useState(0);
   const [durationSec, setDurationSec] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [subTracks, setSubTracks] = useState<MpvSubtitleTrack[]>([]);
@@ -148,14 +146,30 @@ export default function YozoraPlayerPage() {
   const [selectedAudioId, setSelectedAudioId] = useState<number>(-1);
   // LEGACY binaries only: bumped per window-seam two-finger tap (feedback bubble).
   const [twoFingerNonce, setTwoFingerNonce] = useState(0);
-  const [playbackSpeed, setPlaybackSpeed] = useState(1);
-  const [isScrubbing, setIsScrubbing] = useState(false);
-  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const [playbackSpeed, setPlaybackSpeed] = useState(
+    settings.defaultPlaybackSpeed ?? 1,
+  );
+  const playbackSpeedRef = useRef(playbackSpeed);
+  const [isZoomedToFill, setIsZoomedToFill] = useState(false);
+  const zoomRef = useRef(false);
+  const [videoDimensions, setVideoDimensions] = useState<{
+    width?: number;
+    height?: number;
+  }>({});
+  const [tracksReady, setTracksReady] = useState(false);
+  const [pipSupported, setPipSupported] = useState(false);
+  const [isPipActive, setIsPipActive] = useState(false);
+  const [lookupVisible, setLookupVisible] = useState(false);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Gesture layer / slider shared values (ms, like the Jellyfin player's Controls).
   const progressSV = useSharedValue(0);
-  const maxSV = useSharedValue(0);
-  const minSV = useSharedValue(0);
   const cacheProgressSV = useSharedValue(0);
   const isSeekingSV = useSharedValue(false);
 
@@ -303,6 +317,17 @@ export default function YozoraPlayerPage() {
     } catch (e) {
       console.warn(`[YOZORA] audio track refresh failed: ${e}`);
     }
+    try {
+      const info = await v.getTechnicalInfo();
+      if (mountedRef.current)
+        setVideoDimensions({
+          width: info.videoWidth,
+          height: info.videoHeight,
+        });
+    } catch (error) {
+      console.warn("[YOZORA] video dimensions unavailable", error);
+    }
+    if (mountedRef.current) setTracksReady(true);
   }, []);
 
   const selectAudioTrack = useCallback(async (trackId: number) => {
@@ -435,21 +460,22 @@ export default function YozoraPlayerPage() {
 
   const onProgress = useCallback(
     (e: { nativeEvent: MpvOnProgressEventPayload }) => {
-      const { position, duration } = e.nativeEvent;
+      const { position, duration, cacheSeconds } = e.nativeEvent;
       positionRef.current = position;
       durationRef.current = duration ?? 0;
       setIsBuffering(false);
-      setPositionSec((prev) =>
-        Math.abs(prev - position) >= 1 ? position : prev,
-      );
       setDurationSec((prev) =>
         Math.abs(prev - (duration ?? 0)) >= 1 ? (duration ?? 0) : prev,
       );
       // Gesture layer shared values (don't fight an in-flight scrub).
       if (!isSeekingSV.value) progressSV.value = position * 1000;
-      maxSV.value = (duration ?? 0) * 1000;
+      cacheProgressSV.value = bufferedPositionMs(
+        position,
+        cacheSeconds,
+        duration,
+      );
     },
-    [progressSV, maxSV, isSeekingSV],
+    [progressSV, cacheProgressSV, isSeekingSV],
   );
 
   const onPlaybackStateChange = useCallback(
@@ -477,19 +503,107 @@ export default function YozoraPlayerPage() {
     }
   }, [isPlaying]);
 
-  const seekBy = useCallback((delta: number) => {
-    videoRef.current?.seekBy?.(delta);
-    // Position ref updates on the next onProgress; nudge it so the tick is honest.
-    positionRef.current = Math.max(0, positionRef.current + delta);
-    sendTickRef.current("seeked");
+  const play = useCallback(() => {
+    isPlayingRef.current = true;
+    setIsPlaying(true);
+    videoRef.current?.play();
   }, []);
-
+  const pause = useCallback(() => {
+    isPlayingRef.current = false;
+    setIsPlaying(false);
+    videoRef.current?.pause();
+    sendTickRef.current("paused");
+  }, []);
+  const seek = useCallback(
+    (positionMs: number) => {
+      const target = clampPositionMs(positionMs, durationRef.current * 1000);
+      progressSV.value = target;
+      positionRef.current = target / 1000;
+      videoRef.current?.seekTo(target / 1000);
+      sendTickRef.current("seeked");
+    },
+    [progressSV],
+  );
   const setSpeed = useCallback((next: number) => {
+    playbackSpeedRef.current = next;
     setPlaybackSpeed(next);
     videoRef.current?.setSpeed(next).catch(() => {});
   }, []);
-
   const speedBeforeHoldRef = useRef<number | null>(null);
+  const setSavedSpeed = useCallback(
+    (next: number) => {
+      speedBeforeHoldRef.current = null;
+      setSpeed(next);
+      updateSettings({ defaultPlaybackSpeed: next });
+    },
+    [setSpeed, updateSettings],
+  );
+  const onLoad = useCallback(async () => {
+    const player = videoRef.current;
+    if (!player) return;
+    try {
+      await player.setSpeed(playbackSpeedRef.current);
+      await player.setZoomedToFill(zoomRef.current);
+      const supported = await player.isPictureInPictureSupported();
+      if (mountedRef.current) setPipSupported(supported);
+    } catch (error) {
+      console.warn("[YOZORA] player settings failed", error);
+    }
+  }, []);
+  const toggleZoom = useCallback(() => {
+    zoomRef.current = !zoomRef.current;
+    setIsZoomedToFill(zoomRef.current);
+    videoRef.current
+      ?.setZoomedToFill(zoomRef.current)
+      .catch((error) => console.warn("[YOZORA] zoom failed", error));
+  }, []);
+  const startPictureInPicture = useCallback(async () => {
+    setShowControls(false);
+    try {
+      await videoRef.current?.startPictureInPicture();
+    } catch (error) {
+      setShowControls(true);
+      console.warn("[YOZORA] PiP failed", error);
+    }
+  }, []);
+  const onPictureInPictureChange = useCallback(
+    (event: { nativeEvent: { isActive: boolean } }) => {
+      setIsPipActive(event.nativeEvent.isActive);
+      setShowControls(!event.nativeEvent.isActive);
+    },
+    [],
+  );
+  const getTechnicalInfo = useCallback(
+    () => videoRef.current?.getTechnicalInfo() ?? Promise.resolve({}),
+    [],
+  );
+  const onClose = useCallback(() => navigation.goBack(), [navigation]);
+  const openOnlineSubtitles = useCallback(() => setOnlineSubsVisible(true), []);
+  const previousSubtitle = useCallback(() => {
+    void videoRef.current?.subSeek(-1);
+  }, []);
+  const nextSubtitle = useCallback(() => {
+    void videoRef.current?.subSeek(1);
+  }, []);
+  const languageHint = useMemo(
+    () =>
+      playerProfileHint({
+        externalSubtitle: externalSub,
+        subtitleLanguage: subTracks.find((track) => track.id === selectedSubId)
+          ?.lang,
+        audioLanguage: audioTracks.find((track) => track.id === selectedAudioId)
+          ?.lang,
+      }),
+    [externalSub, subTracks, selectedSubId, audioTracks, selectedAudioId],
+  );
+  usePlayerSubtitleStyle({
+    playerRef: videoRef,
+    ready: tracksReady,
+    videoWidth: videoDimensions.width,
+    videoHeight: videoDimensions.height,
+    zoomed: isZoomedToFill,
+  });
+
   const startSpeedHold = useCallback(() => {
     if (speedBeforeHoldRef.current !== null) return;
     speedBeforeHoldRef.current = playbackSpeed;
@@ -508,6 +622,7 @@ export default function YozoraPlayerPage() {
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
   const lookupOpen = useCallback(() => {
+    setLookupVisible(true);
     if (!settings.yomifinPauseOnLookup) return;
     if (isPlayingRef.current) {
       pausedByLookupRef.current = true;
@@ -516,6 +631,7 @@ export default function YozoraPlayerPage() {
     }
   }, [settings.yomifinPauseOnLookup]);
   const lookupClose = useCallback(() => {
+    setLookupVisible(false);
     if (pausedByLookupRef.current) {
       pausedByLookupRef.current = false;
       setIsPlaying(true);
@@ -523,80 +639,30 @@ export default function YozoraPlayerPage() {
     }
   }, []);
 
-  // Card capture: cheap snapshot at tap; expensive capture only on add-press.
-  // sourceUrl = the playing URL itself (debrid links are range-seekable HTTPS).
+  // Keep the tap's source URL even if playback later re-resolves or changes source.
   const snapshotCard = useCallback(
     (): CaptureContext => ({
       cueStart: cueRef.current.start,
       cueEnd: cueRef.current.end,
       framePos: positionRef.current,
+      source: {
+        // The resolved URL conservatively distinguishes versions of the same episode.
+        // A refreshed URL may miss the cache, but cannot return another version's clip.
+        id: JSON.stringify([mediaId, playUrl]),
+        url: playUrl,
+        headers: { ...videoSource?.headers },
+      },
     }),
-    [],
+    [mediaId, playUrl, videoSource?.headers],
   );
-  const captureMedia = useCallback(
-    async (ctx: CaptureContext, want: MediaWant) => {
+  const prepareMedia = useCallback(
+    (ctx: CaptureContext, want: MediaWant) => {
       const v = videoRef.current;
-      if (!v) return {};
-      return captureCardMedia(v, ctx, mediaId, playUrl ?? "", want);
+      if (!v) return undefined;
+      const sameSource = ctx.source.id === JSON.stringify([mediaId, playUrl]);
+      return prepareCardMedia(v, ctx, want, sameSource ? undefined : null);
     },
     [mediaId, playUrl],
-  );
-
-  // Interactive slider: pause during, seek + resume on release.
-  const wasPlayingBeforeSliderRef = useRef(false);
-  const handleSliderStart = useCallback(() => {
-    isSeekingSV.value = true;
-    wasPlayingBeforeSliderRef.current = isPlayingRef.current;
-    if (isPlayingRef.current) {
-      setIsPlaying(false);
-      videoRef.current?.pause();
-    }
-  }, [isSeekingSV]);
-  const handleSliderComplete = useCallback(
-    (ms: number) => {
-      const sec = Math.max(0, ms / 1000);
-      videoRef.current?.seekTo?.(sec);
-      positionRef.current = sec;
-      setPositionSec(sec);
-      isSeekingSV.value = false;
-      sendTickRef.current("seeked");
-      if (wasPlayingBeforeSliderRef.current) {
-        setIsPlaying(true);
-        videoRef.current?.play();
-      }
-    },
-    [isSeekingSV],
-  );
-
-  // Drag-anywhere-to-seek lifecycle (GestureOverlay pan → worklet; these run at
-  // the edges only). Same contract as direct-player: pause during, seek + resume.
-  const wasPlayingBeforeScrubRef = useRef(false);
-  const handleScrubStart = useCallback(() => {
-    wasPlayingBeforeScrubRef.current = isPlayingRef.current;
-    setIsScrubbing(true);
-    if (isPlayingRef.current) {
-      setIsPlaying(false);
-      videoRef.current?.pause();
-    }
-  }, []);
-  const handleScrubEnd = useCallback((ms: number) => {
-    const sec = Math.max(0, ms / 1000);
-    videoRef.current?.seekTo?.(sec);
-    positionRef.current = sec;
-    setPositionSec(sec);
-    setIsScrubbing(false);
-    sendTickRef.current("seeked");
-    if (wasPlayingBeforeScrubRef.current) {
-      setIsPlaying(true);
-      videoRef.current?.play();
-    }
-  }, []);
-
-  const handleSeekRelative = useCallback(
-    (seconds: number) => {
-      seekBy(seconds);
-    },
-    [seekBy],
   );
 
   // SHIM-7 analog: an mpv error with a near/past expires_at → re-resolve the
@@ -669,8 +735,6 @@ export default function YozoraPlayerPage() {
     return sub;
   }, [navigation, queryClient]);
 
-  const rewindTime = settings.rewindSkipTime ?? 10;
-  const forwardTime = settings.forwardSkipTime ?? 30;
   const showSubtitleNav = selectedSubId !== -1 || externalSub !== null;
 
   if (!playUrl) {
@@ -688,6 +752,8 @@ export default function YozoraPlayerPage() {
         source={videoSource}
         style={{ width: "100%", height: "100%" }}
         nowPlayingMetadata={{ title: title || "Yozora" }}
+        onLoad={onLoad}
+        onPictureInPictureChange={onPictureInPictureChange}
         onProgress={onProgress}
         onSubtitleText={onSubtitleText}
         onPlaybackStateChange={onPlaybackStateChange}
@@ -703,78 +769,61 @@ export default function YozoraPlayerPage() {
         onError={onVideoError}
       />
 
-      {/* Gesture layer (below the yomifin overlay/popup z-indices, below the
-          control bars): taps via the native gesture surface, drag-to-seek /
-          volume / brightness via the RNGH worklet pan. */}
-      <GestureOverlay
-        screenWidth={screenWidth}
-        screenHeight={screenHeight}
-        showControls={showControls}
-        isPlaying={isPlaying}
-        onToggleControls={() => setShowControls((s) => !s)}
-        twoFingerNonce={twoFingerNonce}
-        onSeekRelative={handleSeekRelative}
-        onSkipForward={() => seekBy(forwardTime)}
-        onSkipBackward={() => seekBy(-rewindTime)}
-        onTogglePlay={togglePlay}
-        onHoldSpeedStart={startSpeedHold}
-        onHoldSpeedEnd={endSpeedHold}
-        progress={progressSV}
-        max={maxSV}
-        isSeeking={isSeekingSV}
-        onScrubStart={handleScrubStart}
-        onScrubEnd={handleScrubEnd}
-      />
-
-      {/* Unified senplayer-style control pane (matches the Jellyfin player). */}
-      <YozoraPlayerControls
-        showControls={showControls}
-        isPlaying={isPlaying}
-        isBuffering={isBuffering && !error}
-        title={title || "Yozora stream"}
-        positionSec={positionSec}
-        durationSec={durationSec}
-        progress={progressSV}
-        max={maxSV}
-        min={minSV}
-        cacheProgress={cacheProgressSV}
-        isScrubbing={isScrubbing}
-        onClose={() => navigation.goBack()}
-        onTogglePlay={togglePlay}
-        onSkipBackward={() => seekBy(-rewindTime)}
-        onSkipForward={() => seekBy(forwardTime)}
-        rewindSeconds={rewindTime}
-        forwardSeconds={forwardTime}
-        onSliderStart={handleSliderStart}
-        onSliderComplete={handleSliderComplete}
-        playbackSpeed={playbackSpeed}
-        onSetSpeed={setSpeed}
-        subTracks={subTracks}
-        selectedSubId={selectedSubId}
-        externalSubActive={externalSub !== null}
-        externalSubName={externalSub?.name ?? null}
-        isTextSubCodec={isTextSubCodec}
-        onSelectSubtitle={selectSubTrack}
-        onOnlineSubtitles={() => setOnlineSubsVisible(true)}
-        onlineSubtitlesEnabled={Boolean(
-          serverSubs || settings.yomifinJimakuApiKey,
-        )}
-        showSubtitleNav={showSubtitleNav}
-        onPrevSubtitle={() => videoRef.current?.subSeek?.(-1)}
-        onNextSubtitle={() => videoRef.current?.subSeek?.(1)}
-        audioTracks={audioTracks}
-        selectedAudioId={selectedAudioId}
-        onSelectAudio={selectAudioTrack}
-        getTechnicalInfo={() =>
-          videoRef.current?.getTechnicalInfo?.() ?? Promise.resolve({})
-        }
-        profilePill={
-          <ProfilePill
-            profileKey={query || title ? `yozora:${query || title}` : undefined}
-            languageHint={null}
-          />
-        }
-      />
+      {!isPipActive && (
+        <YozoraPlayerControls
+          showControls={showControls && !isPipActive}
+          setShowControls={setShowControls}
+          interactionBlocked={
+            isPipActive || lookupVisible || onlineSubsVisible || Boolean(error)
+          }
+          isPlaying={isPlaying}
+          isBuffering={isBuffering && !error}
+          title={title || "Yozora stream"}
+          durationMs={durationSec * 1000}
+          progress={progressSV}
+          cacheProgress={cacheProgressSV}
+          isSeeking={isSeekingSV}
+          twoFingerNonce={twoFingerNonce}
+          onClose={onClose}
+          togglePlay={togglePlay}
+          play={play}
+          pause={pause}
+          seek={seek}
+          onHoldSpeedStart={startSpeedHold}
+          onHoldSpeedEnd={endSpeedHold}
+          startPictureInPicture={
+            pipSupported ? startPictureInPicture : undefined
+          }
+          isZoomedToFill={isZoomedToFill}
+          onZoomToggle={toggleZoom}
+          playbackSpeed={playbackSpeed}
+          onSetSpeed={setSavedSpeed}
+          subTracks={subTracks}
+          selectedSubId={selectedSubId}
+          externalSubActive={externalSub !== null}
+          externalSubName={externalSub?.name ?? null}
+          onSelectSubtitle={selectSubTrack}
+          onOnlineSubtitles={openOnlineSubtitles}
+          onlineSubtitlesEnabled={Boolean(
+            serverSubs || settings.yomifinJimakuApiKey,
+          )}
+          showSubtitleNav={showSubtitleNav}
+          onPrevSubtitle={previousSubtitle}
+          onNextSubtitle={nextSubtitle}
+          audioTracks={audioTracks}
+          selectedAudioId={selectedAudioId}
+          onSelectAudio={selectAudioTrack}
+          getTechnicalInfo={getTechnicalInfo}
+          profilePill={
+            <ProfilePill
+              profileKey={
+                query || title ? `yozora:${query || title}` : undefined
+              }
+              languageHint={languageHint}
+            />
+          }
+        />
+      )}
 
       {error ? (
         <View style={styles.centerOverlay}>
@@ -793,8 +842,8 @@ export default function YozoraPlayerPage() {
           onLookupClose={lookupClose}
           popupPosition={settings.yomifinPopupPosition ?? "right"}
           onSnapshotCard={snapshotCard}
-          onCaptureMedia={captureMedia}
-          languageHint={null}
+          onPrepareMedia={prepareMedia}
+          languageHint={languageHint}
           profileKey={query || title ? `yozora:${query || title}` : undefined}
           documentTitle={title || "Yozora stream"}
         />

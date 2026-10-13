@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type {
+  MediaSourceInfo,
   MediaStream,
   SubtitleDeliveryMethod,
 } from "@jellyfin/sdk/lib/generated-client";
@@ -7,6 +8,7 @@ import {
   applyMpvSubtitleSelection,
   compareTracksForMenu,
   getExternalSubtitleUrl,
+  getMpvCaptureAudioId,
   isExternalSubtitle,
   type PlayerSubtitleTrack,
   pickAutoSubtitleTrack,
@@ -19,6 +21,43 @@ const External = "External" as SubtitleDeliveryMethod;
 const Embed = "Embed" as SubtitleDeliveryMethod;
 const Encode = "Encode" as SubtitleDeliveryMethod;
 const Hls = "Hls" as SubtitleDeliveryMethod;
+
+describe("original-source audio for card capture", () => {
+  const source: MediaSourceInfo = {
+    TranscodingUrl: "/stream.m3u8",
+    DefaultAudioStreamIndex: 4,
+    MediaStreams: [
+      { Type: "Video", Index: 0 },
+      { Type: "Audio", Index: 1 },
+      { Type: "Subtitle", Index: 2 },
+      { Type: "Audio", Index: 4 },
+    ],
+  };
+  test("maps selected/default Jellyfin audio to the original file, not transcode aid=1", () => {
+    expect(getMpvCaptureAudioId(source, 4, true)).toBe(2);
+    expect(getMpvCaptureAudioId(source, undefined, true)).toBe(2);
+    expect(getMpvCaptureAudioId(source, 1, true)).toBe(1);
+  });
+  test("unknown transcode selections cannot silently fall back to another track", () => {
+    expect(getMpvCaptureAudioId(source, 99, true)).toBeNull();
+    expect(
+      getMpvCaptureAudioId(
+        { ...source, DefaultAudioStreamIndex: null },
+        undefined,
+        true,
+      ),
+    ).toBeNull();
+  });
+  test("direct playback snapshots the actual native selection at Add", () => {
+    expect(
+      getMpvCaptureAudioId({ ...source, TranscodingUrl: null }, 4, true),
+    ).toBeUndefined();
+  });
+  test("downloads with original transcode metadata use the local player's track", () => {
+    // The original track 2 was transcoded into a download containing only track 1.
+    expect(getMpvCaptureAudioId(source, 4, false)).toBeUndefined();
+  });
+});
 
 // --- fixtures --------------------------------------------------------------
 
