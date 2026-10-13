@@ -7,7 +7,9 @@ IPA commands, native-project identity checks, and the GitHub publishing workflow
 A local Debug device IPA was built successfully and inspected: its ID is
 `com.massimotseng.yomifin.dev`, its name is Yomifin Dev, and it has no embedded
 application `main.jsbundle`. Type checking, Biome, and focused source/agent-doc
-checks passed. GitHub publication and physical-iPad validation are pending.
+checks passed. GitHub Actions is enabled; pushing `yomifin-dev-20261013-1`
+triggered the [first cloud build](https://github.com/stexus/yomifin/actions/runs/38465412709).
+Source publication and physical-iPad validation are pending.
 
 The previous copy-and-edit setup instructions are superseded. Future agents
 should use the actual scripts and workflow, not recreate them from templates.
@@ -31,16 +33,14 @@ Expo's launcher has its own resources; Yomifin's app bundle must be absent.
 
 ## Steps the user performs
 
-1. If GitHub Actions is disabled on the fork, enable it in the repository's
-   Actions tab. Otherwise no GitHub account setup is needed. Existing Git SSH
-   access pushes build tags, and the workflow uses its built-in `GITHUB_TOKEN`
-   to publish releases. No personal login, OAuth authorization, PAT, signing
-   certificate, or Apple account is needed by the agent or workflow.
-2. After the first successful publication, add the source below to FlareStore.
+No GitHub setup or login is required: Actions is already enabled, Git SSH access
+pushes build tags, and the workflow's built-in `GITHUB_TOKEN` publishes releases.
+
+1. After the first successful publication, add the source below to FlareStore.
    Select **Yomifin Dev**, sign with the existing purchased certificate/profile,
    and install it. Keep its `.dev` bundle ID on subsequent installs. Confirm
    it appears beside the existing daily-use app.
-3. Start Metro in the checkout being edited with `just dev` (enter `nix develop`
+2. Start Metro in the checkout being edited with `just dev` (enter `nix develop`
    first if Bun is not on PATH). Open Yomifin Dev and scan Metro's QR code or
    select its server. Keep the computer running while developing.
 
@@ -50,8 +50,7 @@ Planned source URL (available only after publishing):
 https://github.com/stexus/yomifin/releases/download/yomifin-source/source.json
 ```
 
-The previous request to authorize GitHub CLI was unnecessary and is withdrawn.
-Future agents must use the workflow token for publishing, not ask for personal
+Agents must use the workflow token for publishing, not ask for personal
 GitHub credentials. Public workflow status and releases can be inspected without
 authentication.
 
@@ -200,6 +199,7 @@ Update this status and `YOMIFIN_CONTEXT.md` as external/device checks complete.
 
 References: [Expo variants](https://docs.expo.dev/build-reference/variants/),
 [development builds](https://docs.expo.dev/develop/development-builds/use-development-builds/),
-[GitHub manual workflows](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow),
+[GitHub workflow authentication](https://docs.github.com/en/actions/tutorials/authenticate-with-github_token),
+[manual workflows](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow),
 [AltStore sources](https://faq.altstore.io/developers/make-a-source),
 [FlareStore iPadOS guide](https://flarestore.app/guide/ios/).
