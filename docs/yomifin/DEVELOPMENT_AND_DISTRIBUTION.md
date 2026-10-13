@@ -7,12 +7,37 @@ IPA commands, native-project identity checks, and the GitHub publishing workflow
 A local Debug device IPA was built successfully and inspected: its ID is
 `com.massimotseng.yomifin.dev`, its name is Yomifin Dev, and it has no embedded
 application `main.jsbundle`. Type checking, Biome, and focused source/agent-doc
-checks passed. GitHub Actions is enabled; pushing `yomifin-dev-20261013-1`
-triggered the [first cloud build](https://github.com/stexus/yomifin/actions/runs/38465412709).
-Source publication and physical-iPad validation are pending.
+checks passed. The [first cloud development build](https://github.com/stexus/yomifin/actions/runs/38465412709)
+succeeded and published Yomifin Dev plus the public source catalog. The first
+standalone Release build was started with `yomifin-stable-20261013-1` at
+2026-10-13 22:32 UTC from commit `32608336`; follow its
+[workflow run](https://github.com/stexus/yomifin/actions/runs/38478515285).
+Release publication and physical-iPad validation remain pending. Both initial
+builds include the committed upstream sync, but exclude uncommitted local work.
 
 The previous copy-and-edit setup instructions are superseded. Future agents
 should use the actual scripts and workflow, not recreate them from templates.
+
+## Branch to use for development
+
+Continue development on `sync/upstream-develop-2026-09-23`, or create feature
+branches from it. It is the current Yomifin integration branch. The temporary
+`setup/yomifin-flarestore` branch was created from its `a08d1759` commit and adds
+the two-app build/distribution setup; it does not omit any committed sync work.
+Those setup commits are incorporated into the integration branch, so new feature
+branches inherit the build workflow too.
+
+Both development and stable apps are build variants of the same source branch;
+they do not require separate long-lived Git branches. Publish Dev tags when the
+native client needs rebuilding, and Stable tags from a tested commit when ready
+to update the daily-use app. `develop` is the inherited upstream/default branch,
+and `yomifin` is an older pre-sync checkpoint; neither is the current feature base.
+
+Uncommitted edits belong to the local checkout and are never included in GitHub
+builds. In particular, the local player/Anki work includes native API changes:
+commit and publish a matching Dev client before expecting those changes to work
+with Metro. Do not discard that work or publish it as stable merely to reconcile
+branches.
 
 ## The user's required workflow
 
@@ -36,7 +61,7 @@ Expo's launcher has its own resources; Yomifin's app bundle must be absent.
 No GitHub setup or login is required: Actions is already enabled, Git SSH access
 pushes build tags, and the workflow's built-in `GITHUB_TOKEN` publishes releases.
 
-1. After the first successful publication, add the source below to FlareStore.
+1. Add the published source below to FlareStore.
    Select **Yomifin Dev**, sign with the existing purchased certificate/profile,
    and install it. Keep its `.dev` bundle ID on subsequent installs. Confirm
    it appears beside the existing daily-use app.
@@ -44,7 +69,7 @@ pushes build tags, and the workflow's built-in `GITHUB_TOKEN` publishes releases
    first if Bun is not on PATH). Open Yomifin Dev and scan Metro's QR code or
    select its server. Keep the computer running while developing.
 
-Planned source URL (available only after publishing):
+Published source URL (the Release entry appears after its build succeeds):
 
 ```text
 https://github.com/stexus/yomifin/releases/download/yomifin-source/source.json
@@ -75,9 +100,8 @@ can reach that machine. `just local` and `just remote` use the development
 identity too, but retain their legacy Xcode/Personal Team signing flow; they do
 not select the purchased FlareStore certificate automatically.
 
-The local development IPA can be imported directly into FlareStore while GitHub
-setup is pending. Publishing through the source removes that manual transfer
-from subsequent installs.
+The local development IPA can also be imported directly into FlareStore.
+Publishing through the source removes that manual transfer from subsequent installs.
 
 ## Connecting Metro
 
@@ -189,7 +213,8 @@ existing stable app available while investigating feature changes.
 
 - [x] Separate identities and commands implemented.
 - [x] Local Debug IPA built with `.dev` ID and no app `main.jsbundle`.
-- [ ] GitHub workflow enabled and source publicly downloadable.
+- [x] GitHub workflow enabled, Dev published, and source publicly downloadable.
+- [ ] First stable Release IPA published (workflow started; see status above).
 - [ ] FlareStore installs Dev alongside stable with the purchased profile.
 - [ ] Metro connects and a visible JS edit refreshes on the iPad.
 - [ ] Stable starts and plays with Metro stopped; existing data is retained.

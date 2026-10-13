@@ -6,6 +6,13 @@ fork's architecture, device constraints, and current setup before working here.
 For builds, installs, or development workflow, also read
 `docs/yomifin/DEVELOPMENT_AND_DISTRIBUTION.md`.
 
+The current fork development base is `sync/upstream-develop-2026-09-23`, with
+the `setup/yomifin-flarestore` commits incorporated. The setup branch contains
+all committed sync work; it is not a separate product line. Both app variants
+build from the same source. `develop` and the old `yomifin` checkpoint are not
+the current fork feature base. Preserve local uncommitted work, which GitHub
+builds cannot include.
+
 The user's chosen workflow is two iPad apps: stable
 `com.massimotseng.yomifin` (standalone Release) and development
 `com.massimotseng.yomifin.dev` (Debug Expo development client, app JavaScript

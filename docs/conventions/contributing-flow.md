@@ -5,7 +5,9 @@ covers setup and the human side; this file is the operational checklist.
 
 ## Branch and commits
 
-- Branch off `develop`, never off `main`.
+- For upstream Streamyfin work, branch off `develop`, never off `main`.
+  For this Yomifin fork, use `sync/upstream-develop-2026-09-23` with the FlareStore
+  setup incorporated; see [the distribution guide](../yomifin/DEVELOPMENT_AND_DISTRIBUTION.md#branch-to-use-for-development).
 - Name the branch after the change type: `feat/…`, `fix/…`, `chore/…`, `docs/…`.
 - [Conventional Commits](https://www.conventionalcommits.org) for every commit and for
   the PR title. CI validates the title, so `fix(player): stop reporting position 0`

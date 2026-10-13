@@ -179,7 +179,7 @@ pod is absent from `ios/Podfile.lock`).
 
 ## Dev environment & build (hard-won facts)
 
-### Two-app workflow (2026-10-05; local build verified)
+### Two-app workflow (2026-10-13; GitHub Dev publication verified)
 
 The user wants to keep a working daily-use app while developing on the same
 iPad. User steps, actual commands, and agent implementation context are in
@@ -201,12 +201,19 @@ iPad. User steps, actual commands, and agent implementation context are in
 
 Status: variant configuration, build/Metro commands, and GitHub workflow are
 implemented. A local Debug IPA was built and inspected: `.dev` identity, no app
-JavaScript bundle. GitHub publication and physical-iPad sign/install/refresh
-checks remain pending. Agents should use existing Git SSH access to push build
+JavaScript bundle. GitHub has published Dev and the public source catalog; the
+first stable build is running from `32608336` (tag `yomifin-stable-20261013-1`).
+Check the distribution guide for its run link and current publication status.
+Physical-iPad sign/install/refresh checks remain pending. Continue development
+on `sync/upstream-develop-2026-09-23` with the setup commits incorporated;
+`setup/yomifin-flarestore` contains its committed history plus the build setup.
+Neither initial cloud build contains the uncommitted local player/Anki changes.
+Agents should use existing Git SSH access to push build
 tags; Actions publishes with its built-in `GITHUB_TOKEN`. Do not ask the user for
 GitHub CLI login, OAuth authorization, or a PAT. The user handles iPad installation
 prompts and, if the fork has Actions disabled, enables it in GitHub's Actions tab.
-Do not assume the documented source URL exists until publication succeeds.
+The source URL is live; check its entries rather than assuming an unpublished
+variant is available.
 
 A reproducible toolchain is available through Nix (`flake.nix`, `nix develop`
 or direnv). The `justfile` uses tools on PATH directly (it no longer enters Nix);
