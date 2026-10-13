@@ -202,8 +202,10 @@ iPad. User steps, actual commands, and agent implementation context are in
 Status: variant configuration, build/Metro commands, and GitHub workflow are
 implemented. A local Debug IPA was built and inspected: `.dev` identity, no app
 JavaScript bundle. GitHub publication and physical-iPad sign/install/refresh
-checks remain pending. Agents should complete build/GitHub work when access
-permits; the user handles browser authentication and iPad installation prompts.
+checks remain pending. Agents should use existing Git SSH access to push build
+tags; Actions publishes with its built-in `GITHUB_TOKEN`. Do not ask the user for
+GitHub CLI login, OAuth authorization, or a PAT. The user handles iPad installation
+prompts and, if the fork has Actions disabled, enables it in GitHub's Actions tab.
 Do not assume the documented source URL exists until publication succeeds.
 
 A reproducible toolchain is available through Nix (`flake.nix`, `nix develop`

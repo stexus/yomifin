@@ -17,6 +17,10 @@ The local config, commands, and publishing workflow are implemented. A local
 Debug IPA was built and verified to omit the app JavaScript bundle. Check the
 guide's status for GitHub publication and iPad installation; those are separate
 validation gates. Handle builds and GitHub setup for the user when access permits.
+Use existing Git SSH access to push build tags; Actions publishes with its own
+`GITHUB_TOKEN`. Do not request GitHub CLI login, OAuth authorization, or a personal
+token for this workflow. If Actions is disabled on the fork, the user only needs
+to enable it in the repository's Actions tab.
 Never install an experimental build over the stable identity. JS/TS-only work
 normally needs Metro, while native changes require rebuilding the dev IPA.
 Preserve unrelated work in progress; use Bun for repository commands.

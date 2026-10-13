@@ -1,6 +1,6 @@
 # Yomifin development and FlareStore distribution
 
-## Current status (2026-10-05)
+## Current status (2026-10-13)
 
 The repository implementation is installed: separate app identities, Metro and
 IPA commands, native-project identity checks, and the GitHub publishing workflow.
@@ -31,10 +31,11 @@ Expo's launcher has its own resources; Yomifin's app bundle must be absent.
 
 ## Steps the user performs
 
-1. Complete GitHub's browser authorization when the agent supplies a device
-   login code, if the Mac is not already authenticated. The agent can then push
-   the setup, create a PR, run builds, and publish releases. No signing
-   certificate or Apple account is needed in GitHub.
+1. If GitHub Actions is disabled on the fork, enable it in the repository's
+   Actions tab. Otherwise no GitHub account setup is needed. Existing Git SSH
+   access pushes build tags, and the workflow uses its built-in `GITHUB_TOKEN`
+   to publish releases. No personal login, OAuth authorization, PAT, signing
+   certificate, or Apple account is needed by the agent or workflow.
 2. After the first successful publication, add the source below to FlareStore.
    Select **Yomifin Dev**, sign with the existing purchased certificate/profile,
    and install it. Keep its `.dev` bundle ID on subsequent installs. Confirm
@@ -48,6 +49,11 @@ Planned source URL (available only after publishing):
 ```text
 https://github.com/stexus/yomifin/releases/download/yomifin-source/source.json
 ```
+
+The previous request to authorize GitHub CLI was unnecessary and is withdrawn.
+Future agents must use the workflow token for publishing, not ask for personal
+GitHub credentials. Public workflow status and releases can be inspected without
+authentication.
 
 The user must approve iPad installation prompts and verify the app on their
 physical device. Agents should handle configuration, building, validation, and

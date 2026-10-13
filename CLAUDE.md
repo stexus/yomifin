@@ -16,6 +16,8 @@ JavaScript from Metro for Fast Refresh. FlareStore signs both; GitHub distribute
 IPAs through a source catalog. Local implementation and an unsigned Debug build
 are verified; consult the guide for GitHub/iPad validation status. Agents should
 handle builds and GitHub operations when access permits.
+Use Git SSH pushes and the workflow's built-in `GITHUB_TOKEN`; no personal
+GitHub CLI login, OAuth authorization, or PAT is needed for distribution.
 
 Before touching the language-learning or Yozora layers, read `YOMIFIN_CONTEXT.md`
 (architecture and native contracts) and `FEATURES.md` (current tracker). Run
