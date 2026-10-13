@@ -7,8 +7,8 @@ For builds, installs, or development workflow, also read
 `docs/yomifin/DEVELOPMENT_AND_DISTRIBUTION.md`.
 
 The current fork development base is `sync/upstream-develop-2026-09-23`, with
-the `setup/yomifin-flarestore` commits incorporated. The setup branch contains
-all committed sync work; it is not a separate product line. Both app variants
+the `setup/yomifin-flarestore` commits incorporated. The temporary setup branch
+is historical; new feature commits go on the integration branch. Both app variants
 build from the same source. `develop` and the old `yomifin` checkpoint are not
 the current fork feature base. Preserve local uncommitted work, which GitHub
 builds cannot include.

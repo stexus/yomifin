@@ -13,7 +13,11 @@ standalone Release build was started with `yomifin-stable-20261013-1` at
 2026-10-13 22:32 UTC from commit `32608336`; follow its
 [workflow run](https://github.com/stexus/yomifin/actions/runs/38478515285).
 Release publication and physical-iPad validation remain pending. Both initial
-builds include the committed upstream sync, but exclude uncommitted local work.
+builds include the committed upstream sync, but predate the shared player UI and
+Anki capture-isolation changes. Those features are now committed on the integration
+branch for the user-requested Dev and Release rebuilds, tagged
+`yomifin-dev-20261013-2` and `yomifin-stable-20261013-2`. Check Actions and the
+source catalog for their publication status; iPad verification remains pending.
 
 The previous copy-and-edit setup instructions are superseded. Future agents
 should use the actual scripts and workflow, not recreate them from templates.
@@ -25,7 +29,8 @@ branches from it. It is the current Yomifin integration branch. The temporary
 `setup/yomifin-flarestore` branch was created from its `a08d1759` commit and adds
 the two-app build/distribution setup; it does not omit any committed sync work.
 Those setup commits are incorporated into the integration branch, so new feature
-branches inherit the build workflow too.
+branches inherit the build workflow too. The temporary setup branch is historical;
+continue from the integration branch to include the subsequent player/Anki work.
 
 Both development and stable apps are build variants of the same source branch;
 they do not require separate long-lived Git branches. Publish Dev tags when the
@@ -34,10 +39,11 @@ to update the daily-use app. `develop` is the inherited upstream/default branch,
 and `yomifin` is an older pre-sync checkpoint; neither is the current feature base.
 
 Uncommitted edits belong to the local checkout and are never included in GitHub
-builds. In particular, the local player/Anki work includes native API changes:
-commit and publish a matching Dev client before expecting those changes to work
-with Metro. Do not discard that work or publish it as stable merely to reconcile
-branches.
+builds. The player/Anki capture changes include native API changes: install the
+Dev client from `yomifin-dev-20261013-2` (or a later build containing those changes)
+before using the current JavaScript with Metro. The first published Dev client
+predates that API. The user explicitly requested publishing both variants with
+these features; their physical-iPad checks are still listed in `FEATURES.md`.
 
 ## The user's required workflow
 
@@ -156,7 +162,10 @@ publication is deliberate, after testing. The catalog preserves the other app
 and recent version history. It appears with only the entries published so far.
 
 Both variants use one concurrency group to avoid overwriting each other's source
-updates. Keep the catalog release mutable and retain IPA releases referenced by
+updates. `queue: max` retains multiple pending builds; `cancel-in-progress: false`
+alone does not keep an older pending run when another tag is pushed. This permits
+pushing both variant tags together even while a previous build is running.
+Keep the catalog release mutable and retain IPA releases referenced by
 its version history. The workflow needs `contents: write` through the provided
 GitHub token; no P12, provisioning profile, Expo token, or App Store credentials.
 Keep downloads publicly accessible to FlareStore.
@@ -225,6 +234,7 @@ Update this status and `YOMIFIN_CONTEXT.md` as external/device checks complete.
 References: [Expo variants](https://docs.expo.dev/build-reference/variants/),
 [development builds](https://docs.expo.dev/develop/development-builds/use-development-builds/),
 [GitHub workflow authentication](https://docs.github.com/en/actions/tutorials/authenticate-with-github_token),
+[workflow queueing](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency),
 [manual workflows](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow),
 [AltStore sources](https://faq.altstore.io/developers/make-a-source),
 [FlareStore iPadOS guide](https://flarestore.app/guide/ios/).
