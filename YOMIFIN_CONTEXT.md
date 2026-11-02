@@ -23,8 +23,9 @@ The integration branch `sync/upstream-develop-2026-09-23` now merges Streamyfin
 The September baseline was `7fb905d1`; `yomifin` remains the pre-sync checkpoint.
 This branch uses Expo SDK 57, React Native tvOS 0.86, MPVKit 0.41 and Jellyfin
 SDK 1.0. The Nix shell and FlareStore CI pin Bun 1.4.4 for the v2 lockfile.
-The merge adds native changes and a notification-settings-link module, so a new
-Dev IPA is required. Validation and physical-iPad gates are in `FEATURES.md`.
+The merge adds native changes and a notification-settings-link module. Install
+the published Dev 0.56.0 (5.1) client before using current Metro code. Validation
+and physical-iPad gates are in `FEATURES.md`.
 
 The fork deliberately keeps iPhone/iPad on the RN player route, even if a stored
 preference selects Native: upstream's fully native chrome does not host the
@@ -192,7 +193,7 @@ pod is absent from `ios/Podfile.lock`).
 
 ## Dev environment & build (hard-won facts)
 
-### Two-app workflow (2026-10-13; GitHub Dev publication verified)
+### Two-app workflow (publication checked 2026-11-01)
 
 The user wants to keep a working daily-use app while developing on the same
 iPad. User steps, actual commands, and agent implementation context are in
@@ -214,18 +215,18 @@ iPad. User steps, actual commands, and agent implementation context are in
 
 Status: variant configuration, build/Metro commands, and GitHub workflow are
 implemented. A local Debug IPA was built and inspected: `.dev` identity, no app
-JavaScript bundle. GitHub has published Dev and the public source catalog; the
-first stable build is running from `32608336` (tag `yomifin-stable-20261013-1`).
-Check the distribution guide for its run link and current publication status.
+JavaScript bundle. GitHub published the October Stable 3.1 and Dev 4.1 rebuilds
+from `e515f164`. The November native merge and episode completion changes are
+published as Dev 0.56.0 (5.1) from `cd7deec6`, requested by
+`yomifin-dev-20261101-1`. The source catalog offers Dev 5.1 while preserving
+Stable 3.1. The distribution guide links the successful build and release.
 Physical-iPad sign/install/refresh checks remain pending. Continue development
 on `sync/upstream-develop-2026-09-23` with the setup commits incorporated;
 `setup/yomifin-flarestore` contains its committed history plus the build setup.
 The setup branch is historical; new work stays on the integration branch.
-The shared player UI and Anki capture-isolation changes are now committed for
-user-requested rebuilds tagged `yomifin-dev-20261013-2` and
-`yomifin-stable-20261013-2`. Check their workflow status before assuming publication.
-The first cloud Dev binary predates the new capture API; install the rebuilt Dev
-client before using current Metro code. Physical-iPad feature checks remain open.
+The October rebuilds include the shared player UI and Anki capture-isolation
+changes. Install the November Dev client before using current Metro code.
+Physical-iPad feature checks remain open.
 Agents should use existing Git SSH access to push build
 tags; Actions publishes with its built-in `GITHUB_TOKEN`. Do not ask the user for
 GitHub CLI login, OAuth authorization, or a PAT. The user handles iPad installation

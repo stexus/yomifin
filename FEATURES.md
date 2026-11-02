@@ -42,8 +42,13 @@ post-credits actions. Typecheck, all 292 Jest suites (3,461 tests), 21 fork Bun
 checks and all 20 language/Yozora regression stages pass. Expo Doctor reports
 upstream-pinned patch versions behind current SDK recommendations and directory
 metadata warnings; dependencies remain at the reviewed upstream lockfile.
+Production iOS and Android Hermes exports pass with `--max-workers 1`; the
+parallel export stalled in the worklet compiler on this Mac.
 
-Device gate: use the new Dev client with Metro; finish an episode early and
+Published in [Dev 0.56.0 (5.1)](https://github.com/stexus/yomifin/releases/tag/yomifin-build-development-5-1)
+from `cd7deec6`; refresh the existing FlareStore source to install it.
+
+Device gate: use this Dev client with Metro; finish an episode early and
 verify Jellyfin removes its resume entry and marks it watched, while next-arrow
 navigation retains normal resume behavior. Also test no segment metadata,
 autoplay off, ending/post-credits scenes, offline completion and a failed server
@@ -67,8 +72,11 @@ Validation: TypeScript, Biome, all 287 upstream test suites, fork Bun tests and
 all 20 language/Yozora stages (including the real-alass cross-check) passed.
 Local Debug IPA compilation reached an upstream Expo compiler incompatibility:
 Xcode 26.3 rejects `RuntimeScheduler` constructor ownership annotations in
-`expo-modules-jsi` 57.1.1. The supported GitHub workflow uses Xcode 26.6; the next
-Dev build validates the native merge there. No physical-iPad run performed.
+`expo-modules-jsi` 57.1.1. The
+[Dev rebuild](https://github.com/stexus/yomifin/actions/runs/41389442018) from
+`cd7deec6` succeeded on Xcode 26.6 and published Dev 0.56.0 (5.1), with `.dev`
+identity and no embedded app JavaScript. The public source catalog contains the
+new Dev entry and retains Stable 3.1 unchanged. No physical-iPad run performed.
 Device gates: playback/exit/backgrounding, lookup with hidden native subtitles,
 text/bitmap/external subtitles, Anki audio/image capture, offline downloads after
 updating, Jellyfin episode/version transitions and Yozora playback.

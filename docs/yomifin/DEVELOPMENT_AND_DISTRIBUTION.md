@@ -5,28 +5,36 @@
 The integration branch now merges upstream `284d5527`, including native player
 changes and the notification-settings-link module. Rebuild the Dev client for
 this baseline; the October binaries are not sufficient. Nix and FlareStore CI
-now use Bun 1.4.4, required by upstream's v2 lockfile. The local Mac has Xcode 26.3, which cannot compile the updated Expo JSI
+now use Bun 1.4.4, required by upstream's v2 lockfile. The local Mac has Xcode
+26.3, which cannot compile the updated Expo JSI
 constructors; use the existing GitHub Xcode 26.6 workflow for the Dev IPA (or a
-supported newer local Xcode). Existing stable identity and distribution stay unchanged. See `FEATURES.md` for validation and iPad gates.
+supported newer local Xcode). Existing stable identity and distribution stay
+unchanged. Production iOS/Android Hermes exports pass with `--max-workers 1`;
+the parallel export stalled in the worklet compiler on this Mac. See
+`FEATURES.md` for validation and iPad gates.
 
-## Current status (2026-10-13)
+## Publication status (checked 2026-11-01)
 
 The repository implementation is installed: separate app identities, Metro and
 IPA commands, native-project identity checks, and the GitHub publishing workflow.
 A local Debug device IPA was built successfully and inspected: its ID is
 `com.massimotseng.yomifin.dev`, its name is Yomifin Dev, and it has no embedded
 application `main.jsbundle`. Type checking, Biome, and focused source/agent-doc
-checks passed. The [first cloud development build](https://github.com/stexus/yomifin/actions/runs/38465412709)
-succeeded and published Yomifin Dev plus the public source catalog. The first
-standalone Release build was started with `yomifin-stable-20261013-1` at
-2026-10-13 22:32 UTC from commit `32608336`; follow its
-[workflow run](https://github.com/stexus/yomifin/actions/runs/38478515285).
-Release publication and physical-iPad validation remain pending. Both initial
-builds include the committed upstream sync, but predate the shared player UI and
-Anki capture-isolation changes. Those features are now committed on the integration
-branch for the user-requested Dev and Release rebuilds, tagged
-`yomifin-dev-20261013-2` and `yomifin-stable-20261013-2`. Check Actions and the
-source catalog for their publication status; iPad verification remains pending.
+checks passed. GitHub published both October rebuilds from `e515f164`, including
+the shared player UI and Anki capture-isolation changes:
+
+- [Stable 3.1](https://github.com/stexus/yomifin/releases/tag/yomifin-build-stable-3-1),
+  requested by `yomifin-stable-20261013-2`.
+- [Dev 4.1](https://github.com/stexus/yomifin/releases/tag/yomifin-build-development-4-1),
+  requested by `yomifin-dev-20261013-2`.
+
+The November native merge and Finish & Next Episode changes are published as
+[Dev 0.56.0 (5.1)](https://github.com/stexus/yomifin/releases/tag/yomifin-build-development-5-1)
+from `cd7deec6`, requested by `yomifin-dev-20261101-1`. Its
+[workflow run](https://github.com/stexus/yomifin/actions/runs/41389442018) passed
+on Xcode 26.6, including the `.dev` identity and absent-app-JavaScript checks.
+The public source catalog offers Dev 5.1 and preserves the Stable 3.1 entry
+unchanged. Physical-iPad installation and feature verification remain pending.
 
 The previous copy-and-edit setup instructions are superseded. Future agents
 should use the actual scripts and workflow, not recreate them from templates.
@@ -48,11 +56,9 @@ to update the daily-use app. `develop` is the inherited upstream/default branch,
 and `yomifin` is an older pre-sync checkpoint; neither is the current feature base.
 
 Uncommitted edits belong to the local checkout and are never included in GitHub
-builds. The player/Anki capture changes include native API changes: install the
-Dev client from `yomifin-dev-20261013-2` (or a later build containing those changes)
-before using the current JavaScript with Metro. The first published Dev client
-predates that API. The user explicitly requested publishing both variants with
-these features; their physical-iPad checks are still listed in `FEATURES.md`.
+builds. Install the November Dev rebuild before using the current JavaScript
+with Metro: the October clients predate native changes in this merge. Physical
+iPad checks are listed in `FEATURES.md`.
 
 ## The user's required workflow
 
@@ -84,7 +90,7 @@ pushes build tags, and the workflow's built-in `GITHUB_TOKEN` publishes releases
    first if Bun is not on PATH). Open Yomifin Dev and scan Metro's QR code or
    select its server. Keep the computer running while developing.
 
-Published source URL (the Release entry appears after its build succeeds):
+Published source URL (contains both Stable and Dev):
 
 ```text
 https://github.com/stexus/yomifin/releases/download/yomifin-source/source.json
@@ -232,7 +238,7 @@ existing stable app available while investigating feature changes.
 - [x] Separate identities and commands implemented.
 - [x] Local Debug IPA built with `.dev` ID and no app `main.jsbundle`.
 - [x] GitHub workflow enabled, Dev published, and source publicly downloadable.
-- [ ] First stable Release IPA published (workflow started; see status above).
+- [x] Stable Release IPA published and present in the source catalog.
 - [ ] FlareStore installs Dev alongside stable with the purchased profile.
 - [ ] Metro connects and a visible JS edit refreshes on the iPad.
 - [ ] Stable starts and plays with Metro stopped; existing data is retained.
