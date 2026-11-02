@@ -1,25 +1,3 @@
-import { NEXT_EPISODE_COUNTDOWN_MS } from "@/constants/Playback";
-
-export function shouldOfferEpisodeCompletion({
-  isEpisode,
-  hasNextEpisode,
-  outroActive,
-  durationMs,
-  remainingMs,
-}: {
-  isEpisode: boolean;
-  hasNextEpisode: boolean;
-  outroActive: boolean;
-  durationMs: number;
-  remainingMs: number;
-}) {
-  return (
-    isEpisode &&
-    hasNextEpisode &&
-    (outroActive || (durationMs > 0 && remainingMs < NEXT_EPISODE_COUNTDOWN_MS))
-  );
-}
-
 interface CompletionSteps {
   pause: () => Promise<unknown>;
   stop: () => Promise<unknown>;

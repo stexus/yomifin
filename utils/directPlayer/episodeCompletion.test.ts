@@ -1,7 +1,4 @@
-import {
-  EpisodeCompletion,
-  shouldOfferEpisodeCompletion,
-} from "./episodeCompletion";
+import { EpisodeCompletion } from "./episodeCompletion";
 
 const deferred = () => {
   let resolve!: () => void;
@@ -100,47 +97,4 @@ test("does not mark watched if stopping the session failed", async () => {
   ).rejects.toThrow("stop failed");
   expect(markPlayed).not.toHaveBeenCalled();
   expect(restore).not.toHaveBeenCalled();
-});
-
-const offer = {
-  isEpisode: true,
-  hasNextEpisode: true,
-  outroActive: false,
-  durationMs: 1_440_000,
-  remainingMs: 600_000,
-};
-test("keeps the floating next action hidden mid-episode without an outro", () => {
-  expect(shouldOfferEpisodeCompletion(offer)).toBe(false);
-});
-test("offers completion through an ending sequence even with controls hidden", () => {
-  expect(shouldOfferEpisodeCompletion({ ...offer, outroActive: true })).toBe(
-    true,
-  );
-});
-test("offers a final-ten-seconds fallback without an outro marker", () => {
-  expect(shouldOfferEpisodeCompletion({ ...offer, remainingMs: 9_000 })).toBe(
-    true,
-  );
-  expect(shouldOfferEpisodeCompletion({ ...offer, remainingMs: 10_000 })).toBe(
-    false,
-  );
-});
-test("does not offer completion for movies, the final episode, or an unknown duration at zero", () => {
-  expect(
-    shouldOfferEpisodeCompletion({
-      ...offer,
-      isEpisode: false,
-      outroActive: true,
-    }),
-  ).toBe(false);
-  expect(
-    shouldOfferEpisodeCompletion({
-      ...offer,
-      hasNextEpisode: false,
-      outroActive: true,
-    }),
-  ).toBe(false);
-  expect(
-    shouldOfferEpisodeCompletion({ ...offer, durationMs: 0, remainingMs: 0 }),
-  ).toBe(false);
 });

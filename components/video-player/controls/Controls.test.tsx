@@ -7,6 +7,8 @@ import type { PlayerControlsProps } from "./PlayerControls";
 
 const mockNavigate = jest.fn();
 let mockOutroActive = false;
+let mockPostCredits = false;
+let mockAutoplay = true;
 let mockTime = { currentTime: 120_000, remainingTime: 1_320_000 };
 let mockChrome: PlayerControlsProps;
 jest.mock("expo-router", () => ({ useLocalSearchParams: () => ({}) }));
@@ -32,7 +34,7 @@ jest.mock("@/providers/OfflineModeProvider", () => ({
   useOfflineMode: () => false,
 }));
 jest.mock("@/utils/atoms/settings", () => ({
-  useSettings: () => ({ settings: { autoPlayNextEpisode: false } }),
+  useSettings: () => ({ settings: { autoPlayNextEpisode: mockAutoplay } }),
 }));
 jest.mock("@/hooks/usePlaybackManager", () => ({
   usePlaybackManager: () => ({ nextItem: { Id: "next", Type: "Episode" } }),
@@ -54,6 +56,7 @@ jest.mock("@/hooks/useMediaSegments", () => ({
   useMediaSegments: () => ({
     showSkipButton: false,
     isOutroActive: mockOutroActive,
+    hasContentAfterCredits: mockPostCredits,
   }),
 }));
 jest.mock("@/utils/jellyfin/getDefaultPlaySettings", () => ({
@@ -102,6 +105,8 @@ const props = (
 beforeEach(() => {
   mockNavigate.mockClear();
   mockOutroActive = false;
+  mockPostCredits = false;
+  mockAutoplay = true;
   mockTime = { currentTime: 120_000, remainingTime: 1_320_000 };
 });
 
@@ -125,10 +130,11 @@ test("next-arrow navigation does not call completion", async () => {
   expect(finish).not.toHaveBeenCalled();
 });
 
-test("Next Episode pill appears during an outro with autoplay off and marks watched before advancing", async () => {
+test("the upstream outro pill marks watched before advancing when tapped", async () => {
   mockOutroActive = true;
   const finish = jest.fn(async () => true);
   await render(<Controls {...props(finish)} showControls={false} />);
+  expect(finish).not.toHaveBeenCalled();
   await fireEvent.press(
     screen.getByRole("button", { name: "player.next_episode" }),
   );
@@ -138,12 +144,52 @@ test("Next Episode pill appears during an outro with autoplay off and marks watc
   );
 });
 
-test("Next Episode pill falls back to the final ten seconds without markers or autoplay", async () => {
+test("Next Episode pill retains the final-ten-seconds fallback without markers", async () => {
   mockTime = { currentTime: 1_435_000, remainingTime: 5_000 };
   await render(<Controls {...props(async () => true)} showControls={false} />);
   expect(
     screen.getByRole("button", { name: "player.next_episode" }),
   ).toBeTruthy();
+});
+
+test.each([1_320_000, 5_000])(
+  "autoplay off keeps the Next Episode pill hidden with %i ms remaining",
+  async (remainingTime) => {
+    mockAutoplay = false;
+    mockOutroActive = true;
+    mockTime = { currentTime: 1_440_000 - remainingTime, remainingTime };
+    await render(<Controls {...props(async () => true)} />);
+    expect(
+      screen.queryByRole("button", { name: "player.next_episode" }),
+    ).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "player.skip_credits" }),
+    ).toBeTruthy();
+  },
+);
+
+test("post-credits content keeps Skip Credits instead of the outro Next Episode pill", async () => {
+  mockOutroActive = true;
+  mockPostCredits = true;
+  await render(<Controls {...props(async () => true)} />);
+  expect(
+    screen.queryByRole("button", { name: "player.next_episode" }),
+  ).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "player.skip_credits" }),
+  ).toBeTruthy();
+});
+
+test("automatic advancement does not explicitly mark the episode watched", async () => {
+  mockTime = { currentTime: 1_435_000, remainingTime: 5_000 };
+  const finish = jest.fn(async () => true);
+  const view = await render(<Controls {...props(finish)} />);
+  mockTime = { currentTime: 1_440_000, remainingTime: 0 };
+  await view.rerender(<Controls {...props(finish)} isPlaying={false} />);
+  expect(mockNavigate).toHaveBeenCalledWith(
+    expect.objectContaining({ itemId: "next" }),
+  );
+  expect(finish).not.toHaveBeenCalled();
 });
 
 test("completion failure does not navigate", async () => {

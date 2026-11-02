@@ -28,7 +28,6 @@ import type { DownloadedItem } from "@/providers/Downloads/types";
 import { useOfflineMode } from "@/providers/OfflineModeProvider";
 import { useSettings } from "@/utils/atoms/settings";
 import { hasChapterMarkers } from "@/utils/chapters";
-import { shouldOfferEpisodeCompletion } from "@/utils/directPlayer/episodeCompletion";
 import { resolveStartTicks } from "@/utils/directPlayer/sessionPosition";
 import {
   getAdjacentStartTicks,
@@ -317,19 +316,8 @@ export const Controls: FC<Props> = ({
     !!onFinishEpisode &&
     item.Type === "Episode" &&
     nextItem?.Type === "Episode";
-  const showFinishEpisode =
-    !!onFinishEpisode &&
-    shouldOfferEpisodeCompletion({
-      isEpisode: item.Type === "Episode",
-      hasNextEpisode: nextItem?.Type === "Episode",
-      outroActive: showSkipOutroButton,
-      durationMs: maxMs,
-      remainingMs: remainingTime,
-    });
   const showNextEpisode =
-    showFinishEpisode ||
-    showNextEpisodeFromCredits ||
-    showNextEpisodeFromRemainingTime;
+    showNextEpisodeFromCredits || showNextEpisodeFromRemainingTime;
   // Whether reaching the end of the item may advance on its own. Pausing is
   // not a reason to take that away: the countdown follows the remaining time,
   // which stops moving while playback does.
@@ -598,7 +586,7 @@ export const Controls: FC<Props> = ({
               showSkipCreditButton={showSkipOutroButton}
               skipCreditButtonText={skipOutroButtonText}
               hasContentAfterCredits={hasContentAfterCredits}
-              willShowNextEpisode={showFinishEpisode || willShowNextEpisode}
+              willShowNextEpisode={willShowNextEpisode}
               showNextEpisode={showNextEpisode}
               autoAdvanceNextEpisode={autoAdvanceNextEpisode}
               remainingTime={remainingTime}

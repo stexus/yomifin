@@ -54,7 +54,6 @@ import { apiAtom } from "@/providers/JellyfinProvider";
 import { useOfflineMode } from "@/providers/OfflineModeProvider";
 import { useSettings } from "@/utils/atoms/settings";
 import type { TVOptionItem } from "@/utils/atoms/tvOptionModal";
-import { shouldOfferEpisodeCompletion } from "@/utils/directPlayer/episodeCompletion";
 import { resolveStartTicks } from "@/utils/directPlayer/sessionPosition";
 import {
   getAdjacentStartTicks,
@@ -558,16 +557,6 @@ export const Controls: FC<Props> = ({
     return remainingTime > 0 && remainingTime <= NEXT_EPISODE_COUNTDOWN_MS;
   }, [nextItem, remainingTime]);
 
-  const showFinishEpisode =
-    !!onFinishEpisode &&
-    shouldOfferEpisodeCompletion({
-      isEpisode: item.Type === "Episode",
-      hasNextEpisode: nextItem?.Type === "Episode",
-      outroActive: showSkipCreditButton,
-      durationMs: maxMs,
-      remainingMs: remainingTime,
-    });
-  const [finishEpisodeRef, setFinishEpisodeRef] = useState<View | null>(null);
   // Simple boolean - when skip cards or countdown are visible, they have focus
   const isSkipOrCountdownVisible = useMemo(() => {
     const skipIntroVisible = showSkipButton && !isCountdownActive;
@@ -575,19 +564,13 @@ export const Controls: FC<Props> = ({
       showSkipCreditButton &&
       (hasContentAfterCredits || !nextItem) &&
       !isCountdownActive;
-    return (
-      skipIntroVisible ||
-      skipCreditsVisible ||
-      isCountdownActive ||
-      showFinishEpisode
-    );
+    return skipIntroVisible || skipCreditsVisible || isCountdownActive;
   }, [
     showSkipButton,
     showSkipCreditButton,
     hasContentAfterCredits,
     nextItem,
     isCountdownActive,
-    showFinishEpisode,
   ]);
 
   // Live TV detection - check for both Program (when playing from guide) and TvChannel (when playing from channels)
@@ -1164,7 +1147,6 @@ export const Controls: FC<Props> = ({
     showControls,
     focusPlayButton,
     isCountdownActive,
-    showFinishEpisode,
     lastOpenedModal,
     isSkipOrCountdownVisible,
     playButtonRef,
@@ -1309,8 +1291,7 @@ export const Controls: FC<Props> = ({
     goToNextItem({ isAutoPlay: true });
   }, [goToNextItem, isFinishingEpisode]);
 
-  const topOverlayFocusTarget =
-    skipSegmentRef ?? nextEpisodeRef ?? finishEpisodeRef;
+  const topOverlayFocusTarget = skipSegmentRef ?? nextEpisodeRef;
 
   return (
     <View style={styles.controlsContainer} pointerEvents='box-none'>
@@ -1389,20 +1370,6 @@ export const Controls: FC<Props> = ({
         controlsVisible={showControls}
         refSetter={setSkipSegmentRef}
         hasTVPreferredFocus={!showControls}
-        playButtonRef={showControls ? playButtonRef : null}
-      />
-
-      <TVSkipSegmentCard
-        show={showFinishEpisode && !isCountdownActive}
-        onPress={handleFinishEpisode}
-        type='finish'
-        disabled={isFinishingEpisode}
-        align='left'
-        controlsVisible={showControls}
-        refSetter={setFinishEpisodeRef}
-        hasTVPreferredFocus={
-          !showControls && !showSkipButton && !showSkipCreditButton
-        }
         playButtonRef={showControls ? playButtonRef : null}
       />
 

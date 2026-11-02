@@ -35,8 +35,9 @@ from `cd7deec6`, requested by `yomifin-dev-20261101-1`. Its
 on Xcode 26.6, including the `.dev` identity and absent-app-JavaScript checks.
 The public source catalog offers Dev 5.1 and preserves the Stable 3.1 entry
 unchanged. Physical-iPad installation and feature verification remain pending.
-The subsequent Next episode label/visibility refinement is JS-only and uses
-this same Dev client with current Metro code.
+The subsequent Next episode refinement restores upstream appearance and
+visibility, retaining completion only when the pill is tapped. It is JS-only
+and uses this same Dev client with current Metro code.
 
 The previous copy-and-edit setup instructions are superseded. Future agents
 should use the actual scripts and workflow, not recreate them from templates.
