@@ -563,7 +563,6 @@ export const Controls: FC<Props> = ({
     shouldOfferEpisodeCompletion({
       isEpisode: item.Type === "Episode",
       hasNextEpisode: nextItem?.Type === "Episode",
-      controlsVisible: showControls,
       outroActive: showSkipCreditButton,
       durationMs: maxMs,
       remainingMs: remainingTime,
@@ -1420,17 +1419,6 @@ export const Controls: FC<Props> = ({
             nextItem.Type === "Episode"
               ? handleFinishEpisode
               : handleNextItemButton
-          }
-          buttonText={
-            onFinishEpisode &&
-            item.Type === "Episode" &&
-            nextItem.Type === "Episode"
-              ? t(
-                  isFinishingEpisode
-                    ? "player.finishing_episode"
-                    : "player.finish_and_next_episode",
-                )
-              : undefined
           }
           disabled={isFinishingEpisode}
           controlsVisible={showControls}

@@ -105,15 +105,11 @@ test("does not mark watched if stopping the session failed", async () => {
 const offer = {
   isEpisode: true,
   hasNextEpisode: true,
-  controlsVisible: false,
   outroActive: false,
   durationMs: 1_440_000,
   remainingMs: 600_000,
 };
-test("offers completion mid-episode when controls open, without requiring credits or autoplay", () => {
-  expect(
-    shouldOfferEpisodeCompletion({ ...offer, controlsVisible: true }),
-  ).toBe(true);
+test("keeps the floating next action hidden mid-episode without an outro", () => {
   expect(shouldOfferEpisodeCompletion(offer)).toBe(false);
 });
 test("offers completion through an ending sequence even with controls hidden", () => {
@@ -121,19 +117,27 @@ test("offers completion through an ending sequence even with controls hidden", (
     true,
   );
 });
-test("does not offer finishing for movies, the final episode, or an unknown duration at zero", () => {
+test("offers a final-ten-seconds fallback without an outro marker", () => {
+  expect(shouldOfferEpisodeCompletion({ ...offer, remainingMs: 9_000 })).toBe(
+    true,
+  );
+  expect(shouldOfferEpisodeCompletion({ ...offer, remainingMs: 10_000 })).toBe(
+    false,
+  );
+});
+test("does not offer completion for movies, the final episode, or an unknown duration at zero", () => {
   expect(
     shouldOfferEpisodeCompletion({
       ...offer,
       isEpisode: false,
-      controlsVisible: true,
+      outroActive: true,
     }),
   ).toBe(false);
   expect(
     shouldOfferEpisodeCompletion({
       ...offer,
       hasNextEpisode: false,
-      controlsVisible: true,
+      outroActive: true,
     }),
   ).toBe(false);
   expect(

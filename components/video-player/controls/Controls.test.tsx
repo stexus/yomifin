@@ -6,6 +6,8 @@ import { Controls } from "./Controls";
 import type { PlayerControlsProps } from "./PlayerControls";
 
 const mockNavigate = jest.fn();
+let mockOutroActive = false;
+let mockTime = { currentTime: 120_000, remainingTime: 1_320_000 };
 let mockChrome: PlayerControlsProps;
 jest.mock("expo-router", () => ({ useLocalSearchParams: () => ({}) }));
 jest.mock("react-i18next", () => ({
@@ -39,7 +41,7 @@ jest.mock("@/hooks/useTrickplay", () => ({
   useTrickplay: () => ({ prefetchAllTrickplayImages: () => {} }),
 }));
 jest.mock("./hooks/useVideoTime", () => ({
-  useVideoTime: () => ({ currentTime: 120_000, remainingTime: 1_320_000 }),
+  useVideoTime: () => mockTime,
 }));
 jest.mock("@/utils/segments", () => ({
   useSegments: () => ({}),
@@ -49,7 +51,10 @@ jest.mock("@/utils/segments", () => ({
   },
 }));
 jest.mock("@/hooks/useMediaSegments", () => ({
-  useMediaSegments: () => ({ showSkipButton: false, isOutroActive: false }),
+  useMediaSegments: () => ({
+    showSkipButton: false,
+    isOutroActive: mockOutroActive,
+  }),
 }));
 jest.mock("@/utils/jellyfin/getDefaultPlaySettings", () => ({
   getDefaultPlaySettings: () => ({}),
@@ -94,7 +99,19 @@ const props = (
   pause: () => {},
   onFinishEpisode: finish,
 });
-beforeEach(() => mockNavigate.mockClear());
+beforeEach(() => {
+  mockNavigate.mockClear();
+  mockOutroActive = false;
+  mockTime = { currentTime: 120_000, remainingTime: 1_320_000 };
+});
+
+test("opening controls mid-episode does not reveal the floating Next Episode pill", async () => {
+  await render(<Controls {...props(async () => true)} />);
+  expect(
+    screen.queryByRole("button", { name: "player.next_episode" }),
+  ).toBeNull();
+  expect(mockChrome.onNextEpisode).toBeDefined();
+});
 
 test("next-arrow navigation does not call completion", async () => {
   const finish = jest.fn(async () => true);
@@ -108,11 +125,12 @@ test("next-arrow navigation does not call completion", async () => {
   expect(finish).not.toHaveBeenCalled();
 });
 
-test("finish pill works early with autoplay off and advances only after completion", async () => {
+test("Next Episode pill appears during an outro with autoplay off and marks watched before advancing", async () => {
+  mockOutroActive = true;
   const finish = jest.fn(async () => true);
-  await render(<Controls {...props(finish)} />);
+  await render(<Controls {...props(finish)} showControls={false} />);
   await fireEvent.press(
-    screen.getByRole("button", { name: "player.finish_and_next_episode" }),
+    screen.getByRole("button", { name: "player.next_episode" }),
   );
   expect(finish).toHaveBeenCalledTimes(1);
   expect(mockNavigate).toHaveBeenCalledWith(
@@ -120,10 +138,19 @@ test("finish pill works early with autoplay off and advances only after completi
   );
 });
 
+test("Next Episode pill falls back to the final ten seconds without markers or autoplay", async () => {
+  mockTime = { currentTime: 1_435_000, remainingTime: 5_000 };
+  await render(<Controls {...props(async () => true)} showControls={false} />);
+  expect(
+    screen.getByRole("button", { name: "player.next_episode" }),
+  ).toBeTruthy();
+});
+
 test("completion failure does not navigate", async () => {
+  mockOutroActive = true;
   await render(<Controls {...props(async () => false)} />);
   await fireEvent.press(
-    screen.getByRole("button", { name: "player.finish_and_next_episode" }),
+    screen.getByRole("button", { name: "player.next_episode" }),
   );
   expect(mockNavigate).not.toHaveBeenCalled();
 });

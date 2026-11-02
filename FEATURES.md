@@ -19,12 +19,13 @@ per backlog item to start work without re-exploration.
 
 ---
 
-## Finish & Next Episode — 2026-11-01 (pending iPad verification)
+## Contextual Next Episode — 2026-11-01 (pending iPad verification)
 
-Jellyfin's floating pill now explicitly finishes the current episode before
-advancing. It is available whenever controls are open, during detected outros,
-and near the end, independently of autoplay. The ordinary next-arrow remains
-navigation only. Skip Credits stays separate when there is post-credits content.
+Jellyfin's existing floating **Next episode** pill now marks the current episode
+watched before advancing. It appears during detected outros (skip mode Ask),
+with the final-ten-seconds fallback, independently of autoplay. Opening controls
+alone does not reveal it. The ordinary next-arrow remains navigation only.
+Skip Credits stays separate when there is post-credits content.
 The React Native TV player has the same completion action. Yozora and the
 presented native players are unchanged.
 
@@ -37,8 +38,8 @@ player is still mounted. Offline downloads persist completion locally.
 Implementation: `utils/directPlayer/episodeCompletion.ts`, `useFinishEpisodeAction`,
 `direct-player.tsx`, `usePlaybackManager` and mobile/TV controls. Tests cover
 report ordering, separate navigation/completion, server errors, double taps,
-unmount/item changes, offline storage, early availability with autoplay off and
-post-credits actions. Typecheck, all 292 Jest suites (3,461 tests), 21 fork Bun
+unmount/item changes, offline storage, outro/fallback availability with autoplay off and
+post-credits actions. Typecheck, all 292 Jest suites (3,464 tests), 21 fork Bun
 checks and all 20 language/Yozora regression stages pass. Expo Doctor reports
 upstream-pinned patch versions behind current SDK recommendations and directory
 metadata warnings; dependencies remain at the reviewed upstream lockfile.
@@ -47,8 +48,10 @@ parallel export stalled in the worklet compiler on this Mac.
 
 Published in [Dev 0.56.0 (5.1)](https://github.com/stexus/yomifin/releases/tag/yomifin-build-development-5-1)
 from `cd7deec6`; refresh the existing FlareStore source to install it.
+The follow-up restores the Next episode label and contextual visibility; it is
+JS-only, so Dev 5.1 loads it from current Metro code without a native rebuild.
 
-Device gate: use this Dev client with Metro; finish an episode early and
+Device gate: use this Dev client with Metro; tap the pill during an outro and
 verify Jellyfin removes its resume entry and marks it watched, while next-arrow
 navigation retains normal resume behavior. Also test no segment metadata,
 autoplay off, ending/post-credits scenes, offline completion and a failed server

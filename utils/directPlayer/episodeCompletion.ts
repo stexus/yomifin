@@ -3,14 +3,12 @@ import { NEXT_EPISODE_COUNTDOWN_MS } from "@/constants/Playback";
 export function shouldOfferEpisodeCompletion({
   isEpisode,
   hasNextEpisode,
-  controlsVisible,
   outroActive,
   durationMs,
   remainingMs,
 }: {
   isEpisode: boolean;
   hasNextEpisode: boolean;
-  controlsVisible: boolean;
   outroActive: boolean;
   durationMs: number;
   remainingMs: number;
@@ -18,9 +16,7 @@ export function shouldOfferEpisodeCompletion({
   return (
     isEpisode &&
     hasNextEpisode &&
-    (controlsVisible ||
-      outroActive ||
-      (durationMs > 0 && remainingMs < NEXT_EPISODE_COUNTDOWN_MS))
+    (outroActive || (durationMs > 0 && remainingMs < NEXT_EPISODE_COUNTDOWN_MS))
   );
 }
 

@@ -106,9 +106,7 @@ export const TVSkipSegmentCard: FC<TVSkipSegmentCardProps> = ({
 
   const labelText = t(
     type === "finish"
-      ? disabled
-        ? "player.finishing_episode"
-        : "player.finish_and_next_episode"
+      ? "player.next_episode"
       : SEGMENT_SKIP_KEY[SEGMENT_NAME_BY_CARD_TYPE[type]],
   );
 

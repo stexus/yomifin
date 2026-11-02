@@ -322,7 +322,6 @@ export const Controls: FC<Props> = ({
     shouldOfferEpisodeCompletion({
       isEpisode: item.Type === "Episode",
       hasNextEpisode: nextItem?.Type === "Episode",
-      controlsVisible: showControls,
       outroActive: showSkipOutroButton,
       durationMs: maxMs,
       remainingMs: remainingTime,
@@ -611,15 +610,6 @@ export const Controls: FC<Props> = ({
               onNextEpisodeFinish={handleNextEpisodeAutoPlay}
               onNextEpisodePress={
                 canFinishEpisode ? handleFinishEpisode : handleNextEpisodeManual
-              }
-              nextButtonText={
-                canFinishEpisode
-                  ? t(
-                      isFinishingEpisode
-                        ? "player.finishing_episode"
-                        : "player.finish_and_next_episode",
-                    )
-                  : undefined
               }
               nextButtonDisabled={isFinishingEpisode}
               controlsVisible={showControls}

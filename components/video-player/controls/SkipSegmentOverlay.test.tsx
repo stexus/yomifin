@@ -27,10 +27,9 @@ const props = () => ({
   onNextEpisodeFinish: jest.fn(),
   onNextEpisodePress: jest.fn(),
   controlsVisible: false,
-  nextButtonText: "Finish & Next Episode",
 });
 
-test("offers separate skip-credits and finish buttons without controls or a countdown", async () => {
+test("offers separate Skip Credits and Next Episode buttons without controls or a countdown", async () => {
   const actions = props();
   await render(<SkipSegmentOverlay {...actions} />);
   await fireEvent.press(
@@ -39,7 +38,7 @@ test("offers separate skip-credits and finish buttons without controls or a coun
   expect(actions.skipCredit).toHaveBeenCalledTimes(1);
   expect(actions.onNextEpisodePress).not.toHaveBeenCalled();
   await fireEvent.press(
-    screen.getByRole("button", { name: "Finish & Next Episode" }),
+    screen.getByRole("button", { name: "player.next_episode" }),
   );
   expect(actions.onNextEpisodePress).toHaveBeenCalledTimes(1);
   expect(actions.onNextEpisodeFinish).not.toHaveBeenCalled();
@@ -48,7 +47,7 @@ test("offers separate skip-credits and finish buttons without controls or a coun
 test("disables completion while watched state is being saved", async () => {
   const actions = props();
   await render(<SkipSegmentOverlay {...actions} nextButtonDisabled />);
-  const finish = screen.getByRole("button", { name: "Finish & Next Episode" });
+  const finish = screen.getByRole("button", { name: "player.next_episode" });
   expect(finish.props.accessibilityState).toMatchObject({
     disabled: true,
     busy: true,
