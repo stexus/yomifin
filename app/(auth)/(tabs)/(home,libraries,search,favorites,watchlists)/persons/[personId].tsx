@@ -1,20 +1,24 @@
 import type { BaseItemDto } from "@jellyfin/sdk/lib/generated-client/models";
-import { getItemsApi } from "@jellyfin/sdk/lib/utils/api";
+import { getLibraryApi } from "@jellyfin/sdk/lib/utils/api";
 import { useQuery } from "@tanstack/react-query";
 import { useLocalSearchParams } from "expo-router";
 import { useAtom } from "jotai";
 import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Platform, View } from "react-native";
+import { Platform, useWindowDimensions, View } from "react-native";
 import { Image } from "@/components/common/ServerImage";
 import { InfiniteScrollingCollectionList } from "@/components/home/InfiniteScrollingCollectionList";
 import { Loader } from "@/components/Loader";
 import { MoviesTitleHeader } from "@/components/movies/MoviesTitleHeader";
 import { OverviewText } from "@/components/OverviewText";
-import { ParallaxScrollView } from "@/components/ParallaxPage";
+import {
+  PARALLAX_HEADER_HEIGHT,
+  ParallaxScrollView,
+} from "@/components/ParallaxPage";
 import { TVActorPage } from "@/components/persons/TVActorPage";
 import { apiAtom, userAtom } from "@/providers/JellyfinProvider";
 import { getBackdropUrl } from "@/utils/jellyfin/image/getBackdropUrl";
+import { toImagePixels } from "@/utils/jellyfin/image/imagePixels";
 import { getUserItemData } from "@/utils/jellyfin/user-library/getUserItemData";
 
 const PAGE_SIZE = 16;
@@ -36,6 +40,7 @@ const MobileActorPage: React.FC<{ personId: string }> = ({ personId }) => {
 
   const [api] = useAtom(apiAtom);
   const [user] = useAtom(userAtom);
+  const { width: windowWidth } = useWindowDimensions();
 
   const { data: item, isLoading: l1 } = useQuery({
     queryKey: ["item", personId],
@@ -53,7 +58,7 @@ const MobileActorPage: React.FC<{ personId: string }> = ({ personId }) => {
     async ({ pageParam }: { pageParam: number }): Promise<BaseItemDto[]> => {
       if (!api || !user?.Id) return [];
 
-      const response = await getItemsApi(api).getItems({
+      const response = await getLibraryApi(api).getItems({
         userId: user.Id,
         personIds: [personId],
         startIndex: pageParam,
@@ -82,9 +87,11 @@ const MobileActorPage: React.FC<{ personId: string }> = ({ personId }) => {
         api,
         item,
         quality: 90,
-        width: 1000,
+        // The image covers the header, which spans the window.
+        width: toImagePixels(windowWidth),
+        height: toImagePixels(PARALLAX_HEADER_HEIGHT),
       }),
-    [item],
+    [api, item, windowWidth],
   );
 
   if (l1)

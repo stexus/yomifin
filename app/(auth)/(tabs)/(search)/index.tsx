@@ -2,12 +2,12 @@ import type {
   BaseItemDto,
   BaseItemKind,
 } from "@jellyfin/sdk/lib/generated-client/models";
-import { getItemsApi } from "@jellyfin/sdk/lib/utils/api";
-import { useQuery } from "@tanstack/react-query";
+import { getLibraryApi } from "@jellyfin/sdk/lib/utils/api";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import { useLocalSearchParams, useNavigation, useSegments } from "expo-router";
 import { useAtom } from "jotai";
-import { orderBy, uniqBy } from "lodash";
+import { orderBy } from "lodash";
 import {
   useCallback,
   useEffect,
@@ -18,7 +18,13 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { Platform, ScrollView, TouchableOpacity, View } from "react-native";
+import {
+  Platform,
+  RefreshControl,
+  ScrollView,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CardRow } from "@/components/cards/CardRow";
 import { Image } from "@/components/common/ServerImage";
@@ -27,10 +33,6 @@ import {
   getItemNavigation,
   TouchableItemRouter,
 } from "@/components/common/TouchableItemRouter";
-import {
-  JellyseerrSearchSort,
-  JellyserrIndexPage,
-} from "@/components/jellyseerr/JellyseerrIndexPage";
 import { DiscoverFilters } from "@/components/search/DiscoverFilters";
 import { LoadingSkeleton } from "@/components/search/LoadingSkeleton";
 import { SearchItemWrapper } from "@/components/search/SearchItemWrapper";
@@ -41,8 +43,14 @@ import {
 import { SearchTabButtons } from "@/components/search/SearchTabButtons";
 import { TVSearchPage } from "@/components/search/TVSearchPage";
 import { YozoraSearchResults } from "@/components/search/YozoraSearchResults";
+import {
+  SeerrIndexPage,
+  SeerrSearchSort,
+} from "@/components/seerr/SeerrIndexPage";
+import { SEARCH_RESULT_LIMIT } from "@/constants/Search";
 import useRouter from "@/hooks/useAppRouter";
-import { useJellyseerr } from "@/hooks/useJellyseerr";
+import { useSeerr } from "@/hooks/useSeerr";
+import { useServerVersion } from "@/hooks/useServerVersion";
 import { useTVItemActionModal } from "@/hooks/useTVItemActionModal";
 import { apiAtom, userAtom } from "@/providers/JellyfinProvider";
 import { useSettings } from "@/utils/atoms/settings";
@@ -50,13 +58,13 @@ import { getIntegrationHeaders } from "@/utils/customHeaders";
 import { isAbortLikeError } from "@/utils/errors";
 import { eventBus } from "@/utils/eventBus";
 import { getPrimaryImageUrl } from "@/utils/jellyfin/image/getPrimaryImageUrl";
-import { MediaType } from "@/utils/jellyseerr/server/constants/media";
-import type {
-  MovieResult,
-  PersonResult,
-  TvResult,
-} from "@/utils/jellyseerr/server/models/Search";
+import { searchPeople, searchStudios } from "@/utils/jellyfin/search";
 import { logAndCaptureError } from "@/utils/log";
+import { isSeerrQuery } from "@/utils/seerr/queries";
+import { searchSeerr } from "@/utils/seerr/search";
+import { loadDiscoverSliders } from "@/utils/seerr/sliders";
+import type { MovieResult, PersonResult, TvResult } from "@/utils/seerr/types";
+import { MediaType } from "@/utils/seerr/types";
 import { createStreamystatsApi } from "@/utils/streamystats";
 import { useYozoraSearch } from "@/utils/yozora/useYozoraSearch";
 
@@ -71,6 +79,8 @@ const exampleSearches = [
   "The Mandalorian",
 ];
 
+// The people and studio requests are covered by utils/jellyfin/search.test.ts,
+// the TV's studio section by components/search/TVSearchPage.test.tsx.
 export default function SearchPage() {
   const params = useLocalSearchParams();
   const insets = useSafeAreaInsets();
@@ -89,6 +99,22 @@ export default function SearchPage() {
   const { q } = params as { q: string };
 
   const [searchType, setSearchType] = useState<SearchType>("Library");
+
+  // Pulling down asks again for what the screen shows: Discover's rows and
+  // the results of either search.
+  const queryClient = useQueryClient();
+  const [refreshing, setRefreshing] = useState(false);
+  const refresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await queryClient.invalidateQueries({
+        predicate: (query) =>
+          query.queryKey[0] === "search" || isSeerrQuery(query.queryKey),
+      });
+    } finally {
+      setRefreshing(false);
+    }
+  }, [queryClient]);
   const [search, setSearch] = useState<string>("");
 
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -99,9 +125,10 @@ export default function SearchPage() {
   }, [search]);
 
   const [api] = useAtom(apiAtom);
+  const serverVersion = useServerVersion();
 
   const { settings, updateSettings } = useSettings();
-  const { jellyseerrApi } = useJellyseerr();
+  const { seerrApi } = useSeerr();
 
   // Unified search scope (Jellyfin / Yozora / Both), persisted in settings.
   // Legacy stored value "stremio" (pre-Yozora migration) maps to "yozora".
@@ -118,15 +145,10 @@ export default function SearchPage() {
   const jellyfinScope = scope === "jellyfin" || scope === "both";
   const yozoraScope = scope === "yozora" || scope === "both";
   const bothScopes = scope === "both";
-  const [jellyseerrOrderBy, setJellyseerrOrderBy] =
-    useState<JellyseerrSearchSort>(
-      JellyseerrSearchSort[
-        JellyseerrSearchSort.DEFAULT
-      ] as unknown as JellyseerrSearchSort,
-    );
-  const [jellyseerrSortOrder, setJellyseerrSortOrder] = useState<
-    "asc" | "desc"
-  >("desc");
+  const [seerrOrderBy, setSeerrOrderBy] = useState<SeerrSearchSort>(
+    SeerrSearchSort[SeerrSearchSort.DEFAULT] as unknown as SeerrSearchSort,
+  );
+  const [seerrSortOrder, setSeerrSortOrder] = useState<"asc" | "desc">("desc");
 
   const searchEngine = useMemo(() => {
     return settings?.searchEngine || "Jellyfin";
@@ -154,10 +176,10 @@ export default function SearchPage() {
 
       try {
         if (searchEngine === "Jellyfin") {
-          const searchApi = await getItemsApi(api).getItems(
+          const searchApi = await getLibraryApi(api).getItems(
             {
               searchTerm: query,
-              limit: 10,
+              limit: SEARCH_RESULT_LIMIT,
               includeItemTypes: types,
               recursive: true,
               userId: user?.Id,
@@ -191,23 +213,25 @@ export default function SearchPage() {
           const response = await streamyStatsApi.searchIds(
             query,
             searchType as "movies" | "series" | "episodes" | "actors" | "media",
-            10,
+            SEARCH_RESULT_LIMIT,
             signal,
           );
 
+          // searchIds answers with every list, empty when the server's body has
+          // none: covered by utils/streamystats/api.test.ts.
           const allIds: string[] = [
-            ...(response.data.movies || []),
-            ...(response.data.series || []),
-            ...(response.data.episodes || []),
-            ...(response.data.actors || []),
-            ...(response.data.audio || []),
+            ...response.data.movies,
+            ...response.data.series,
+            ...response.data.episodes,
+            ...response.data.actors,
+            ...response.data.audio,
           ];
 
           if (!allIds.length) {
             return [];
           }
 
-          const itemsResponse = await getItemsApi(api).getItems(
+          const itemsResponse = await getLibraryApi(api).getItems(
             {
               ids: allIds,
               enableImageTypes: ["Primary", "Backdrop", "Thumb"],
@@ -238,7 +262,7 @@ export default function SearchPage() {
           return [];
         }
 
-        const response2 = await getItemsApi(api).getItems(
+        const response2 = await getLibraryApi(api).getItems(
           {
             ids,
             enableImageTypes: ["Primary", "Backdrop", "Thumb"],
@@ -275,10 +299,10 @@ export default function SearchPage() {
       }
 
       try {
-        const searchApi = await getItemsApi(api).getItems(
+        const searchApi = await getLibraryApi(api).getItems(
           {
             searchTerm: query,
-            limit: 10,
+            limit: SEARCH_RESULT_LIMIT,
             includeItemTypes: types,
             recursive: true,
             userId: user?.Id,
@@ -390,12 +414,44 @@ export default function SearchPage() {
       jellyfinScope && searchType === "Library" && debouncedSearch.length > 0,
   });
 
+  // Jellyfin's own search asks the Persons API, which can leave the musicians
+  // out. Marlin and Streamystats rank people themselves, so they keep theirs.
   const { data: actors, isFetching: l8 } = useQuery({
-    queryKey: ["search", "actors", debouncedSearch],
+    // The version picks between the two ways of leaving the musicians out,
+    // which do not answer alike, so an answer is only good for the version
+    // it was asked under.
+    queryKey: [
+      "search",
+      "actors",
+      searchEngine,
+      debouncedSearch,
+      serverVersion,
+    ],
     queryFn: ({ signal }) =>
-      searchFn({
+      searchEngine === "Jellyfin"
+        ? searchPeople({
+            api,
+            userId: user?.Id,
+            query: debouncedSearch,
+            serverVersion,
+            signal,
+          })
+        : searchFn({
+            query: debouncedSearch,
+            types: ["Person"],
+            signal,
+          }),
+    enabled: searchType === "Library" && debouncedSearch.length > 0,
+  });
+
+  // Always Jellyfin: neither Marlin nor Streamystats indexes studios.
+  const { data: studios, isFetching: l13 } = useQuery({
+    queryKey: ["search", "studios", debouncedSearch],
+    queryFn: ({ signal }) =>
+      searchStudios({
+        api,
+        userId: user?.Id,
         query: debouncedSearch,
-        types: ["Person"],
         signal,
       }),
     enabled:
@@ -465,6 +521,7 @@ export default function SearchPage() {
         series?.length ||
         collections?.length ||
         actors?.length ||
+        studios?.length ||
         artists?.length ||
         albums?.length ||
         songs?.length ||
@@ -476,6 +533,7 @@ export default function SearchPage() {
       series,
       collections,
       actors,
+      studios,
       artists,
       albums,
       songs,
@@ -491,7 +549,8 @@ export default function SearchPage() {
 
   const loading = useMemo(() => {
     const jfLoading =
-      jellyfinScope && (l1 || l2 || l3 || l7 || l8 || l9 || l10 || l11 || l12);
+      jellyfinScope &&
+      (l1 || l2 || l3 || l7 || l8 || l9 || l10 || l11 || l12 || l13);
     const yzLoading = yozoraScope && yozora.loading;
     return jfLoading || yzLoading;
   }, [
@@ -507,6 +566,7 @@ export default function SearchPage() {
     l10,
     l11,
     l12,
+    l13,
   ]);
 
   // TV item press handler
@@ -518,99 +578,85 @@ export default function SearchPage() {
     [from, router],
   );
 
-  // Jellyseerr search for TV
-  const { data: jellyseerrTVResults, isFetching: jellyseerrTVLoading } =
-    useQuery({
-      queryKey: ["search", "jellyseerr", "tv", debouncedSearch],
-      queryFn: async () => {
-        const params = {
-          query: new URLSearchParams(debouncedSearch || "").toString(),
-        };
-        return await Promise.all([
-          jellyseerrApi?.search({ ...params, page: 1 }),
-          jellyseerrApi?.search({ ...params, page: 2 }),
-          jellyseerrApi?.search({ ...params, page: 3 }),
-          jellyseerrApi?.search({ ...params, page: 4 }),
-        ]).then((all) =>
-          uniqBy(
-            all.flatMap((v) => v?.results || []),
-            "id",
-          ),
-        );
-      },
-      enabled:
-        Platform.isTV &&
-        !!jellyseerrApi &&
-        searchType === "Discover" &&
-        debouncedSearch.length > 0,
-    });
+  // Seerr search for TV
+  const { data: seerrTVResults, isFetching: seerrTVLoading } = useQuery({
+    queryKey: ["search", "seerr", "tv", debouncedSearch],
+    queryFn: async () => {
+      return await searchSeerr(seerrApi, debouncedSearch);
+    },
+    enabled:
+      Platform.isTV &&
+      !!seerrApi &&
+      searchType === "Discover" &&
+      debouncedSearch.length > 0,
+  });
 
-  // Process Jellyseerr results for TV
-  const jellyseerrMovieResults = useMemo(
+  // Process Seerr results for TV
+  const seerrMovieResults = useMemo(
     () =>
       orderBy(
-        jellyseerrTVResults?.filter(
+        seerrTVResults?.filter(
           (r) => r.mediaType === MediaType.MOVIE,
         ) as MovieResult[],
         [(m) => m?.title?.toLowerCase() === debouncedSearch.toLowerCase()],
         "desc",
       ),
-    [jellyseerrTVResults, debouncedSearch],
+    [seerrTVResults, debouncedSearch],
   );
 
-  const jellyseerrTvResults = useMemo(
+  const seerrTvResults = useMemo(
     () =>
       orderBy(
-        jellyseerrTVResults?.filter(
+        seerrTVResults?.filter(
           (r) => r.mediaType === MediaType.TV,
         ) as TvResult[],
         [(t) => t?.name?.toLowerCase() === debouncedSearch.toLowerCase()],
         "desc",
       ),
-    [jellyseerrTVResults, debouncedSearch],
+    [seerrTVResults, debouncedSearch],
   );
 
-  const jellyseerrPersonResults = useMemo(
+  const seerrPersonResults = useMemo(
     () =>
       orderBy(
-        jellyseerrTVResults?.filter(
+        seerrTVResults?.filter(
           (r) => r.mediaType === "person",
         ) as PersonResult[],
         [(p) => p?.name?.toLowerCase() === debouncedSearch.toLowerCase()],
         "desc",
       ),
-    [jellyseerrTVResults, debouncedSearch],
+    [seerrTVResults, debouncedSearch],
   );
 
-  const jellyseerrTVNoResults = useMemo(() => {
+  const seerrTVNoResults = useMemo(() => {
     return (
-      !jellyseerrMovieResults?.length &&
-      !jellyseerrTvResults?.length &&
-      !jellyseerrPersonResults?.length
+      !seerrMovieResults?.length &&
+      !seerrTvResults?.length &&
+      !seerrPersonResults?.length
     );
-  }, [jellyseerrMovieResults, jellyseerrTvResults, jellyseerrPersonResults]);
+  }, [seerrMovieResults, seerrTvResults, seerrPersonResults]);
 
   // Fetch discover settings for TV (when no search query in Discover mode)
   const { data: discoverSliders } = useQuery({
-    queryKey: ["search", "jellyseerr", "discoverSettings", "tv"],
-    queryFn: async () => jellyseerrApi?.discoverSettings(),
+    queryKey: ["search", "seerr", "discoverSettings", "tv"],
+    queryFn: () => loadDiscoverSliders(seerrApi),
     enabled:
       Platform.isTV &&
-      !!jellyseerrApi &&
+      !!seerrApi &&
       searchType === "Discover" &&
       debouncedSearch.length === 0,
   });
 
-  // TV Jellyseerr press handlers
-  const handleJellyseerrMoviePress = useCallback(
+  // TV Seerr press handlers
+  const handleSeerrMoviePress = useCallback(
     (item: MovieResult) => {
       router.push({
-        pathname: "/(auth)/(tabs)/(search)/jellyseerr/page",
+        pathname: "/(auth)/(tabs)/(search)/seerr/page",
         params: {
           mediaTitle: item.title,
           releaseYear: String(new Date(item.releaseDate || "").getFullYear()),
           canRequest: "true",
-          posterSrc: jellyseerrApi?.imageProxy(item.posterPath) || "",
+          posterSrc: seerrApi?.imageProxy(item.posterPath) || "",
           mediaType: MediaType.MOVIE,
           id: String(item.id),
           backdropPath: item.backdropPath || "",
@@ -618,18 +664,18 @@ export default function SearchPage() {
         },
       });
     },
-    [router, jellyseerrApi],
+    [router, seerrApi],
   );
 
-  const handleJellyseerrTvPress = useCallback(
+  const handleSeerrTvPress = useCallback(
     (item: TvResult) => {
       router.push({
-        pathname: "/(auth)/(tabs)/(search)/jellyseerr/page",
+        pathname: "/(auth)/(tabs)/(search)/seerr/page",
         params: {
           mediaTitle: item.name,
           releaseYear: String(new Date(item.firstAirDate || "").getFullYear()),
           canRequest: "true",
-          posterSrc: jellyseerrApi?.imageProxy(item.posterPath) || "",
+          posterSrc: seerrApi?.imageProxy(item.posterPath) || "",
           mediaType: MediaType.TV,
           id: String(item.id),
           backdropPath: item.backdropPath || "",
@@ -637,12 +683,12 @@ export default function SearchPage() {
         },
       });
     },
-    [router, jellyseerrApi],
+    [router, seerrApi],
   );
 
-  const handleJellyseerrPersonPress = useCallback(
+  const handleSeerrPersonPress = useCallback(
     (item: PersonResult) => {
-      router.push(`/(auth)/jellyseerr/person/${item.id}` as any);
+      router.push(`/(auth)/seerr/person/${item.id}` as any);
     },
     [router],
   );
@@ -659,6 +705,7 @@ export default function SearchPage() {
         episodes={episodes}
         collections={collections}
         actors={actors}
+        studios={studios}
         artists={artists}
         albums={albums}
         songs={songs}
@@ -669,15 +716,15 @@ export default function SearchPage() {
         onItemLongPress={showItemActions}
         searchType={searchType}
         setSearchType={setSearchType}
-        showDiscover={!!jellyseerrApi}
-        jellyseerrMovies={jellyseerrMovieResults}
-        jellyseerrTv={jellyseerrTvResults}
-        jellyseerrPersons={jellyseerrPersonResults}
-        jellyseerrLoading={jellyseerrTVLoading}
-        jellyseerrNoResults={jellyseerrTVNoResults}
-        onJellyseerrMoviePress={handleJellyseerrMoviePress}
-        onJellyseerrTvPress={handleJellyseerrTvPress}
-        onJellyseerrPersonPress={handleJellyseerrPersonPress}
+        showDiscover={!!seerrApi}
+        seerrMovies={seerrMovieResults}
+        seerrTv={seerrTvResults}
+        seerrPersons={seerrPersonResults}
+        seerrLoading={seerrTVLoading}
+        seerrNoResults={seerrTVNoResults}
+        onSeerrMoviePress={handleSeerrMoviePress}
+        onSeerrTvPress={handleSeerrTvPress}
+        onSeerrPersonPress={handleSeerrPersonPress}
         discoverSliders={discoverSliders}
       />
     );
@@ -687,6 +734,9 @@ export default function SearchPage() {
     <ScrollView
       keyboardDismissMode='on-drag'
       contentInsetAdjustmentBehavior='automatic'
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={refresh} />
+      }
       contentContainerStyle={{
         paddingLeft: insets.left,
         paddingRight: insets.right,
@@ -702,7 +752,7 @@ export default function SearchPage() {
             <SearchScopeSelector scope={scope} onChange={setScope} />
           </View>
         ) : null}
-        {jellyseerrApi && (
+        {seerrApi && (
           <View className='pl-4 pr-4 flex flex-row'>
             <SearchTabButtons
               searchType={searchType}
@@ -716,10 +766,10 @@ export default function SearchPage() {
                 <DiscoverFilters
                   searchFilterId={searchFilterId}
                   orderFilterId={orderFilterId}
-                  jellyseerrOrderBy={jellyseerrOrderBy}
-                  setJellyseerrOrderBy={setJellyseerrOrderBy}
-                  jellyseerrSortOrder={jellyseerrSortOrder}
-                  setJellyseerrSortOrder={setJellyseerrSortOrder}
+                  seerrOrderBy={seerrOrderBy}
+                  setSeerrOrderBy={setSeerrOrderBy}
+                  seerrSortOrder={seerrSortOrder}
+                  setSeerrSortOrder={setSeerrSortOrder}
                   t={t}
                 />
               )}
@@ -774,6 +824,12 @@ export default function SearchPage() {
                 title={t("search.actors")}
                 items={actors ?? []}
                 kind='portrait'
+                hideIfEmpty
+              />
+              <CardRow
+                title={t("search.studios")}
+                items={studios ?? []}
+                kind='wide'
                 hideIfEmpty
               />
               {/* Music search results */}
@@ -959,10 +1015,10 @@ export default function SearchPage() {
             ) : null}
           </View>
         ) : (
-          <JellyserrIndexPage
+          <SeerrIndexPage
             searchQuery={debouncedSearch}
-            sortType={jellyseerrOrderBy}
-            order={jellyseerrSortOrder}
+            sortType={seerrOrderBy}
+            order={seerrSortOrder}
           />
         )}
 

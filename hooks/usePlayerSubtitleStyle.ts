@@ -41,7 +41,6 @@ export function usePlayerSubtitleStyle({
       videoHeight,
       width * PixelRatio.get(),
       height * PixelRatio.get(),
-      zoomed && height > width ? "cover" : "contain",
       playerType,
     );
     void applySubtitleStyle(

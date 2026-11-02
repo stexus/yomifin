@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import type { BaseItemDto } from "@jellyfin/sdk/lib/generated-client/models";
-import { getTvShowsApi } from "@jellyfin/sdk/lib/utils/api";
+import { getShowApi } from "@jellyfin/sdk/lib/utils/api";
 import { useQuery } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSegments } from "expo-router";
@@ -21,7 +21,9 @@ import { getItemNavigation } from "@/components/common/TouchableItemRouter";
 import { seasonIndexAtom } from "@/components/series/SeasonPicker";
 import { TVEpisodeList } from "@/components/series/TVEpisodeList";
 import { TVSeriesHeader } from "@/components/series/TVSeriesHeader";
+import { TVSimilarItems } from "@/components/TVSimilarItems";
 import { TVButton } from "@/components/tv/TVButton";
+import { TVCastCrewText } from "@/components/tv/TVCastCrewText";
 import { TVFavoriteButton } from "@/components/tv/TVFavoriteButton";
 import { useScaledTVTypography } from "@/constants/TVTypography";
 import useRouter from "@/hooks/useAppRouter";
@@ -40,6 +42,8 @@ import {
   getDownloadedEpisodesForSeason,
 } from "@/utils/downloads/offline-series";
 import { scaleSize } from "@/utils/scaleSize";
+import { replacementSeason } from "@/utils/seasonSelection";
+import { getSeriesPlaybackTarget } from "@/utils/seriesPlaybackTarget";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -118,19 +122,11 @@ export const TVSeriesPage: React.FC<TVSeriesPageProps> = ({
       }
       if (!api || !user?.Id || !item.Id) return [];
 
-      const response = await api.axiosInstance.get(
-        `${api.basePath}/Shows/${item.Id}/Seasons`,
-        {
-          params: {
-            userId: user.Id,
-            itemId: item.Id,
-            Fields: "ItemCounts,PrimaryImageAspectRatio",
-          },
-          headers: {
-            Authorization: `MediaBrowser DeviceId="${api.deviceInfo.id}", Token="${api.accessToken}"`,
-          },
-        },
-      );
+      const response = await getShowApi(api).getSeasons({
+        seriesId: item.Id,
+        userId: user.Id,
+        fields: ["ItemCounts", "PrimaryImageAspectRatio"],
+      });
       return response.data.Items || [];
     },
     staleTime: isOffline ? Infinity : 60 * 1000,
@@ -144,7 +140,11 @@ export const TVSeriesPage: React.FC<TVSeriesPageProps> = ({
   // and no episodes.
   const selectedSeasonIndex = useMemo(() => {
     const remembered = seasonIndexState[item.Id ?? ""];
-    if (remembered !== undefined && remembered !== null) return remembered;
+    if (remembered !== undefined && remembered !== null) {
+      // A remembered season that is gone (offline: its last downloaded
+      // episode was deleted) would show its name over an empty row.
+      return replacementSeason(seasons, remembered) ?? remembered;
+    }
 
     if (
       Number.isFinite(initialSeasonIndex) &&
@@ -200,7 +200,7 @@ export const TVSeriesPage: React.FC<TVSeriesPageProps> = ({
       }
       if (!api || !user?.Id || !item.Id || !selectedSeasonId) return [];
 
-      const res = await getTvShowsApi(api).getEpisodes({
+      const res = await getShowApi(api).getEpisodes({
         seriesId: item.Id,
         userId: user.Id,
         seasonId: selectedSeasonId,
@@ -217,20 +217,10 @@ export const TVSeriesPage: React.FC<TVSeriesPageProps> = ({
   });
 
   // Find next unwatched episode
-  const nextUnwatchedEpisode = useMemo(() => {
-    // First check all episodes for a "next up" candidate
-    for (const ep of allEpisodes) {
-      if (!ep.UserData?.Played) {
-        // Check if it has progress (continue watching)
-        if ((ep.UserData?.PlaybackPositionTicks ?? 0) > 0) {
-          return ep;
-        }
-      }
-    }
-
-    // Find first unwatched
-    return allEpisodes.find((ep) => !ep.UserData?.Played) || allEpisodes[0];
-  }, [allEpisodes]);
+  const nextUnwatchedEpisode = useMemo(
+    () => getSeriesPlaybackTarget(allEpisodes),
+    [allEpisodes],
+  );
 
   // Get season name for button
   const selectedSeasonName = useMemo(() => {
@@ -241,6 +231,15 @@ export const TVSeriesPage: React.FC<TVSeriesPageProps> = ({
     );
     return season?.Name || `Season ${selectedSeasonIndex}`;
   }, [seasons, selectedSeasonIndex]);
+
+  const handlePersonPress = useCallback(
+    (personId: string) => {
+      // The id comes from the server: encoded, it stays one path segment
+      // whatever it contains.
+      router.push(`/(auth)/persons/${encodeURIComponent(personId)}`);
+    },
+    [router],
+  );
 
   // Handle episode press
   const handleEpisodePress = useCallback(
@@ -268,7 +267,7 @@ export const TVSeriesPage: React.FC<TVSeriesPageProps> = ({
     // A single-season series has no "season vs series" distinction — shuffle
     // the whole thing without prompting.
     if (seasons.length <= 1) {
-      startShuffle(item.Id, allEpisodes, { isOffline });
+      startShuffle(allEpisodes, { isOffline });
       return;
     }
 
@@ -298,7 +297,7 @@ export const TVSeriesPage: React.FC<TVSeriesPageProps> = ({
       onSelect: (value: "season" | "series") => {
         if (!item.Id) return;
         const pool = value === "season" ? episodesForSeason : allEpisodes;
-        startShuffle(item.Id, pool, { isOffline });
+        startShuffle(pool, { isOffline });
       },
     });
   }, [
@@ -589,6 +588,24 @@ export const TVSeriesPage: React.FC<TVSeriesPageProps> = ({
             horizontalPadding={HORIZONTAL_PADDING}
           />
         </View>
+
+        {/* Credits lines - creators, directors, writers */}
+        <TVCastCrewText
+          people={item.People}
+          onPersonPress={isOffline ? undefined : handlePersonPress}
+          disabled={isSeasonModalVisible}
+          style={{ marginTop: scaleSize(40), marginLeft: SCALE_PADDING }}
+        />
+
+        {!isOffline && (
+          <TVSimilarItems
+            item={item}
+            disabled={isSeasonModalVisible}
+            horizontalPadding={HORIZONTAL_PADDING}
+            titleInset={SCALE_PADDING}
+            style={{ marginTop: scaleSize(40), overflow: "visible" }}
+          />
+        )}
       </ScrollView>
     </View>
   );

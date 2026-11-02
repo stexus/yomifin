@@ -13,6 +13,21 @@
       let
         pkgs = import nixpkgs { inherit system; };
 
+        # Upstream's v2 lockfile requires Bun 1.4; retain the rest of the Nix pin.
+        bunRelease = {
+          aarch64-darwin = { name = "bun-darwin-aarch64"; hash = "sha256-wkDX8My5DCY6hJ/NsJt+5iYw2SE0jtaq/ahrnVd7xRA="; };
+          x86_64-darwin = { name = "bun-darwin-x64-baseline"; hash = "sha256-1KFVrfv9CRVes7oFyeOlRPOSl9emhhbTx3WfZ6tcR9w="; };
+          aarch64-linux = { name = "bun-linux-aarch64"; hash = "sha256-uqa7NvUdblhWHgK76oJQOKnfRU9nPW13bou/hvjHhQ4="; };
+          x86_64-linux = { name = "bun-linux-x64"; hash = "sha256-v4zL+ysLgBWeD5ptFcVTF63YB3U028YTCj7bUvzLOVw="; };
+        }.${system};
+        yomifinBun = pkgs.bun.overrideAttrs (_: {
+          version = "1.4.4";
+          src = pkgs.fetchurl {
+            url = "https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/${bunRelease.name}.zip";
+            inherit (bunRelease) hash;
+          };
+        });
+
         # Pin the JDK to 17 (Temurin). Newer JDKs (23/25) break the
         # RN/AGP native Android build — see .github/workflows/build-apps.yml.
         jdk = pkgs.temurin-bin-17;
@@ -28,7 +43,7 @@
 
           packages = with pkgs; [
             # JS toolchain
-            bun # primary package manager / runner (CI pins 1.4.2)
+            yomifinBun # matches GitHub distribution
             nodejs_22 # Node >20 required by the project
 
             # React Native / Metro
@@ -84,7 +99,7 @@
             echo "   java : $(java -version 2>&1 | head -n1)"
             echo ""
             echo "First-time setup:"
-            echo "   bun i && bun run submodule-reload"
+            echo "   bun install --frozen-lockfile"
             echo "   bun run prebuild"
             echo "   bun run ios   # or: bun run android"
             echo ""

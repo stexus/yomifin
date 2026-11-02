@@ -16,13 +16,15 @@ sideloaded with a purchased FlareStore certificate, no App Store concerns.
   `utils/yomifin/LOOKUP_FIDELITY.md`.
 - Upstream Streamyfin conventions (bun, Jotai, expo-router, TV patterns): `CLAUDE.md`.
 
-## Upstream baseline — 2026-09-23
+## Upstream baseline — 2026-11-01
 
-The isolated `sync/upstream-develop-2026-09-23` branch integrates Streamyfin
-`develop` at `7fb905d1e887377ba80ca49b62582690729f77bf` (316 upstream commits).
-The original `yomifin` branch is the clean pre-sync checkpoint `a5349749`.
-This branch uses Expo SDK 57, React Native tvOS 0.86 and MPVKit 0.41.
-Merge validation and remaining physical-iPad gates are in `FEATURES.md`.
+The integration branch `sync/upstream-develop-2026-09-23` now merges Streamyfin
+`develop` at `284d5527f3aa0f099a7124b6e9d7fb8321ccd51c` (152 additional commits).
+The September baseline was `7fb905d1`; `yomifin` remains the pre-sync checkpoint.
+This branch uses Expo SDK 57, React Native tvOS 0.86, MPVKit 0.41 and Jellyfin
+SDK 1.0. The Nix shell and FlareStore CI pin Bun 1.4.4 for the v2 lockfile.
+The merge adds native changes and a notification-settings-link module, so a new
+Dev IPA is required. Validation and physical-iPad gates are in `FEATURES.md`.
 
 The fork deliberately keeps iPhone/iPad on the RN player route, even if a stored
 preference selects Native: upstream's fully native chrome does not host the
@@ -32,9 +34,9 @@ playback is now `MpvPlayerView → MPVPlayerEngine → MPVLayerRenderer`; preser
 the subtitle-text delegate and capture/visibility/sub-seek forwarding through
 all three layers when syncing again.
 
-`bun run test:unit` runs repository unit tests through `scripts/test-unit.ts`,
-isolates `.ui.test.tsx` React component tests from native module mocks, then runs
-the 20 standalone Yomifin/Yozora stages. Bare `bun test` also discovers the
+`bun run test:unit` runs upstream Jest/Expo tests through `scripts/test-unit.ts`,
+then the fork-only Bun specs (isolating `.ui.test.tsx` native mocks), and the
+20 standalone Yomifin/Yozora stages. Bare `bun test` also discovers the
 ignored local Yomitan checkout and standalone scripts that can end its process
 early. Use the package command for a complete result.
 

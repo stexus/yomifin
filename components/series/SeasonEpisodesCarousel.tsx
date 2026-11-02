@@ -1,15 +1,19 @@
 import type { BaseItemDto } from "@jellyfin/sdk/lib/generated-client/models";
-import { getTvShowsApi } from "@jellyfin/sdk/lib/utils/api";
+import { getShowApi } from "@jellyfin/sdk/lib/utils/api";
 import { useQuery } from "@tanstack/react-query";
 import { useAtom } from "jotai";
 import { useMemo } from "react";
 import { View, type ViewStyle } from "react-native";
+import type { CardData } from "@/components/cards/CardData";
+import { CardPill } from "@/components/cards/CardPill";
 import { CardRow } from "@/components/cards/CardRow";
 import useRouter from "@/hooks/useAppRouter";
+import { useEpisodeAirLabels } from "@/hooks/useEpisodeAirLabels";
 import { useDownload } from "@/providers/DownloadProvider";
 import { apiAtom, userAtom } from "@/providers/JellyfinProvider";
 import { useOfflineMode } from "@/providers/OfflineModeProvider";
 import { getDownloadedEpisodesBySeasonId } from "@/utils/downloads/offline-series";
+import { queryResultItems } from "@/utils/jellyfin/queryResult";
 
 interface Props {
   item?: BaseItemDto | null;
@@ -45,7 +49,7 @@ export const SeasonEpisodesCarousel: React.FC<Props> = ({
         return getDownloadedEpisodesBySeasonId(getDownloadedItems(), seasonId!);
       }
       if (!api || !user?.Id || !item?.SeriesId) return [];
-      const response = await getTvShowsApi(api).getEpisodes({
+      const response = await getShowApi(api).getEpisodes({
         userId: user.Id,
         seasonId: seasonId || undefined,
         seriesId: item.SeriesId,
@@ -58,16 +62,32 @@ export const SeasonEpisodesCarousel: React.FC<Props> = ({
           "Overview",
         ],
       });
-      return response.data.Items as BaseItemDto[];
+      // An answer without the list (a proxy's page, an empty body) fails the
+      // query rather than emptying it: a refetch keeps the episodes shown.
+      return queryResultItems(response);
     },
     enabled: !!seasonId && (isOffline || (!!api && !!user?.Id)),
   });
+
+  // An episode the library has no file for says so, rather than looking like
+  // one that plays.
+  const { availabilityLabel } = useEpisodeAirLabels();
+  const slots = useMemo(() => {
+    const episodeById = new Map(episodes?.map((e) => [e.Id, e]));
+    return {
+      overlay: (card: CardData) => {
+        const label = availabilityLabel(episodeById.get(card.id));
+        return label ? <CardPill label={label} /> : null;
+      },
+    };
+  }, [episodes, availabilityLabel]);
 
   return (
     <View style={[containerStyle, style]}>
       <CardRow
         kind='wide'
         items={episodes ?? []}
+        slots={slots}
         useEpisodePoster
         loading={loading || isPending}
         // Everything but the episode being viewed is faded back.

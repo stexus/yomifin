@@ -80,6 +80,7 @@ export interface PlayerControlsProps {
   panel?: ReactNode;
   overlays?: ReactNode;
   interactionBlocked?: boolean;
+  onUserInteraction?: () => void;
 }
 const noPreview = () => {};
 const animation = {
@@ -126,6 +127,7 @@ export function PlayerControls({
   panel,
   overlays,
   interactionBlocked = false,
+  onUserInteraction,
 }: PlayerControlsProps) {
   const { width, height } = useWindowDimensions();
   const min = useSharedValue(0);
@@ -277,6 +279,7 @@ export function PlayerControls({
     timeout: PLAYER_CONTROLS_TIMEOUT_MS,
   });
   useKeyEventListener((event) => {
+    if (event?.eventType === "press") onUserInteraction?.();
     if (
       panel ||
       openPanels.size ||
@@ -293,7 +296,14 @@ export function PlayerControls({
   });
   return (
     <PlayerInteractionContext.Provider value={interaction}>
-      <View style={StyleSheet.absoluteFill} pointerEvents='box-none'>
+      <View
+        style={StyleSheet.absoluteFill}
+        pointerEvents='box-none'
+        onStartShouldSetResponderCapture={() => {
+          onUserInteraction?.();
+          return false;
+        }}
+      >
         {panel || (
           <>
             <GestureOverlay

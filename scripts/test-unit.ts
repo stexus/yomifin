@@ -1,8 +1,8 @@
 import { execFileSync, spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 
-// Bare `bun test` also discovers ignored native builds and the local Yomitan
-// checkout. The fork's standalone regression scripts run separately because
-// they own their process lifecycle; they must not terminate Bun's test runner.
+// Upstream uses Jest/Expo. Fork-only Bun specs and standalone language tests
+// retain their own runtimes; never discover ignored native/reference checkouts.
 const files = [
   ...new Set(
     execFileSync(
@@ -21,11 +21,22 @@ const files = [
 );
 
 if (files.length === 0) throw new Error("No repository unit tests found");
+const bunFiles = files.filter((path) =>
+  readFileSync(path, "utf8").includes('from "bun:test"'),
+);
+const jestFiles = files.filter((path) => !bunFiles.includes(path));
+const jestResult = spawnSync(
+  "bun",
+  ["run", "jest", "--runTestsByPath", "--maxWorkers=4", ...jestFiles],
+  { stdio: "inherit" },
+);
+if (jestResult.error) throw jestResult.error;
+if (jestResult.status !== 0) process.exit(jestResult.status ?? 1);
 // UI specs replace native views with React hosts. Bun module mocks are global,
 // so isolate these from utility specs' different native stubs.
-const uiFiles = files.filter((path) => path.endsWith(".ui.test.tsx"));
+const uiFiles = bunFiles.filter((path) => path.endsWith(".ui.test.tsx"));
 const batches = [
-  files.filter((path) => !uiFiles.includes(path)),
+  bunFiles.filter((path) => !uiFiles.includes(path)),
   ...uiFiles.map((path) => [path]),
 ];
 for (const batch of batches) {

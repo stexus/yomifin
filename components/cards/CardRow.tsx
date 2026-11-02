@@ -1,6 +1,6 @@
 import type { BaseItemDto } from "@jellyfin/sdk/lib/generated-client/models";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, View, type ViewProps } from "react-native";
 import { SectionHeader } from "@/components/common/SectionHeader";
 import { Text } from "@/components/common/Text";
@@ -31,6 +31,8 @@ interface Props extends ViewProps {
 
   /** Prefer the episode's own still over the series thumbnail. */
   useEpisodePoster?: boolean;
+  /** Show a TV child's series name before its own name. */
+  showParentTitle?: boolean;
   /** Item to keep at full opacity; every other card is faded back. */
   selectedId?: string | null;
   /** Card to scroll into view when this value changes. */
@@ -90,6 +92,7 @@ export const CardRow: React.FC<Props> = ({
   items,
   cards: providedCards,
   useEpisodePoster = false,
+  showParentTitle = false,
   selectedId,
   scrollToId,
   textPlacement = "over",
@@ -114,6 +117,7 @@ export const CardRow: React.FC<Props> = ({
       cards: providedCards,
       kind,
       useEpisodePoster,
+      showParentTitle,
       selectedId,
       onPressItem,
       onPressId,
@@ -148,6 +152,11 @@ export const CardRow: React.FC<Props> = ({
     listRef.current?.scrollToOffset({ offset: index * stride, animated: true });
   }, [isMeasured, scrollToId, cards, stride]);
 
+  const Separator = useMemo(
+    () => () => <View style={{ width: layout.spacing }} />,
+    [layout.spacing],
+  );
+
   const renderCard = useCallback(
     ({ item }: { item: CardData }) => (
       <Card
@@ -155,10 +164,8 @@ export const CardRow: React.FC<Props> = ({
         kind={kind}
         textPlacement={textPlacement}
         slots={slots}
-        onPress={() => handlePress(item.id)}
-        onLongPress={
-          handleLongPress ? () => handleLongPress(item.id) : undefined
-        }
+        onPress={handlePress}
+        onLongPress={handleLongPress}
       />
     ),
     [kind, textPlacement, slots, handlePress, handleLongPress],
@@ -203,9 +210,7 @@ export const CardRow: React.FC<Props> = ({
             onEndReached={onEndReached}
             onEndReachedThreshold={0.5}
             onContentSizeChange={handleContentSizeChange}
-            ItemSeparatorComponent={() => (
-              <View style={{ width: layout.spacing }} />
-            )}
+            ItemSeparatorComponent={Separator}
             ListFooterComponent={
               loadingMore ? (
                 <View

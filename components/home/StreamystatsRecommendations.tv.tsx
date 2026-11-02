@@ -2,7 +2,7 @@ import type {
   BaseItemDto,
   PublicSystemInfo,
 } from "@jellyfin/sdk/lib/generated-client/models";
-import { getItemsApi, getSystemApi } from "@jellyfin/sdk/lib/utils/api";
+import { getLibraryApi, getSystemApi } from "@jellyfin/sdk/lib/utils/api";
 import { useQuery } from "@tanstack/react-query";
 import { useSegments } from "expo-router";
 import { useAtomValue } from "jotai";
@@ -20,7 +20,6 @@ import { apiAtom, userAtom } from "@/providers/JellyfinProvider";
 import { useSettings } from "@/utils/atoms/settings";
 import { scaleSize } from "@/utils/scaleSize";
 import { createStreamystatsApi } from "@/utils/streamystats/api";
-import type { StreamystatsRecommendationsIdsResponse } from "@/utils/streamystats/types";
 
 interface Props extends ViewProps {
   title: string;
@@ -97,12 +96,7 @@ export const StreamystatsRecommendations: React.FC<Props> = ({
         limit,
       );
 
-      const data = response as StreamystatsRecommendationsIdsResponse;
-
-      if (type === "Movie") {
-        return data.data.movies || [];
-      }
-      return data.data.series || [];
+      return type === "Movie" ? response.data.movies : response.data.series;
     },
     enabled:
       enabled &&
@@ -132,7 +126,7 @@ export const StreamystatsRecommendations: React.FC<Props> = ({
         return [];
       }
 
-      const response = await getItemsApi(api).getItems({
+      const response = await getLibraryApi(api).getItems({
         userId: user.Id,
         ids: recommendationIds,
         fields: ["PrimaryImageAspectRatio", "Genres"],
@@ -175,9 +169,9 @@ export const StreamystatsRecommendations: React.FC<Props> = ({
           <TVPosterCard
             item={item}
             orientation='vertical'
-            onPress={() => handleItemPress(item)}
-            onLongPress={() => showItemActions(item)}
-            onFocus={() => onItemFocus?.(item)}
+            onPress={handleItemPress}
+            onLongPress={showItemActions}
+            onFocus={onItemFocus}
             width={sizes.posters.poster}
           />
         </View>

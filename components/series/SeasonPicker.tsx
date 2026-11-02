@@ -1,5 +1,5 @@
 import type { BaseItemDto } from "@jellyfin/sdk/lib/generated-client/models";
-import { getTvShowsApi } from "@jellyfin/sdk/lib/utils/api";
+import { getShowApi } from "@jellyfin/sdk/lib/utils/api";
 import { useQuery } from "@tanstack/react-query";
 import { atom, useAtom } from "jotai";
 import { useEffect, useMemo, useState } from "react";
@@ -10,7 +10,9 @@ import {
   SeasonDropdown,
   type SeasonIndexState,
 } from "@/components/series/SeasonDropdown";
+import { SyncPlayQueueButton } from "@/components/syncplay/SyncPlayQueueButton";
 import { Colors } from "@/constants/Colors";
+import { useEpisodeAirLabels } from "@/hooks/useEpisodeAirLabels";
 import { useDownload } from "@/providers/DownloadProvider";
 import { apiAtom, userAtom } from "@/providers/JellyfinProvider";
 import { useOfflineMode } from "@/providers/OfflineModeProvider";
@@ -18,9 +20,11 @@ import {
   buildOfflineSeasons,
   getDownloadedEpisodesForSeason,
 } from "@/utils/downloads/offline-series";
+import { replacementSeason } from "@/utils/seasonSelection";
 import { runtimeTicksToSeconds } from "@/utils/time";
 import { buildItemCards, type CardData } from "../cards/CardData";
 import { CardListRow } from "../cards/CardListRow";
+import { CardPill } from "../cards/CardPill";
 import { useItemCardBehavior } from "../cards/useItemCardBehavior";
 import { Text } from "../common/Text";
 import { DownloadItems, DownloadSingleItem } from "../DownloadItem";
@@ -47,7 +51,7 @@ export const SeasonPicker: React.FC<Props> = ({ item, initialSeasonIndex }) => {
     [item, seasonIndexState],
   );
 
-  const { data: seasons } = useQuery({
+  const { data: seasons = [] } = useQuery({
     queryKey: ["seasons", item.Id, isOffline, downloadedItems.length],
     queryFn: async () => {
       if (isOffline) {
@@ -55,29 +59,36 @@ export const SeasonPicker: React.FC<Props> = ({ item, initialSeasonIndex }) => {
       }
 
       if (!api || !user?.Id || !item.Id) return [];
-      const response = await api.axiosInstance.get(
-        `${api.basePath}/Shows/${item.Id}/Seasons`,
-        {
-          params: {
-            userId: user?.Id,
-            itemId: item.Id,
-            Fields:
-              "ItemCounts,PrimaryImageAspectRatio,CanDelete,MediaSourceCount",
-          },
-          headers: {
-            Authorization: `MediaBrowser DeviceId="${api.deviceInfo.id}", Token="${api.accessToken}"`,
-          },
-        },
-      );
+      const response = await getShowApi(api).getSeasons({
+        seriesId: item.Id,
+        userId: user.Id,
+        fields: [
+          "ItemCounts",
+          "PrimaryImageAspectRatio",
+          "CanDelete",
+          "MediaSourceCount",
+        ],
+      });
 
-      return response.data.Items;
+      return response.data.Items || [];
     },
     staleTime: isOffline ? Infinity : 60,
     enabled: isOffline || (!!api && !!user?.Id && !!item.Id),
   });
 
+  // The remembered season can go away under the page: offline, deleting its
+  // last downloaded episode removes it from the list. SeasonDropdown only
+  // picks a season while none is remembered, so without this the page stays
+  // on a season it can no longer show.
+  useEffect(() => {
+    if (!item.Id) return;
+    const replacement = replacementSeason(seasons, seasonIndex);
+    if (replacement === undefined) return;
+    setSeasonIndexState((prev) => ({ ...prev, [item.Id!]: replacement }));
+  }, [item.Id, seasons, seasonIndex, setSeasonIndexState]);
+
   const selectedSeasonId: string | null = useMemo(() => {
-    const season: BaseItemDto = seasons?.find(
+    const season = seasons?.find(
       (s: BaseItemDto) =>
         s.IndexNumber === seasonIndex || s.Name === seasonIndex,
     );
@@ -118,7 +129,7 @@ export const SeasonPicker: React.FC<Props> = ({ item, initialSeasonIndex }) => {
         return [];
       }
 
-      const res = await getTvShowsApi(api).getEpisodes({
+      const res = await getShowApi(api).getEpisodes({
         seriesId: item.Id,
         userId: user.Id,
         seasonId: selectedSeasonId,
@@ -176,11 +187,18 @@ export const SeasonPicker: React.FC<Props> = ({ item, initialSeasonIndex }) => {
       enableActionSheet: true,
     });
 
+  const { availabilityLabel } = useEpisodeAirLabels();
   const slots = useMemo(
     () => ({
+      // An episode the library has no file for says so, and offers no
+      // download, rather than looking like one that plays.
+      overlay: (card: CardData) => {
+        const label = availabilityLabel(episodeById.get(card.id));
+        return label ? <CardPill label={label} /> : null;
+      },
       trailing: (card: CardData) => {
         const episode = episodeById.get(card.id);
-        if (isOffline || !episode) return null;
+        if (isOffline || !episode || availabilityLabel(episode)) return null;
         return <DownloadSingleItem item={episode} />;
       },
       footer: (card: CardData) => {
@@ -193,7 +211,7 @@ export const SeasonPicker: React.FC<Props> = ({ item, initialSeasonIndex }) => {
         );
       },
     }),
-    [episodeById, isOffline],
+    [episodeById, isOffline, availabilityLabel],
   );
 
   return (
@@ -234,6 +252,7 @@ export const SeasonPicker: React.FC<Props> = ({ item, initialSeasonIndex }) => {
               )}
             />
             <PlayedStatus items={episodes || []} />
+            <SyncPlayQueueButton items={episodes || []} variant='icon' />
           </View>
         ) : null}
       </View>

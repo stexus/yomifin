@@ -1,5 +1,13 @@
 # Yomifin development and FlareStore distribution
 
+## Latest development baseline (2026-11-01)
+
+The integration branch now merges upstream `284d5527`, including native player
+changes and the notification-settings-link module. Rebuild the Dev client for
+this baseline; the October binaries are not sufficient. Nix and FlareStore CI
+now use Bun 1.4.4, required by upstream's v2 lockfile. Existing stable identity
+and distribution stay unchanged. See `FEATURES.md` for validation and iPad gates.
+
 ## Current status (2026-10-13)
 
 The repository implementation is installed: separate app identities, Metro and

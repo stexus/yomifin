@@ -19,6 +19,27 @@ per backlog item to start work without re-exploration.
 
 ---
 
+## Upstream sync — 2026-11-01 (pending iPad verification)
+
+Merged Streamyfin `develop` at `284d5527` (152 commits) into the existing
+integration branch. Adopted Jellyfin SDK 1.0 / Jellyfin 12 support, SyncPlay,
+Seerr migration, notifications, library/cast improvements and iOS playback,
+subtitle, progress and download fixes. Preserved shared Jellyfin/Yozora controls,
+mining/capture/gesture seams, the RN iPad player and separate FlareStore identities.
+Native foreground subtitle recovery respects Yomifin's hidden native text.
+
+Upstream Jest/Expo tests and the fork's Bun/standalone suites run separately.
+Nix and FlareStore CI use Bun 1.4.4. The old Expo JSI patch is obsolete: the new
+57.1.1 implementation uses `Double.magnitude`. The retired Seerr submodule is no
+longer required; any remaining local checkout is ignored.
+
+Validation: TypeScript, Biome, all 287 upstream test suites, fork Bun tests and
+all 20 language/Yozora stages (including the real-alass cross-check) passed.
+Unsigned Debug IPA compilation is in progress; no physical-iPad run performed.
+Device gates: playback/exit/backgrounding, lookup with hidden native subtitles,
+text/bitmap/external subtitles, Anki audio/image capture, offline downloads after
+updating, Jellyfin episode/version transitions and Yozora playback.
+
 ## Shared mobile player UI — 2026-10-05 (pending iPad verification)
 
 Jellyfin and Yozora now render the same `PlayerControls`, status/header/bottom

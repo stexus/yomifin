@@ -8,6 +8,10 @@ import UIKit
 /// Configuration for loading a video
 struct VideoLoadConfig {
 	let url: URL
+	/// The URL as JS asked for it. `url` is Foundation's parse of it, which can
+	/// spell it differently (punycode hosts, percent encoding), so JS
+	/// recognizes its own stream in onLoad only by this string.
+	var requestedURL: String?
 	var headers: [String: String]?
 	var externalSubtitles: [String]?
 	var startPosition: Double?
@@ -121,7 +125,13 @@ class MpvPlayerView: ExpoView {
 		engine.displayLayer.contentsScale = contentScaleFactor
 		engine.displayLayer.isHidden = false
 		engine.displayLayer.opacity = 1.0
+		engine.syncSubtitleLayerFrame()
 		CATransaction.commit()
+	}
+
+	override func didMoveToWindow() {
+		super.didMoveToWindow()
+		engine.setPictureInPictureHostVisible(window != nil)
 	}
 
 	// MARK: - Now Playing Info
@@ -340,8 +350,8 @@ extension MpvPlayerView: MPVPlayerEngineDelegate {
 		onSubtitleText(["text": text, "start": start, "end": end])
 	}
 
-	func engine(_ engine: MPVPlayerEngine, didLoad url: URL) {
-		onLoad(["url": url.absoluteString])
+	func engine(_ engine: MPVPlayerEngine, didLoad config: VideoLoadConfig) {
+		onLoad(["url": config.url.absoluteString])
 	}
 
 	func engine(_ engine: MPVPlayerEngine, didUpdateProgress position: Double, duration: Double, cacheSeconds: Double) {

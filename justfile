@@ -39,9 +39,9 @@ xcode-license:
     sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
     sudo xcodebuild -license accept
 
-# Install JS deps and pull native submodules.
+# Install the pinned JS dependencies.
 deps:
-    bun i && bun run submodule-reload
+    bun install --frozen-lockfile
 
 # Install the Metal toolchain (required for the MPVKit/libmpv native build).
 metal-toolchain:

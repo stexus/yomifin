@@ -6,7 +6,7 @@ import {
   BottomSheetScrollView,
 } from "@gorhom/bottom-sheet";
 import type { BaseItemDto } from "@jellyfin/sdk/lib/generated-client/models";
-import { getItemsApi } from "@jellyfin/sdk/lib/utils/api";
+import { getLibraryApi } from "@jellyfin/sdk/lib/utils/api";
 import { useQuery } from "@tanstack/react-query";
 import { useAtom } from "jotai";
 import React, {
@@ -28,6 +28,7 @@ import { Input } from "@/components/common/Input";
 import { Image } from "@/components/common/ServerImage";
 import { Text } from "@/components/common/Text";
 import { useAddToPlaylist } from "@/hooks/usePlaylistMutations";
+import { useSheetOpenState } from "@/hooks/useSheetOpenState";
 import { apiAtom, userAtom } from "@/providers/JellyfinProvider";
 
 interface Props {
@@ -59,7 +60,7 @@ export const PlaylistPickerSheet: React.FC<Props> = ({
     queryFn: async () => {
       if (!api || !user?.Id) return [];
 
-      const response = await getItemsApi(api).getItems({
+      const response = await getLibraryApi(api).getItems({
         userId: user.Id,
         includeItemTypes: ["Playlist"],
         sortBy: ["SortName"],
@@ -84,13 +85,9 @@ export const PlaylistPickerSheet: React.FC<Props> = ({
   const showSearch = (playlists?.length || 0) > 10;
 
   useEffect(() => {
-    if (open) {
-      setSearch("");
-      bottomSheetModalRef.current?.present();
-    } else {
-      bottomSheetModalRef.current?.dismiss();
-    }
+    if (open) setSearch("");
   }, [open]);
+  const handleDismissed = useSheetOpenState(bottomSheetModalRef, open);
 
   const handleSheetChanges = useCallback(
     (index: number) => {
@@ -145,6 +142,7 @@ export const PlaylistPickerSheet: React.FC<Props> = ({
   return (
     <BottomSheetModal
       ref={bottomSheetModalRef}
+      onDismiss={handleDismissed}
       index={0}
       snapPoints={snapPoints}
       onChange={handleSheetChanges}

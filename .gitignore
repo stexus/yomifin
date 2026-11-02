@@ -73,6 +73,9 @@ build/
 # but keep EAS custom build configs (the generic build/ rule above matches .eas/build/)
 !.eas/build/
 !.eas/build/**
+# Jest coverage reports
+coverage/
+
 # Claude Code: the shared conventions are tracked so a new learned fact or agent
 # reaches the repo; everything else under .claude/ is per-machine state.
 .claude/*
@@ -104,3 +107,8 @@ assets/dictionaries/
 
 # yomifin: real-world subtitle pairs for the alass sync cross-check (personal content)
 scripts/sync-fixtures/
+# Reassure measurements
+.reassure/
+
+# Historical Seerr submodule checkout (removed by upstream)
+/utils/jellyseerr/

@@ -15,18 +15,35 @@ import {
 import { useTranslation } from "react-i18next";
 import { type SharedValue, useSharedValue } from "react-native-reanimated";
 import ContinueWatchingOverlay from "@/components/video-player/controls/ContinueWatchingOverlay";
+import { NEXT_EPISODE_COUNTDOWN_MS } from "@/constants/Playback";
 import useRouter from "@/hooks/useAppRouter";
 import { useHaptic } from "@/hooks/useHaptic";
 import { useMediaSegments } from "@/hooks/useMediaSegments";
 import { usePlaybackManager } from "@/hooks/usePlaybackManager";
+import { useServerVersion } from "@/hooks/useServerVersion";
 import { useTrickplay } from "@/hooks/useTrickplay";
 import type { TechnicalInfo } from "@/modules/mpv-player";
 import type { DownloadedItem } from "@/providers/Downloads/types";
 import { useOfflineMode } from "@/providers/OfflineModeProvider";
 import { useSettings } from "@/utils/atoms/settings";
 import { hasChapterMarkers } from "@/utils/chapters";
-import { getDefaultPlaySettings } from "@/utils/jellyfin/getDefaultPlaySettings";
+import { resolveStartTicks } from "@/utils/directPlayer/sessionPosition";
+import {
+  getAdjacentStartTicks,
+  getDefaultPlaySettings,
+} from "@/utils/jellyfin/getDefaultPlaySettings";
+import { getPlayingRunTimeTicks } from "@/utils/jellyfin/mediaSourceVersion";
 import { SEGMENT_SKIP_KEY, useSegments } from "@/utils/segments";
+import {
+  decideStillWatchingOnce,
+  isStillWatchingDueAtEnd,
+  markStillWatchingInput,
+  peekStillWatchingDecision,
+  previewStillWatchingDecision,
+  recordStillWatchingAutoplay,
+  releaseStillWatchingDecision,
+  resetStillWatchingSession,
+} from "@/utils/stillWatching";
 import { ticksToMs } from "@/utils/time";
 import { CONTROLS_CONSTANTS } from "./constants";
 import DropdownView from "./dropdown/DropdownView";
@@ -124,7 +141,11 @@ export const Controls: FC<Props> = ({
   interactionBlocked,
 }) => {
   const offline = useOfflineMode();
-  const { settings, updateSettings } = useSettings();
+  const { settings } = useSettings();
+  const serverVersion = useServerVersion({
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+  const [stillWatchingVisible, setStillWatchingVisible] = useState(false);
   const router = useRouter();
   const lightHapticFeedback = useHaptic("light");
   const [episodeView, setEpisodeView] = useState(false);
@@ -137,26 +158,38 @@ export const Controls: FC<Props> = ({
     calculateTrickplayUrl,
     trickplayInfo,
     prefetchAllTrickplayImages,
-  } = useTrickplay(item);
-  const maxMs = ticksToMs(item.RunTimeTicks || 0);
+  } = useTrickplay(item, mediaSource?.Id);
+  const maxMs = ticksToMs(getPlayingRunTimeTicks(item, mediaSource));
   const max = useSharedValue(maxMs);
   useEffect(() => {
     prefetchAllTrickplayImages();
   }, [prefetchAllTrickplayImages]);
   useEffect(() => {
-    progress.value = ticksToMs(item.UserData?.PlaybackPositionTicks);
-    max.value = ticksToMs(item.RunTimeTicks || 0);
-  }, [item, progress, max]);
+    progress.value = ticksToMs(
+      resolveStartTicks(
+        playbackPositionRef.current,
+        item.UserData?.PlaybackPositionTicks,
+      ),
+    );
+  }, [item, progress]);
+  useEffect(() => {
+    max.value = maxMs;
+  }, [maxMs, max]);
   const { currentTime, remainingTime } = useVideoTime({
     progress,
     max,
     isSeeking,
   });
-  const { bitrateValue, subtitleIndex, audioIndex } = useLocalSearchParams<{
-    bitrateValue: string;
-    audioIndex: string;
-    subtitleIndex: string;
-  }>();
+  const { playbackPosition, bitrateValue, subtitleIndex, audioIndex } =
+    useLocalSearchParams<{
+      playbackPosition: string;
+      bitrateValue: string;
+      audioIndex: string;
+      subtitleIndex: string;
+    }>();
+  // Read when the item changes only: the player rewrites the param as it goes.
+  const playbackPositionRef = useRef(playbackPosition);
+  playbackPositionRef.current = playbackPosition;
 
   // Fetch all segments for the current item
   const { data: segments } = useSegments(
@@ -199,14 +232,69 @@ export const Controls: FC<Props> = ({
     [item.Chapters, maxMs],
   );
 
+  const autoPlayWanted = !!nextItem && settings.autoPlayNextEpisode !== false;
+  const inCountdownWindow = remainingTime < NEXT_EPISODE_COUNTDOWN_MS;
+
+  // Autoplay would run at EOF but the session is long enough to ask "Still
+  // watching?" there instead, with playback paused — mirroring the native
+  // player's stillWatchingRequired flow.
+  //
+  // An autoplay records the episode synchronously while currentTime and
+  // remainingTime still hold the outgoing episode's near-zero values (the
+  // next item loads async), so "at EOF" alone would fire the prompt over the
+  // incoming episode. Only a progress tick from mid-playback of the episode
+  // itself arms the trigger, and every navigation disarms it.
+  const stillWatchingArmedRef = useRef(false);
+  // Decided once the credits or the countdown window start, so time passing
+  // can't swap Skip Credits, the countdown and the prompt around under the
+  // viewer; an input can only cancel a due prompt, as the idle rule needs. The decision lives
+  // with the session, not this component, so a track change that remounts
+  // the player keeps it. Taken without the autoplay gate, so a next item that
+  // resolves late still gets the prompt.
+  const isDueNow = () =>
+    isStillWatchingDueAtEnd({
+      preset: settings.stillWatchingPreset,
+      remainingMs: remainingTime,
+      playbackRate: playbackSpeed,
+      tracksInput: true,
+    });
+  const inDecisionWindow = showSkipOutroButton || inCountdownWindow;
+  // Armed: a tick from this episode's own playback has been seen, not the 0/0
+  // a freshly mounted item starts from. Unarmed, a decision already taken for
+  // this episode (before a remount, such as a track change) still holds the
+  // countdown back, but nothing is decided or released on placeholder values,
+  // and only an armed player shows the prompt.
+  const stillWatchingArmed = stillWatchingArmedRef.current;
+  // Only read here: React may run a render and throw it away, and the
+  // decision is shared with the native player and with the next mount. The
+  // effect below takes it, for the render that was kept.
+  const stillWatchingDue =
+    !inDecisionWindow || !item.Id
+      ? false
+      : stillWatchingArmed
+        ? previewStillWatchingDecision(item.Id, isDueNow)
+        : (peekStillWatchingDecision(item.Id) ?? false);
+  const stillWatchingRequired = autoPlayWanted && stillWatchingDue;
+
+  // After every render, on purpose: the window, the arming and the inputs
+  // that can make a "due" decision stale all move between two of them.
+  useEffect(() => {
+    if (!stillWatchingArmed || !item.Id) return;
+    if (inDecisionWindow) {
+      decideStillWatchingOnce(item.Id, isDueNow);
+    } else {
+      // Leaving the window (a seek back) lets go, so the end is judged again.
+      releaseStillWatchingDecision(item.Id);
+    }
+  });
+
   // Whether the "Next Episode" countdown can be rendered at all. The Skip
   // Credits button yields to it only when this is true; if autoplay is
-  // disabled or its episode limit is reached, Skip Credits must stay available.
+  // disabled or the prompt is due, Skip Credits must stay available. A shown
+  // prompt keeps it away even after a touch makes the prompt no longer due,
+  // or the countdown would auto-advance under an unanswered prompt.
   const willShowNextEpisode =
-    !!nextItem &&
-    settings.autoPlayNextEpisode !== false &&
-    (settings.maxAutoPlayEpisodeCount.value === -1 ||
-      settings.autoPlayEpisodeCount < settings.maxAutoPlayEpisodeCount.value);
+    autoPlayWanted && !stillWatchingRequired && !stillWatchingVisible;
 
   // Credits segment metadata (hasContentAfterCredits) can be wrong, so this
   // path only swaps Skip Credits for a manually-tappable Next Episode button
@@ -217,8 +305,7 @@ export const Controls: FC<Props> = ({
   // Driven by actual playback position vs. duration, independent of segment
   // metadata, so it's safe to auto-advance from this trigger.
   const showNextEpisodeFromRemainingTime =
-    willShowNextEpisode &&
-    remainingTime < CONTROLS_CONSTANTS.NEXT_EPISODE_COUNTDOWN_MS;
+    willShowNextEpisode && inCountdownWindow;
 
   const showNextEpisode =
     showNextEpisodeFromCredits || showNextEpisodeFromRemainingTime;
@@ -227,32 +314,15 @@ export const Controls: FC<Props> = ({
   // which stops moving while playback does.
   const autoAdvanceNextEpisode = showNextEpisodeFromRemainingTime;
 
-  // Autoplay would run at EOF but the episode cap stops it: ask "Still
-  // watching?" there instead, with playback paused — mirroring the native
-  // player's stillWatchingRequired flow. Gated on reaching the end so the
-  // prompt never covers a video that is still playing.
-  const stillWatchingRequired =
-    !!nextItem &&
-    settings.autoPlayNextEpisode !== false &&
-    settings.maxAutoPlayEpisodeCount.value !== -1 &&
-    settings.autoPlayEpisodeCount >= settings.maxAutoPlayEpisodeCount.value;
-
-  const [stillWatchingVisible, setStillWatchingVisible] = useState(false);
-  // The cap-hitting autoplay updates the episode count synchronously while
-  // currentTime/remainingTime still hold the outgoing episode's near-zero
-  // values (the next item loads async), so "at EOF" alone would fire the
-  // prompt over the incoming episode. Only a progress tick from mid-playback
-  // of the final episode itself arms the trigger.
-  const stillWatchingArmedRef = useRef(false);
-
-  // Reset after an in-place episode switch (setParams keeps Controls mounted).
+  // Reset whenever the item changes. direct-player remounts Controls on an
+  // episode switch today, so this mostly covers the mount itself.
   useEffect(() => {
     stillWatchingArmedRef.current = false;
     setStillWatchingVisible(false);
   }, [item.Id]);
 
   useEffect(() => {
-    if (!stillWatchingRequired || stillWatchingVisible || maxMs <= 0) {
+    if (stillWatchingVisible || maxMs <= 0) {
       return;
     }
     if (
@@ -263,7 +333,14 @@ export const Controls: FC<Props> = ({
       return;
     }
     if (
-      stillWatchingArmedRef.current &&
+      stillWatchingRequired &&
+      // Or a real tick (not the 0/0 placeholder) after a remount inside the
+      // last moments, where arming can't happen: the known decision held the
+      // countdown back, so the prompt must come or the episode just stops.
+      (stillWatchingArmedRef.current ||
+        (currentTime > 0 &&
+          !!item.Id &&
+          peekStillWatchingDecision(item.Id) === true)) &&
       remainingTime <= CONTROLS_CONSTANTS.STILL_WATCHING_EOF_WINDOW_MS
     ) {
       setStillWatchingVisible(true);
@@ -276,6 +353,7 @@ export const Controls: FC<Props> = ({
     currentTime,
     remainingTime,
     pause,
+    item.Id,
   ]);
 
   const goToItemCommon = useCallback(
@@ -283,6 +361,7 @@ export const Controls: FC<Props> = ({
       if (!item || !settings) {
         return;
       }
+      stillWatchingArmedRef.current = false;
       lightHapticFeedback();
       const previousIndexes = {
         subtitleIndex: subtitleIndex
@@ -298,6 +377,7 @@ export const Controls: FC<Props> = ({
       } = getDefaultPlaySettings(item, settings, {
         indexes: previousIndexes,
         source: mediaSource ?? undefined,
+        offline,
       });
 
       // Use setParams instead of replace to avoid unmounting/remounting the player,
@@ -310,7 +390,12 @@ export const Controls: FC<Props> = ({
         mediaSourceId: newMediaSource?.Id ?? "",
         bitrateValue: bitrateValue?.toString(),
         playbackPosition:
-          item.UserData?.PlaybackPositionTicks?.toString() ?? "",
+          getAdjacentStartTicks(
+            item,
+            newMediaSource,
+            offline,
+            serverVersion,
+          )?.toString() ?? "",
       });
     },
     [
@@ -321,64 +406,52 @@ export const Controls: FC<Props> = ({
       bitrateValue,
       router,
       offline,
+      serverVersion,
     ],
+  );
+
+  // Any navigation the viewer picks is a play they started themselves: a new
+  // session, as in jellyfin-web. Autoplay goes through goToItemCommon alone.
+  const goToItemByUser = useCallback(
+    (target: BaseItemDto) => {
+      resetStillWatchingSession();
+      goToItemCommon(target);
+    },
+    [goToItemCommon],
   );
 
   const goToPreviousItem = useCallback(() => {
     if (!previousItem) {
       return;
     }
-    goToItemCommon(previousItem);
-  }, [previousItem, goToItemCommon]);
+    goToItemByUser(previousItem);
+  }, [previousItem, goToItemByUser]);
 
   const goToNextItem = useCallback(
-    ({
-      isAutoPlay,
-      resetWatchCount,
-    }: {
-      isAutoPlay?: boolean;
-      resetWatchCount?: boolean;
-    }) => {
+    ({ isAutoPlay }: { isAutoPlay?: boolean }) => {
       if (!nextItem) {
         return;
       }
 
+      // "Continue watching" is a deliberate advance too.
       if (!isAutoPlay) {
-        // if we are not autoplaying, we won't update anything, we just go to the next item
-        goToItemCommon(nextItem);
-        if (resetWatchCount) {
-          updateSettings({
-            autoPlayEpisodeCount: 0,
-          });
-        }
+        goToItemByUser(nextItem);
         return;
       }
 
-      // Skip autoplay logic if maxAutoPlayEpisodeCount is -1
-      if (settings.maxAutoPlayEpisodeCount.value === -1) {
-        goToItemCommon(nextItem);
-        return;
-      }
-
-      // Same boundary as the countdown's willShowNextEpisode gate — the
-      // countdown must never complete without actually navigating.
-      if (
-        settings.autoPlayEpisodeCount < settings.maxAutoPlayEpisodeCount.value
-      ) {
-        goToItemCommon(nextItem);
-      }
-
-      // Check if the autoPlayEpisodeCount is less than maxAutoPlayEpisodeCount for the autoPlay
-      if (
-        settings.autoPlayEpisodeCount < settings.maxAutoPlayEpisodeCount.value
-      ) {
-        // update the autoPlayEpisodeCount in settings
-        updateSettings({
-          autoPlayEpisodeCount: settings.autoPlayEpisodeCount + 1,
-        });
-      }
+      // A due or unanswered prompt holds autoplay, whoever asks for it; a tap
+      // on the shown prompt can make it no longer due.
+      if (stillWatchingRequired || stillWatchingVisible) return;
+      recordStillWatchingAutoplay();
+      goToItemCommon(nextItem);
     },
-    [nextItem, goToItemCommon],
+    [
+      nextItem,
+      goToItemCommon,
+      goToItemByUser,
+      stillWatchingRequired,
+      stillWatchingVisible,
+    ],
   );
 
   // Add a memoized handler for autoplay next episode
@@ -390,14 +463,6 @@ export const Controls: FC<Props> = ({
   const handleNextEpisodeManual = useCallback(() => {
     goToNextItem({ isAutoPlay: false });
   }, [goToNextItem]);
-
-  // Add a memoized handler for ContinueWatchingOverlay
-  const handleContinueWatching = useCallback(
-    (options: { isAutoPlay?: boolean; resetWatchCount?: boolean }) => {
-      goToNextItem(options);
-    },
-    [goToNextItem],
-  );
 
   const onClose = useCallback(() => {
     lightHapticFeedback();
@@ -471,13 +536,14 @@ export const Controls: FC<Props> = ({
         trickPlayUrl={trickPlayUrl}
         trickplayInfo={trickplayInfo}
         calculateTrickplayUrl={calculateTrickplayUrl}
+        onUserInteraction={markStillWatchingInput}
         interactionBlocked={interactionBlocked || stillWatchingVisible}
         panel={
           episodeView ? (
             <EpisodeList
               item={item}
               close={() => setEpisodeView(false)}
-              goToItem={goToItemCommon}
+              goToItem={goToItemByUser}
             />
           ) : undefined
         }
@@ -506,6 +572,7 @@ export const Controls: FC<Props> = ({
               remainingTime={remainingTime}
               isPlaying={isPlaying}
               itemId={item.Id}
+              nextIsEpisode={nextItem?.Type === "Episode"}
               skipIntro={onSkipSegment}
               skipCredit={onSkipOutro}
               onNextEpisodeFinish={handleNextEpisodeAutoPlay}
@@ -518,7 +585,7 @@ export const Controls: FC<Props> = ({
         }
       />
       {stillWatchingVisible && (
-        <ContinueWatchingOverlay goToNextItem={handleContinueWatching} />
+        <ContinueWatchingOverlay goToNextItem={goToNextItem} />
       )}
     </>
   );

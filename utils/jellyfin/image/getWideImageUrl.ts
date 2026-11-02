@@ -1,5 +1,6 @@
 import type { Api } from "@jellyfin/sdk";
 import type { BaseItemDto } from "@jellyfin/sdk/lib/generated-client/models";
+import { itemImageUrl } from "./itemImageUrl";
 
 /**
  * Landscape (16:9-ish) image for an item, as used by the continue-watching
@@ -7,25 +8,39 @@ import type { BaseItemDto } from "@jellyfin/sdk/lib/generated-client/models";
  *
  * @param useEpisodePoster - Prefer the episode's own still over the series
  *   Thumb for episodes (the `useEpisodeImagesForNextUp` setting).
+ * @param fillHeight - The image height in physical pixels, not layout points:
+ *   convert with `toImagePixels`.
+ * @param fillWidth - The width of the box the image has to cover, in physical
+ *   pixels. Pass it whenever the image is drawn cover fit: the Primary
+ *   failover can be a 2:3 poster, which the height alone leaves far too narrow.
  */
 export const getWideImageUrl = ({
   api,
   item,
   useEpisodePoster = false,
-  fillHeight = 389,
+  fillHeight,
+  fillWidth,
   quality = 80,
 }: {
   api?: Api | null;
   item?: BaseItemDto | null;
   useEpisodePoster?: boolean;
-  fillHeight?: number;
+  fillHeight: number;
+  fillWidth?: number;
   quality?: number;
 }): string | undefined => {
   if (!api || !item?.Id) return undefined;
 
-  const primary = `${api.basePath}/Items/${item.Id}/Images/Primary?fillHeight=${fillHeight}&quality=${quality}`;
+  // With both sides the server returns the smallest image that fills the box,
+  // whichever side binds. A Thumb is as wide as the card, so its height is
+  // enough; a Primary image is whatever shape the item's artwork has.
+  const primary = itemImageUrl(api, item.Id, "Primary", {
+    fillWidth,
+    fillHeight,
+    quality,
+  });
   const thumb = (itemId: string, tag: string) =>
-    `${api.basePath}/Items/${itemId}/Images/Thumb?fillHeight=${fillHeight}&quality=${quality}&tag=${tag}`;
+    itemImageUrl(api, itemId, "Thumb", { fillHeight, quality, tag });
 
   if (item.Type === "Episode") {
     if (useEpisodePoster) return primary;

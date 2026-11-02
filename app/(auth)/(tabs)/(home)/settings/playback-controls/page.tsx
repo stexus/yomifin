@@ -8,7 +8,6 @@ import { MpvVoSettings } from "@/components/settings/MpvVoSettings";
 import { PlaybackControlsSettings } from "@/components/settings/PlaybackControlsSettings";
 import { PlayerUISettings } from "@/components/settings/PlayerUISettings";
 import { VideoPlayerSelector } from "@/components/settings/VideoPlayerSelector";
-import { ChromecastSettings } from "../../../../../../components/settings/ChromecastSettings";
 
 export default function PlaybackControlsPage() {
   const insets = useSafeAreaInsets();
@@ -37,7 +36,6 @@ export default function PlaybackControlsPage() {
             <MpvVoSettings />
           </MediaProvider>
         </View>
-        {!Platform.isTV && <ChromecastSettings />}
       </View>
     </ScrollView>
   );

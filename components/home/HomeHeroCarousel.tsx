@@ -3,11 +3,7 @@ import type {
   BaseItemDto,
   BaseItemKind,
 } from "@jellyfin/sdk/lib/generated-client/models";
-import {
-  getItemsApi,
-  getTvShowsApi,
-  getUserLibraryApi,
-} from "@jellyfin/sdk/lib/utils/api";
+import { getLibraryApi, getShowApi } from "@jellyfin/sdk/lib/utils/api";
 import { useQuery } from "@tanstack/react-query";
 import { useSegments } from "expo-router";
 import { useAtomValue } from "jotai";
@@ -35,6 +31,7 @@ import { getBackdropUrl } from "@/utils/jellyfin/image/getBackdropUrl";
 import { getLogoImageUrlById } from "@/utils/jellyfin/image/getLogoImageUrlById";
 import { getParentBackdropImageUrl } from "@/utils/jellyfin/image/getParentBackdropImageUrl";
 import { getPrimaryImageUrl } from "@/utils/jellyfin/image/getPrimaryImageUrl";
+import { toImagePixels } from "@/utils/jellyfin/image/imagePixels";
 import { runtimeTicksToMinutes } from "@/utils/time";
 import { getItemNavigation } from "../common/TouchableItemRouter";
 
@@ -48,9 +45,13 @@ const DOTS_AREA = 24;
 const heroMetrics = (windowWidth: number) => {
   // Matches the 36pt page margin inside the native view.
   const cardWidth = Math.max(windowWidth - 72, 1);
+  const cardHeight = Math.round(Math.min(cardWidth * 1.15, 440));
   return {
-    cardHeight: Math.round(Math.min(cardWidth * 1.15, 440)),
-    backdropWidth: Math.min(Math.round(cardWidth * 2), 1920),
+    cardHeight,
+    // The backdrop covers the whole card, which on a phone is taller than
+    // 16:9: the request has to carry both sides, in physical pixels.
+    backdropWidth: toImagePixels(cardWidth),
+    backdropHeight: toImagePixels(cardHeight),
   };
 };
 
@@ -224,6 +225,7 @@ const buildBackdropUrl = (
   api: Api,
   item: BaseItemDto,
   width: number,
+  height: number,
 ): string | null => {
   // Episodes/seasons: prefer the series backdrop over the episode still.
   if (
@@ -231,9 +233,15 @@ const buildBackdropUrl = (
     item.ParentBackdropItemId &&
     item.ParentBackdropImageTags?.length
   ) {
-    return getParentBackdropImageUrl({ api, item, quality: 80, width });
+    return getParentBackdropImageUrl({
+      api,
+      item,
+      quality: 80,
+      width,
+      height,
+    });
   }
-  return getBackdropUrl({ api, item, quality: 80, width });
+  return getBackdropUrl({ api, item, quality: 80, width, height });
 };
 
 const buildLogoUrl = (api: Api, item: BaseItemDto): string | null => {
@@ -381,7 +389,7 @@ export const HomeHeroCarousel = () => {
       // slides instead of blanking the whole carousel.
       const [resume, nextUp, latestMovies, latestTv] = await Promise.all([
         filters.showContinueWatching
-          ? getItemsApi(api)
+          ? getLibraryApi(api)
               .getResumeItems({
                 userId: user.Id,
                 limit: overFetch(filters.continueWatchingQuota),
@@ -393,7 +401,7 @@ export const HomeHeroCarousel = () => {
               .catch(() => null)
           : null,
         filters.showNextUp
-          ? getTvShowsApi(api)
+          ? getShowApi(api)
               .getNextUp({
                 userId: user.Id,
                 limit: overFetch(filters.nextUpQuota),
@@ -405,7 +413,7 @@ export const HomeHeroCarousel = () => {
               .catch(() => null)
           : null,
         filters.showRecentlyAddedMovies
-          ? getUserLibraryApi(api)
+          ? getLibraryApi(api)
               .getLatestMedia({
                 userId: user.Id,
                 includeItemTypes: ["Movie"],
@@ -418,7 +426,7 @@ export const HomeHeroCarousel = () => {
               .catch(() => null)
           : null,
         filters.showRecentlyAddedTv
-          ? getUserLibraryApi(api)
+          ? getLibraryApi(api)
               .getLatestMedia({
                 userId: user.Id,
                 // Do we want to show seasons, episodes, and shows, or just one of them? I'd assume just Series maybe?
@@ -540,7 +548,12 @@ export const HomeHeroCarousel = () => {
       overview: item.Overview || "",
       label: t(SECTION_LABEL_KEYS[section]),
       labelIcon: SECTION_ICONS[section],
-      backdropUrl: buildBackdropUrl(api, item, metrics.backdropWidth),
+      backdropUrl: buildBackdropUrl(
+        api,
+        item,
+        metrics.backdropWidth,
+        metrics.backdropHeight,
+      ),
       logoUrl: buildLogoUrl(api, item),
       posterUrl: buildPosterUrl(api, item),
       badges: buildBadges(item),
@@ -549,7 +562,7 @@ export const HomeHeroCarousel = () => {
         ? item.UserData.PlayedPercentage / 100
         : null,
     }));
-  }, [api, entries, t, metrics.backdropWidth]);
+  }, [api, entries, t, metrics.backdropWidth, metrics.backdropHeight]);
 
   // An admin-locked setting is dropped by updateSettings, so offering its row
   // would just be a dead tap. Omit those rows the way the settings screen
