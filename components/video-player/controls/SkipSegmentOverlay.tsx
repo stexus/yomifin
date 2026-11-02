@@ -35,6 +35,8 @@ interface Props {
   skipCredit: () => void;
   onNextEpisodeFinish: () => void;
   onNextEpisodePress: () => void;
+  nextButtonText?: string;
+  nextButtonDisabled?: boolean;
   controlsVisible: boolean;
   hasChapters?: boolean;
 }
@@ -52,7 +54,8 @@ interface Props {
 //          hidden, so it does not drift away from the edge.
 const HIDDEN_BOTTOM = 24;
 const EDGE_RIGHT = 24;
-const VISIBLE_BOTTOM = 65;
+// The shared mobile controls include a transport row below the timeline.
+const VISIBLE_BOTTOM = 86;
 // Left shift used only while the controls show the chapters icon in the bottom
 // right corner, so the buttons never crowd it.
 const CHAPTERS_RIGHT = 52;
@@ -97,6 +100,8 @@ export const SkipSegmentOverlay: FC<Props> = ({
   skipCredit,
   onNextEpisodeFinish,
   onNextEpisodePress,
+  nextButtonText,
+  nextButtonDisabled,
   controlsVisible,
   hasChapters,
 }) => {
@@ -143,11 +148,13 @@ export const SkipSegmentOverlay: FC<Props> = ({
         showButton={renderSkip}
         onPress={skipIntro}
         buttonText={skipButtonText ?? t("player.skip_intro")}
+        disabled={nextButtonDisabled}
       />
       <SkipButton
         showButton={renderCredit}
         onPress={skipCredit}
         buttonText={skipCreditButtonText ?? t("player.skip_credits")}
+        disabled={nextButtonDisabled}
       />
       {/* Lives here (not in BottomControls) so it shares the skip buttons'
           exact position and can never overlap them. */}
@@ -160,6 +167,8 @@ export const SkipSegmentOverlay: FC<Props> = ({
         nextIsEpisode={nextIsEpisode}
         onFinish={onNextEpisodeFinish}
         onPress={onNextEpisodePress}
+        buttonText={nextButtonText}
+        disabled={nextButtonDisabled}
       />
     </Animated.View>
   );

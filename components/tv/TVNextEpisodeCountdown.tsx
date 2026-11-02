@@ -34,6 +34,8 @@ export interface TVNextEpisodeCountdownProps {
   onFinish: () => void;
   /** Called when user presses the card to skip to next episode */
   onPlayNext?: () => void;
+  buttonText?: string;
+  disabled?: boolean;
   /** Whether controls are visible - affects card position */
   controlsVisible?: boolean;
   /** Callback ref setter for focus guide destination pattern */
@@ -57,6 +59,8 @@ export const TVNextEpisodeCountdown: FC<TVNextEpisodeCountdownProps> = ({
   isPlaying,
   onFinish,
   onPlayNext,
+  buttonText,
+  disabled,
   controlsVisible = false,
   refSetter,
   hasTVPreferredFocus = true,
@@ -164,6 +168,11 @@ export const TVNextEpisodeCountdown: FC<TVNextEpisodeCountdownProps> = ({
       <Pressable
         ref={refSetter}
         onPress={onPlayNext}
+        disabled={disabled}
+        accessibilityRole='button'
+        accessibilityLabel={
+          buttonText ?? t(isEpisode ? "player.next_episode" : "player.up_next")
+        }
         onFocus={handleFocus}
         onBlur={handleBlur}
         hasTVPreferredFocus={hasTVPreferredFocus}
@@ -182,7 +191,8 @@ export const TVNextEpisodeCountdown: FC<TVNextEpisodeCountdownProps> = ({
 
               <View style={styles.content}>
                 <Text style={styles.label}>
-                  {t(isEpisode ? "player.next_episode" : "player.up_next")}
+                  {buttonText ??
+                    t(isEpisode ? "player.next_episode" : "player.up_next")}
                 </Text>
 
                 <Text style={styles.seriesName} numberOfLines={1}>

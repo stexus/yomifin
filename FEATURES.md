@@ -19,6 +19,36 @@ per backlog item to start work without re-exploration.
 
 ---
 
+## Finish & Next Episode — 2026-11-01 (pending iPad verification)
+
+Jellyfin's floating pill now explicitly finishes the current episode before
+advancing. It is available whenever controls are open, during detected outros,
+and near the end, independently of autoplay. The ordinary next-arrow remains
+navigation only. Skip Credits stays separate when there is post-credits content.
+The React Native TV player has the same completion action. Yozora and the
+presented native players are unchanged.
+
+Completion pauses, drains pending start/progress requests, awaits Stop, and
+writes watched state last. Later ticks cannot restore a resume position. Repeated
+taps are ignored. A failed write keeps the current episode paused, restores its
+session and allows retry; navigation only occurs on success and while the same
+player is still mounted. Offline downloads persist completion locally.
+
+Implementation: `utils/directPlayer/episodeCompletion.ts`, `useFinishEpisodeAction`,
+`direct-player.tsx`, `usePlaybackManager` and mobile/TV controls. Tests cover
+report ordering, separate navigation/completion, server errors, double taps,
+unmount/item changes, offline storage, early availability with autoplay off and
+post-credits actions. Typecheck, all 292 Jest suites (3,461 tests), 21 fork Bun
+checks and all 20 language/Yozora regression stages pass. Expo Doctor reports
+upstream-pinned patch versions behind current SDK recommendations and directory
+metadata warnings; dependencies remain at the reviewed upstream lockfile.
+
+Device gate: use the new Dev client with Metro; finish an episode early and
+verify Jellyfin removes its resume entry and marks it watched, while next-arrow
+navigation retains normal resume behavior. Also test no segment metadata,
+autoplay off, ending/post-credits scenes, offline completion and a failed server
+write. No iPad/server playback validation has been performed in this session.
+
 ## Upstream sync — 2026-11-01 (pending iPad verification)
 
 Merged Streamyfin `develop` at `284d5527` (152 commits) into the existing
@@ -35,7 +65,10 @@ longer required; any remaining local checkout is ignored.
 
 Validation: TypeScript, Biome, all 287 upstream test suites, fork Bun tests and
 all 20 language/Yozora stages (including the real-alass cross-check) passed.
-Unsigned Debug IPA compilation is in progress; no physical-iPad run performed.
+Local Debug IPA compilation reached an upstream Expo compiler incompatibility:
+Xcode 26.3 rejects `RuntimeScheduler` constructor ownership annotations in
+`expo-modules-jsi` 57.1.1. The supported GitHub workflow uses Xcode 26.6; the next
+Dev build validates the native merge there. No physical-iPad run performed.
 Device gates: playback/exit/backgrounding, lookup with hidden native subtitles,
 text/bitmap/external subtitles, Anki audio/image capture, offline downloads after
 updating, Jellyfin episode/version transitions and Yozora playback.

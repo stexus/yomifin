@@ -43,7 +43,9 @@ const SEGMENT_NAME_BY_CARD_TYPE: Record<TVSkipSegmentType, SegmentTypeName> = {
 export interface TVSkipSegmentCardProps {
   show: boolean;
   onPress: () => void;
-  type: TVSkipSegmentType;
+  type: TVSkipSegmentType | "finish";
+  disabled?: boolean;
+  align?: "left" | "right";
   /** Whether controls are visible - affects card position */
   controlsVisible?: boolean;
   /** Callback ref setter for focus guide destination pattern */
@@ -68,6 +70,8 @@ export const TVSkipSegmentCard: FC<TVSkipSegmentCardProps> = ({
   show,
   onPress,
   type,
+  disabled = false,
+  align = "right",
   controlsVisible = false,
   refSetter,
   hasTVPreferredFocus = true,
@@ -100,18 +104,31 @@ export const TVSkipSegmentCard: FC<TVSkipSegmentCardProps> = ({
     bottom: bottomPosition.value,
   }));
 
-  const labelText = t(SEGMENT_SKIP_KEY[SEGMENT_NAME_BY_CARD_TYPE[type]]);
+  const labelText = t(
+    type === "finish"
+      ? disabled
+        ? "player.finishing_episode"
+        : "player.finish_and_next_episode"
+      : SEGMENT_SKIP_KEY[SEGMENT_NAME_BY_CARD_TYPE[type]],
+  );
 
   if (!show) return null;
 
   return (
     <Animated.View
-      style={[styles.container, containerAnimatedStyle]}
+      style={[
+        styles.container,
+        align === "left" ? { left: scaleSize(80) } : { right: scaleSize(80) },
+        containerAnimatedStyle,
+      ]}
       pointerEvents='box-none'
     >
       <Pressable
         ref={refSetter}
         onPress={onPress}
+        disabled={disabled}
+        accessibilityRole='button'
+        accessibilityLabel={labelText}
         onFocus={handleFocus}
         onBlur={handleBlur}
         hasTVPreferredFocus={hasTVPreferredFocus}
@@ -149,7 +166,6 @@ export const TVSkipSegmentCard: FC<TVSkipSegmentCardProps> = ({
 const styles = StyleSheet.create({
   container: {
     position: "absolute",
-    right: scaleSize(80),
     zIndex: 100,
   },
   button: {

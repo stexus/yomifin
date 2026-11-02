@@ -6,17 +6,22 @@ interface SkipButtonProps extends ViewProps {
   onPress: () => void;
   showButton: boolean;
   buttonText: string;
+  disabled?: boolean;
 }
 
 const SkipButton: React.FC<SkipButtonProps> = ({
   onPress,
   showButton,
   buttonText,
+  disabled,
   ...props
 }) => {
   return (
     <View className={showButton ? "flex" : "hidden"} {...props}>
       <TouchableOpacity
+        accessibilityRole='button'
+        accessibilityLabel={buttonText}
+        disabled={disabled}
         onPress={onPress}
         className='bg-black/60 rounded-md px-3 py-2 border border-neutral-900'
       >

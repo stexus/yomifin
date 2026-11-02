@@ -40,6 +40,7 @@ import { TVFocusableProgressBar } from "@/components/tv/TVFocusableProgressBar";
 import { NEXT_EPISODE_COUNTDOWN_MS } from "@/constants/Playback";
 import { useScaledTVTypography } from "@/constants/TVTypography";
 import useRouter from "@/hooks/useAppRouter";
+import { useFinishEpisodeAction } from "@/hooks/useFinishEpisodeAction";
 import { useMediaSegments } from "@/hooks/useMediaSegments";
 import { usePlaybackManager } from "@/hooks/usePlaybackManager";
 import type { SegmentType } from "@/hooks/useSegmentSkipper";
@@ -53,6 +54,7 @@ import { apiAtom } from "@/providers/JellyfinProvider";
 import { useOfflineMode } from "@/providers/OfflineModeProvider";
 import { useSettings } from "@/utils/atoms/settings";
 import type { TVOptionItem } from "@/utils/atoms/tvOptionModal";
+import { shouldOfferEpisodeCompletion } from "@/utils/directPlayer/episodeCompletion";
 import { resolveStartTicks } from "@/utils/directPlayer/sessionPosition";
 import {
   getAdjacentStartTicks,
@@ -107,6 +109,8 @@ interface Props {
   nextItem?: BaseItemDto | null;
   goToPreviousItem?: () => void;
   goToNextItem?: () => void;
+  onFinishEpisode?: () => Promise<boolean>;
+  isFinishingEpisode?: boolean;
   onRefreshSubtitleTracks?: () => Promise<
     import("@jellyfin/sdk/lib/generated-client").MediaStream[]
   >;
@@ -238,6 +242,8 @@ export const Controls: FC<Props> = ({
   onToggleMute,
   previousItem,
   nextItem: nextItemProp,
+  onFinishEpisode,
+  isFinishingEpisode = false,
   goToPreviousItem,
   goToNextItem: goToNextItemProp,
   onRefreshSubtitleTracks,
@@ -552,6 +558,17 @@ export const Controls: FC<Props> = ({
     return remainingTime > 0 && remainingTime <= NEXT_EPISODE_COUNTDOWN_MS;
   }, [nextItem, remainingTime]);
 
+  const showFinishEpisode =
+    !!onFinishEpisode &&
+    shouldOfferEpisodeCompletion({
+      isEpisode: item.Type === "Episode",
+      hasNextEpisode: nextItem?.Type === "Episode",
+      controlsVisible: showControls,
+      outroActive: showSkipCreditButton,
+      durationMs: maxMs,
+      remainingMs: remainingTime,
+    });
+  const [finishEpisodeRef, setFinishEpisodeRef] = useState<View | null>(null);
   // Simple boolean - when skip cards or countdown are visible, they have focus
   const isSkipOrCountdownVisible = useMemo(() => {
     const skipIntroVisible = showSkipButton && !isCountdownActive;
@@ -559,13 +576,19 @@ export const Controls: FC<Props> = ({
       showSkipCreditButton &&
       (hasContentAfterCredits || !nextItem) &&
       !isCountdownActive;
-    return skipIntroVisible || skipCreditsVisible || isCountdownActive;
+    return (
+      skipIntroVisible ||
+      skipCreditsVisible ||
+      isCountdownActive ||
+      showFinishEpisode
+    );
   }, [
     showSkipButton,
     showSkipCreditButton,
     hasContentAfterCredits,
     nextItem,
     isCountdownActive,
+    showFinishEpisode,
   ]);
 
   // Live TV detection - check for both Program (when playing from guide) and TvChannel (when playing from channels)
@@ -1142,6 +1165,7 @@ export const Controls: FC<Props> = ({
     showControls,
     focusPlayButton,
     isCountdownActive,
+    showFinishEpisode,
     lastOpenedModal,
     isSkipOrCountdownVisible,
     playButtonRef,
@@ -1211,13 +1235,19 @@ export const Controls: FC<Props> = ({
   }, [goToPreviousItem]);
 
   const handleNextItemButton = useCallback(() => {
+    if (isFinishingEpisode) return;
     if (goToNextItemProp) {
       goToNextItemProp();
     } else {
       goToNextItemRef.current({ isAutoPlay: false });
     }
     controlsInteractionRef.current();
-  }, [goToNextItemProp]);
+  }, [goToNextItemProp, isFinishingEpisode]);
+  const handleFinishEpisode = useFinishEpisodeAction(
+    item.Id,
+    onFinishEpisode,
+    handleNextItemButton,
+  );
 
   const goToNextItem = useCallback(
     ({ isAutoPlay: _isAutoPlay }: { isAutoPlay?: boolean } = {}) => {
@@ -1276,11 +1306,12 @@ export const Controls: FC<Props> = ({
   goToNextItemRef.current = goToNextItem;
 
   const handleAutoPlayFinish = useCallback(() => {
-    if (exitingRef.current) return;
+    if (exitingRef.current || isFinishingEpisode) return;
     goToNextItem({ isAutoPlay: true });
-  }, [goToNextItem]);
+  }, [goToNextItem, isFinishingEpisode]);
 
-  const topOverlayFocusTarget = skipSegmentRef ?? nextEpisodeRef;
+  const topOverlayFocusTarget =
+    skipSegmentRef ?? nextEpisodeRef ?? finishEpisodeRef;
 
   return (
     <View style={styles.controlsContainer} pointerEvents='box-none'>
@@ -1362,14 +1393,46 @@ export const Controls: FC<Props> = ({
         playButtonRef={showControls ? playButtonRef : null}
       />
 
+      <TVSkipSegmentCard
+        show={showFinishEpisode && !isCountdownActive}
+        onPress={handleFinishEpisode}
+        type='finish'
+        disabled={isFinishingEpisode}
+        align='left'
+        controlsVisible={showControls}
+        refSetter={setFinishEpisodeRef}
+        hasTVPreferredFocus={
+          !showControls && !showSkipButton && !showSkipCreditButton
+        }
+        playButtonRef={showControls ? playButtonRef : null}
+      />
+
       {nextItem && (
         <TVNextEpisodeCountdown
           nextItem={nextItem}
           api={api}
           show={isCountdownActive}
-          isPlaying={isPlaying && !isExiting}
+          isPlaying={isPlaying && !isExiting && !isFinishingEpisode}
           onFinish={handleAutoPlayFinish}
-          onPlayNext={handleNextItemButton}
+          onPlayNext={
+            onFinishEpisode &&
+            item.Type === "Episode" &&
+            nextItem.Type === "Episode"
+              ? handleFinishEpisode
+              : handleNextItemButton
+          }
+          buttonText={
+            onFinishEpisode &&
+            item.Type === "Episode" &&
+            nextItem.Type === "Episode"
+              ? t(
+                  isFinishingEpisode
+                    ? "player.finishing_episode"
+                    : "player.finish_and_next_episode",
+                )
+              : undefined
+          }
+          disabled={isFinishingEpisode}
           controlsVisible={showControls}
           refSetter={setNextEpisodeRef}
           hasTVPreferredFocus={!showControls}

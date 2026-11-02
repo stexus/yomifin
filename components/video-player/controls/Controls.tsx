@@ -17,6 +17,7 @@ import { type SharedValue, useSharedValue } from "react-native-reanimated";
 import ContinueWatchingOverlay from "@/components/video-player/controls/ContinueWatchingOverlay";
 import { NEXT_EPISODE_COUNTDOWN_MS } from "@/constants/Playback";
 import useRouter from "@/hooks/useAppRouter";
+import { useFinishEpisodeAction } from "@/hooks/useFinishEpisodeAction";
 import { useHaptic } from "@/hooks/useHaptic";
 import { useMediaSegments } from "@/hooks/useMediaSegments";
 import { usePlaybackManager } from "@/hooks/usePlaybackManager";
@@ -27,6 +28,7 @@ import type { DownloadedItem } from "@/providers/Downloads/types";
 import { useOfflineMode } from "@/providers/OfflineModeProvider";
 import { useSettings } from "@/utils/atoms/settings";
 import { hasChapterMarkers } from "@/utils/chapters";
+import { shouldOfferEpisodeCompletion } from "@/utils/directPlayer/episodeCompletion";
 import { resolveStartTicks } from "@/utils/directPlayer/sessionPosition";
 import {
   getAdjacentStartTicks,
@@ -100,6 +102,8 @@ interface Props {
   /** Extra header control next to the dropdown (yomifin profile pill). */
   headerLeftSlot?: React.ReactNode;
   interactionBlocked?: boolean;
+  onFinishEpisode?: () => Promise<boolean>;
+  isFinishingEpisode?: boolean;
 }
 
 export const Controls: FC<Props> = ({
@@ -139,6 +143,8 @@ export const Controls: FC<Props> = ({
   onNextSubtitle,
   headerLeftSlot,
   interactionBlocked,
+  onFinishEpisode,
+  isFinishingEpisode = false,
 }) => {
   const offline = useOfflineMode();
   const { settings } = useSettings();
@@ -307,12 +313,29 @@ export const Controls: FC<Props> = ({
   const showNextEpisodeFromRemainingTime =
     willShowNextEpisode && inCountdownWindow;
 
+  const canFinishEpisode =
+    !!onFinishEpisode &&
+    item.Type === "Episode" &&
+    nextItem?.Type === "Episode";
+  const showFinishEpisode =
+    !!onFinishEpisode &&
+    shouldOfferEpisodeCompletion({
+      isEpisode: item.Type === "Episode",
+      hasNextEpisode: nextItem?.Type === "Episode",
+      controlsVisible: showControls,
+      outroActive: showSkipOutroButton,
+      durationMs: maxMs,
+      remainingMs: remainingTime,
+    });
   const showNextEpisode =
-    showNextEpisodeFromCredits || showNextEpisodeFromRemainingTime;
+    showFinishEpisode ||
+    showNextEpisodeFromCredits ||
+    showNextEpisodeFromRemainingTime;
   // Whether reaching the end of the item may advance on its own. Pausing is
   // not a reason to take that away: the countdown follows the remaining time,
   // which stops moving while playback does.
-  const autoAdvanceNextEpisode = showNextEpisodeFromRemainingTime;
+  const autoAdvanceNextEpisode =
+    showNextEpisodeFromRemainingTime && !isFinishingEpisode;
 
   // Reset whenever the item changes. direct-player remounts Controls on an
   // episode switch today, so this mostly covers the mount itself.
@@ -322,7 +345,7 @@ export const Controls: FC<Props> = ({
   }, [item.Id]);
 
   useEffect(() => {
-    if (stillWatchingVisible || maxMs <= 0) {
+    if (stillWatchingVisible || isFinishingEpisode || maxMs <= 0) {
       return;
     }
     if (
@@ -348,6 +371,7 @@ export const Controls: FC<Props> = ({
     }
   }, [
     stillWatchingVisible,
+    isFinishingEpisode,
     stillWatchingRequired,
     maxMs,
     currentTime,
@@ -429,7 +453,7 @@ export const Controls: FC<Props> = ({
 
   const goToNextItem = useCallback(
     ({ isAutoPlay }: { isAutoPlay?: boolean }) => {
-      if (!nextItem) {
+      if (!nextItem || isFinishingEpisode) {
         return;
       }
 
@@ -447,6 +471,7 @@ export const Controls: FC<Props> = ({
     },
     [
       nextItem,
+      isFinishingEpisode,
       goToItemCommon,
       goToItemByUser,
       stillWatchingRequired,
@@ -461,8 +486,14 @@ export const Controls: FC<Props> = ({
 
   // Add a memoized handler for manual next episode
   const handleNextEpisodeManual = useCallback(() => {
+    if (isFinishingEpisode) return;
     goToNextItem({ isAutoPlay: false });
-  }, [goToNextItem]);
+  }, [goToNextItem, isFinishingEpisode]);
+  const handleFinishEpisode = useFinishEpisodeAction(
+    item.Id,
+    onFinishEpisode,
+    handleNextEpisodeManual,
+  );
 
   const onClose = useCallback(() => {
     lightHapticFeedback();
@@ -537,7 +568,9 @@ export const Controls: FC<Props> = ({
         trickplayInfo={trickplayInfo}
         calculateTrickplayUrl={calculateTrickplayUrl}
         onUserInteraction={markStillWatchingInput}
-        interactionBlocked={interactionBlocked || stillWatchingVisible}
+        interactionBlocked={
+          interactionBlocked || stillWatchingVisible || isFinishingEpisode
+        }
         panel={
           episodeView ? (
             <EpisodeList
@@ -566,7 +599,7 @@ export const Controls: FC<Props> = ({
               showSkipCreditButton={showSkipOutroButton}
               skipCreditButtonText={skipOutroButtonText}
               hasContentAfterCredits={hasContentAfterCredits}
-              willShowNextEpisode={willShowNextEpisode}
+              willShowNextEpisode={showFinishEpisode || willShowNextEpisode}
               showNextEpisode={showNextEpisode}
               autoAdvanceNextEpisode={autoAdvanceNextEpisode}
               remainingTime={remainingTime}
@@ -576,7 +609,19 @@ export const Controls: FC<Props> = ({
               skipIntro={onSkipSegment}
               skipCredit={onSkipOutro}
               onNextEpisodeFinish={handleNextEpisodeAutoPlay}
-              onNextEpisodePress={handleNextEpisodeManual}
+              onNextEpisodePress={
+                canFinishEpisode ? handleFinishEpisode : handleNextEpisodeManual
+              }
+              nextButtonText={
+                canFinishEpisode
+                  ? t(
+                      isFinishingEpisode
+                        ? "player.finishing_episode"
+                        : "player.finish_and_next_episode",
+                    )
+                  : undefined
+              }
+              nextButtonDisabled={isFinishingEpisode}
               controlsVisible={showControls}
               hasChapters={showsChapterIcon}
             />

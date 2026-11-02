@@ -35,6 +35,8 @@ const mockNavigation = {
 };
 const mockRouter = { setParams: jest.fn(), replace: jest.fn() };
 const mockReportProgress = jest.fn(async (_info: unknown) => {});
+const mockMarkPlayed = jest.fn(async (_id: string) => {});
+let mockRestoredSessions = 0;
 const mockPlayer = {
   destroy: jest.fn(async () => {}),
   seekTo: jest.fn(),
@@ -49,6 +51,7 @@ let mockPlayerMounts = 0;
 type ControlsProps = {
   progress: { get: () => number; set: (ms: number) => void };
   seek: (ms: number) => void;
+  onFinishEpisode?: () => Promise<boolean>;
   onBitrateChange?: (bitrate: number | undefined) => void;
   onAudioIndexChange?: (index: number) => void;
 };
@@ -138,6 +141,7 @@ jest.mock("@/hooks/useOrientation", () => ({
 jest.mock("@/hooks/usePlaybackManager", () => ({
   usePlaybackManager: () => ({
     reportPlaybackProgress: mockReportProgress,
+    markItemPlayed: mockMarkPlayed,
     nextItem: null,
     previousItem: null,
   }),
@@ -342,7 +346,9 @@ describe("direct player stop report", () => {
     mockTranscodingUrl = undefined;
     mockRouter.setParams.mockClear();
     mockRouter.replace.mockClear();
-    mockReportProgress.mockClear();
+    mockReportProgress.mockReset().mockResolvedValue(undefined);
+    mockMarkPlayed.mockReset().mockResolvedValue(undefined);
+    mockRestoredSessions = 0;
     api.mock.reset();
     api.mock.onGet(/\/Items\/item-1/).reply(200, {
       Id: "item-1",
@@ -366,8 +372,54 @@ describe("direct player stop report", () => {
       startReports().map((request) => JSON.parse(request.data).PlaySessionId),
     ).size;
     screen.unmount();
-    await waitFor(() => expect(stopReports()).toHaveLength(sessions));
+    await waitFor(() =>
+      expect(stopReports()).toHaveLength(sessions + mockRestoredSessions),
+    );
     jest.restoreAllMocks();
+  });
+
+  test("completion waits for in-flight progress, stops, then marks watched without seeking", async () => {
+    await openPlayer();
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockReportProgress.mockImplementationOnce(() => pending);
+    await tick(60);
+    mockMarkPlayed.mockImplementationOnce(async (id) => {
+      expect(id).toBe("item-1");
+      expect(stopReports()).toHaveLength(1);
+      expect(stopReports()[0].PositionTicks).toBe(600_000_000);
+    });
+    let finish!: Promise<boolean>;
+    await act(async () => {
+      finish = mockControlsProps!.onFinishEpisode!();
+    });
+    expect(mockMarkPlayed).not.toHaveBeenCalled();
+    expect(stopReports()).toHaveLength(0);
+    await tick(61);
+    expect(mockReportProgress).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      release();
+      expect(await finish).toBe(true);
+    });
+    expect(mockMarkPlayed).toHaveBeenCalledTimes(1);
+    await tick(62);
+    expect(mockReportProgress).toHaveBeenCalledTimes(1);
+    expect(mockPlayer.seekTo).not.toHaveBeenCalledWith(3400);
+    expect(mockRouter.replace).not.toHaveBeenCalled();
+  });
+
+  test("failed completion keeps the episode open and restores its paused session", async () => {
+    await openPlayer();
+    mockMarkPlayed.mockRejectedValueOnce(new Error("server unavailable"));
+    mockRestoredSessions = 1;
+    await act(async () => {
+      expect(await mockControlsProps!.onFinishEpisode!()).toBe(false);
+    });
+    expect(mockRouter.replace).not.toHaveBeenCalled();
+    expect(startReports()).toHaveLength(2);
+    expect(JSON.parse(startReports()[1].data).IsPaused).toBe(true);
   });
 
   // Jellyfin clears the resume point of an item stopped below its minimum
@@ -593,7 +645,9 @@ describe("direct player stop report", () => {
     test("reports progress once and writes the route once when both are due", async () => {
       await openPlayer();
       await tick(1200);
-      mockReportProgress.mockClear();
+      mockReportProgress.mockReset().mockResolvedValue(undefined);
+      mockMarkPlayed.mockReset().mockResolvedValue(undefined);
+      mockRestoredSessions = 0;
       mockRouter.setParams.mockClear();
 
       await pileUp([1231, 1232, 1233, 1234, 1235], Date.now() + 31_000);
@@ -607,7 +661,9 @@ describe("direct player stop report", () => {
     test("reports the end of a seek once", async () => {
       await openPlayer();
       await tick(1200);
-      mockReportProgress.mockClear();
+      mockReportProgress.mockReset().mockResolvedValue(undefined);
+      mockMarkPlayed.mockReset().mockResolvedValue(undefined);
+      mockRestoredSessions = 0;
       mockRouter.setParams.mockClear();
 
       await act(async () => mockSeekReaction?.(false, true));
@@ -620,7 +676,9 @@ describe("direct player stop report", () => {
     test("leaves ticks that are not due alone", async () => {
       await openPlayer();
       await tick(1200);
-      mockReportProgress.mockClear();
+      mockReportProgress.mockReset().mockResolvedValue(undefined);
+      mockMarkPlayed.mockReset().mockResolvedValue(undefined);
+      mockRestoredSessions = 0;
       mockRouter.setParams.mockClear();
 
       await pileUp([1201, 1202, 1203]);

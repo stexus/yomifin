@@ -312,7 +312,12 @@ export const BottomControls: FC<BottomControlsProps> = ({
           pointerEvents='auto'
         >
           {goToPreviousItem && (
-            <TouchableOpacity onPress={goToPreviousItem} hitSlop={8}>
+            <TouchableOpacity
+              onPress={goToPreviousItem}
+              hitSlop={8}
+              accessibilityRole='button'
+              accessibilityLabel={t("player.previous_episode")}
+            >
               <Ionicons name='play-skip-back' size={26} color={ICON} />
             </TouchableOpacity>
           )}
@@ -431,7 +436,12 @@ export const BottomControls: FC<BottomControlsProps> = ({
           </TouchableOpacity>
 
           {goToNextItem && (
-            <TouchableOpacity onPress={goToNextItem} hitSlop={8}>
+            <TouchableOpacity
+              onPress={goToNextItem}
+              hitSlop={8}
+              accessibilityRole='button'
+              accessibilityLabel={t("player.go_to_next_episode")}
+            >
               <Ionicons name='play-skip-forward' size={26} color={ICON} />
             </TouchableOpacity>
           )}

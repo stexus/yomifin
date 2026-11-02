@@ -10,6 +10,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAtomValue } from "jotai";
 import { useMemo } from "react";
+import { PLAYBACK_REPORT_TIMEOUT_MS } from "@/constants/Playback";
 import { useDownload } from "@/providers/DownloadProvider";
 import { DownloadedItem } from "@/providers/Downloads/types";
 import { apiAtom, userAtom } from "@/providers/JellyfinProvider";
@@ -255,7 +256,7 @@ export const usePlaybackManager = ({
       try {
         await getSessionApi(api).reportPlaybackProgress(
           { playbackProgressInfo },
-          { signal },
+          { signal, timeout: PLAYBACK_REPORT_TIMEOUT_MS },
         );
       } catch (error) {
         console.error("Failed to report playback progress", error);
@@ -287,6 +288,27 @@ export const usePlaybackManager = ({
    */
   const markItemPlayed = async (itemId: string) => {
     const localItem = getDownloadedItemById(itemId);
+    if (!localItem && (!isOnline || !api || !user)) {
+      throw new Error(
+        "Cannot mark a streamed episode watched without a server connection",
+      );
+    }
+    // Persist remotely before changing local state; a rejected write is retryable.
+    // Handle remote state update if online
+    if (isOnline && api && user) {
+      try {
+        await getUserDataApi(api).markPlayedItem(
+          {
+            itemId,
+            userId: user.Id,
+          },
+          { timeout: PLAYBACK_REPORT_TIMEOUT_MS },
+        );
+      } catch (error) {
+        console.error("Failed to mark item as played on server", error);
+        throw error;
+      }
+    }
 
     // Handle local state update for downloaded items
     if (localItem) {
@@ -307,19 +329,6 @@ export const usePlaybackManager = ({
       // Force invalidate queries so they refetch from updated local database
       queryClient.invalidateQueries({ queryKey: ["item", itemId] });
       queryClient.invalidateQueries({ queryKey: ["episodes"] });
-    }
-
-    // Handle remote state update if online
-    if (isOnline && api && user) {
-      try {
-        await getUserDataApi(api).markPlayedItem({
-          itemId,
-          userId: user.Id,
-        });
-      } catch (error) {
-        console.error("Failed to mark item as played on server", error);
-        throw error;
-      }
     }
   };
 

@@ -350,7 +350,9 @@ export function PlayerControls({
             />
             <Animated.View
               style={[styles.header, headerStyle]}
-              pointerEvents={showControls ? "box-none" : "none"}
+              pointerEvents={
+                showControls && !interactionBlocked ? "box-none" : "none"
+              }
               onTouchStart={handleControlsInteraction}
             >
               <HeaderControls
@@ -366,7 +368,9 @@ export function PlayerControls({
             </Animated.View>
             <Animated.View
               style={[styles.bottom, bottomStyle]}
-              pointerEvents={showControls ? "box-none" : "none"}
+              pointerEvents={
+                showControls && !interactionBlocked ? "box-none" : "none"
+              }
             >
               <BottomControls
                 trackMenus={trackMenus}

@@ -48,7 +48,10 @@ import OnlineSubtitlesModal, {
 import ProfilePill from "@/components/yomifin/ProfilePill";
 import YomifinErrorBoundary from "@/components/yomifin/YomifinErrorBoundary";
 import YomifinLookupLayer from "@/components/yomifin/YomifinLookupLayer";
-import { PROGRESS_REPORT_INTERVAL } from "@/constants/Playback";
+import {
+  PLAYBACK_REPORT_TIMEOUT_MS,
+  PROGRESS_REPORT_INTERVAL,
+} from "@/constants/Playback";
 import useRouter from "@/hooks/useAppRouter";
 import { useHaptic } from "@/hooks/useHaptic";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
@@ -79,6 +82,7 @@ import {
 } from "@/utils/atoms/yomifinCueStore";
 import { yomifinOnlineSubsVisibleAtom } from "@/utils/atoms/yomifinOnlineSubs";
 import { getJellyfinHeadersForUrl } from "@/utils/customHeaders";
+import { EpisodeCompletion } from "@/utils/directPlayer/episodeCompletion";
 import {
   isPlaceholderTick,
   resolveSessionPositionTicks,
@@ -351,6 +355,8 @@ export default function DirectPlayerPage() {
   });
 
   // Playback manager for progress reporting and adjacent items
+  const completion = useMemo(() => new EpisodeCompletion(), [itemId]);
+  const [isFinishingEpisode, setIsFinishingEpisode] = useState(false);
   const playbackManager = usePlaybackManager({ item, isOffline: offline });
   const { nextItem, previousItem } = playbackManager;
   const { isConnected } = useNetworkStatus();
@@ -360,9 +366,12 @@ export default function DirectPlayerPage() {
   // Mirror the progress reporter instead: it closes over connectivity and the
   // api, and a handler captured while either was different would keep
   // reporting through the stale one for the rest of playback.
-  const reportProgressRef = useRef(playbackManager.reportPlaybackProgress);
+  const reportProgressRef = useRef((info: PlaybackProgressInfo) =>
+    completion.report(() => playbackManager.reportPlaybackProgress(info)),
+  );
   useEffect(() => {
-    reportProgressRef.current = playbackManager.reportPlaybackProgress;
+    reportProgressRef.current = (info: PlaybackProgressInfo) =>
+      completion.report(() => playbackManager.reportPlaybackProgress(info));
   });
 
   // Resolve audio index: use URL param if provided, otherwise use stored index for offline playback
@@ -740,23 +749,26 @@ export default function DirectPlayerPage() {
     const reportPlaybackStart = async () => {
       const progressInfo = currentPlayStateInfo();
       if (progressInfo) {
-        await getSessionApi(api).reportPlaybackStart({
-          playbackStartInfo: {
-            ...progressInfo,
-            // This runs once the stream resolves, before MPV has produced a
-            // frame: the live state still says paused at 0:00. The source is
-            // built with autoplay, so describe the session that is starting
-            // instead, or the dashboard shows "paused at 0:00" until the first
-            // progress tick.
-            IsPaused: false,
-            PositionTicks: startTicks,
+        await getSessionApi(api).reportPlaybackStart(
+          {
+            playbackStartInfo: {
+              ...progressInfo,
+              // This runs once the stream resolves, before MPV has produced a
+              // frame: the live state still says paused at 0:00. The source is
+              // built with autoplay, so describe the session that is starting
+              // instead, or the dashboard shows "paused at 0:00" until the first
+              // progress tick.
+              IsPaused: false,
+              PositionTicks: startTicks,
+            },
           },
-        });
+          { timeout: PLAYBACK_REPORT_TIMEOUT_MS },
+        );
       }
     };
     // Fire-and-forget, so swallow instead of leaving an unhandled rejection
     // whenever the server is unreachable at the moment playback starts.
-    reportPlaybackStart().catch((error) => {
+    completion.report(reportPlaybackStart).catch((error) => {
       writeToLog(
         "ERROR",
         "reportPlaybackStart failed",
@@ -1099,51 +1111,52 @@ export default function DirectPlayerPage() {
     }
   };
 
-  // Key of the last "stopped" report, to dedupe the double teardown. The
-  // PlaySessionId when there is one, the item id otherwise (see stopKey below).
-  const reportedStopKeyRef = useRef<string | null>(null);
-
-  const reportPlaybackStopped = useCallback(async () => {
-    if (!item?.Id || !stream || !api || !isConnected) return;
-    // Leaving the player reports "stopped" twice: once from the beforeRemove
-    // listener (via stop()) and once from the unmount cleanup backstop. Dedupe
-    // per session — not a plain boolean, since the component survives in-place
-    // item switches and the next session must report again. Downloaded items
-    // have no PlaySessionId, so fall back to the item id.
-    const stopKey = stream.sessionId || item.Id;
-    if (reportedStopKeyRef.current === stopKey) return;
-    reportedStopKeyRef.current = stopKey;
-    const currentTimeInTicks = getSessionPositionTicks();
-    try {
-      await getSessionApi(api).reportPlaybackStopped({
-        playbackStopInfo: {
-          ItemId: item.Id,
-          MediaSourceId: mediaSourceId,
-          PositionTicks: currentTimeInTicks,
-          PlaySessionId: stream.sessionId || undefined,
-          // Release the server-side live stream (and its tuner slot) on stop.
-          // Jellyfin only closes a live stream opened via autoOpenLiveStream when
-          // the stop report carries its LiveStreamId; without it the stream leaks
-          // and Live TV eventually fails for everyone with "M3U simultaneous
-          // stream limit has been reached". Undefined for non-live items (no-op).
-          LiveStreamId: stream.mediaSource?.LiveStreamId ?? undefined,
-        },
-      });
-    } catch (error) {
-      // Un-mark the session so a later teardown path can retry: e.g. a failed
-      // report from a WebSocket remote-stop (player still mounted) must not
-      // suppress the report when the user then navigates away. Callers are
-      // fire-and-forget, so swallow instead of rethrowing unhandled.
-      if (reportedStopKeyRef.current === stopKey) {
-        reportedStopKeyRef.current = null;
+  // Share the actual request, not just a sent flag: completion must await an
+  // already-running Stop before it writes the final watched state.
+  const stopReportRef = useRef<{ key: string; request: Promise<void> } | null>(
+    null,
+  );
+  const reportPlaybackStopped = useCallback(
+    (strict = false): Promise<void> => {
+      if (!item?.Id || !stream || !api || !isConnected)
+        return Promise.resolve();
+      const key = stream.sessionId || item.Id;
+      let report = stopReportRef.current;
+      if (report?.key !== key) {
+        const request = getSessionApi(api)
+          .reportPlaybackStopped(
+            {
+              playbackStopInfo: {
+                ItemId: item.Id,
+                MediaSourceId: mediaSourceId,
+                PositionTicks: getSessionPositionTicks(),
+                PlaySessionId: stream.sessionId || undefined,
+                LiveStreamId: stream.mediaSource?.LiveStreamId ?? undefined,
+              },
+            },
+            { timeout: PLAYBACK_REPORT_TIMEOUT_MS },
+          )
+          .then(() => {})
+          .catch((error) => {
+            if (stopReportRef.current?.key === key)
+              stopReportRef.current = null;
+            throw error;
+          });
+        report = { key, request };
+        stopReportRef.current = report;
       }
-      writeToLog(
-        "ERROR",
-        "reportPlaybackStopped failed",
-        error instanceof Error ? error.message : String(error),
-      );
-    }
-  }, [api, item, mediaSourceId, stream, getSessionPositionTicks, isConnected]);
+      return strict
+        ? report.request
+        : report.request.catch((error) => {
+            writeToLog(
+              "ERROR",
+              "reportPlaybackStopped failed",
+              error instanceof Error ? error.message : String(error),
+            );
+          });
+    },
+    [api, item, mediaSourceId, stream, getSessionPositionTicks, isConnected],
+  );
 
   const stop = useCallback(() => {
     // Update URL with final playback position before stopping
@@ -1296,7 +1309,8 @@ export default function DirectPlayerPage() {
   /** Progress handler for MPV - position in seconds */
   const onProgress = useCallback(
     async (data: { nativeEvent: MpvOnProgressEventPayload }) => {
-      if (isSeeking.get() || isPlaybackStoppedRef.current) return;
+      if (completion.blocked || isSeeking.get() || isPlaybackStoppedRef.current)
+        return;
 
       // An in-place episode switch clears the stream and resets the position
       // while MPV can still emit one last tick for the previous episode.
@@ -1368,6 +1382,7 @@ export default function DirectPlayerPage() {
       void reportProgressRef.current(progressInfo);
     },
     [
+      completion,
       // Depend on the builder itself rather than re-listing what it reads: it
       // also covers the mute state, which this list used to miss.
       currentPlayStateInfo,
@@ -1709,6 +1724,58 @@ export default function DirectPlayerPage() {
   const pause = useCallback(() => {
     videoRef.current?.pause?.();
   }, []);
+
+  const finishEpisode = useCallback(async (): Promise<boolean> => {
+    if (!item?.Id || item.Type !== "Episode" || completion.blocked)
+      return false;
+    setIsFinishingEpisode(true);
+    try {
+      const finished = await completion.finish({
+        pause: async () => {
+          setPlaying(false);
+          await videoRef.current?.pause();
+        },
+        stop: () => reportPlaybackStopped(true),
+        markPlayed: () => playbackManager.markItemPlayed(item.Id!),
+        restore: async () => {
+          // A failed watched-state write leaves this episode paused for retry.
+          // Reopen its session so an explicit Play can resume normal reporting.
+          stopReportRef.current = null;
+          const info = currentPlayStateInfo();
+          if (api && isConnected && info) {
+            await getSessionApi(api).reportPlaybackStart(
+              { playbackStartInfo: { ...info, IsPaused: true } },
+              { timeout: PLAYBACK_REPORT_TIMEOUT_MS },
+            );
+          }
+        },
+      });
+      if (finished)
+        void Promise.resolve(revalidateProgressCache()).catch(() => {});
+      return finished;
+    } catch (error) {
+      writeToLog(
+        "ERROR",
+        "Finishing episode failed",
+        error instanceof Error ? error.message : String(error),
+      );
+      Alert.alert(t("player.error"), t("player.finish_episode_failed"));
+      return false;
+    } finally {
+      setIsFinishingEpisode(false);
+    }
+  }, [
+    item,
+    completion,
+    setPlaying,
+    reportPlaybackStopped,
+    playbackManager,
+    currentPlayStateInfo,
+    api,
+    isConnected,
+    revalidateProgressCache,
+    t,
+  ]);
 
   const seek = useCallback(
     (position: number) => {
@@ -2312,6 +2379,8 @@ export default function DirectPlayerPage() {
               !isPipMode &&
               (Platform.isTV ? (
                 <TVControls
+                  onFinishEpisode={finishEpisode}
+                  isFinishingEpisode={isFinishingEpisode}
                   mediaSource={stream?.mediaSource}
                   item={item}
                   togglePlay={togglePlay}
@@ -2347,6 +2416,8 @@ export default function DirectPlayerPage() {
                 />
               ) : (
                 <Controls
+                  onFinishEpisode={finishEpisode}
+                  isFinishingEpisode={isFinishingEpisode}
                   interactionBlocked={onlineSubsVisible || yomifinLookupVisible}
                   mediaSource={stream?.mediaSource}
                   item={item}

@@ -33,6 +33,7 @@ interface NextEpisodeCountDownButtonProps extends TouchableOpacityProps {
   itemId?: string | null;
   /** False when a play queue lines up something else, a movie for instance. */
   nextIsEpisode?: boolean;
+  buttonText?: string;
 }
 
 /** Media time the fill represents, matching the window the button appears in. */
@@ -55,6 +56,7 @@ const NextEpisodeCountDownButton: React.FC<NextEpisodeCountDownButtonProps> = ({
   isPlaying,
   itemId,
   nextIsEpisode = true,
+  buttonText,
   ...props
 }) => {
   const progress = useSharedValue(0);
@@ -159,14 +161,21 @@ const NextEpisodeCountDownButton: React.FC<NextEpisodeCountDownButtonProps> = ({
 
   return (
     <TouchableOpacity
-      className='w-32 overflow-hidden rounded-md bg-black/60 border border-neutral-900'
+      accessibilityRole='button'
+      accessibilityLabel={
+        buttonText ??
+        t(nextIsEpisode ? "player.next_episode" : "player.up_next")
+      }
+      accessibilityState={{ disabled: props.disabled, busy: props.disabled }}
+      className='overflow-hidden rounded-md bg-black/60 border border-neutral-900'
       {...props}
       onPress={handlePress}
     >
       <Animated.View style={animatedStyle} />
       <View className='px-3 py-2'>
         <Text numberOfLines={1} className='text-center text-sm font-bold'>
-          {t(nextIsEpisode ? "player.next_episode" : "player.up_next")}
+          {buttonText ??
+            t(nextIsEpisode ? "player.next_episode" : "player.up_next")}
         </Text>
       </View>
     </TouchableOpacity>
